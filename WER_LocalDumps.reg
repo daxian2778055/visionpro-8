@@ -1,0 +1,23 @@
+Windows Registry Editor Version 5.00
+
+; =====================================================================
+; 软件闪退自动转储配置（Windows Error Reporting LocalDumps）
+; 用途：程序崩溃（含原生崩溃/SDK 内部崩溃/内存访问冲突）时，Windows
+;       自动在 DumpFolder 生成 .dmp 文件，无需改代码，最可靠的兜底。
+; 部署步骤：
+;   1. 把下面的 "DumpFolder" 改成实际部署目录（例如 exe 所在目录下的 CrashDump）
+;   2. 管理员权限双击导入本注册表（或 reg import WER_LocalDumps.reg）
+;   3. 闪退后到 DumpFolder 找 .dmp，用 Visual Studio 或 WinDbg 打开分析
+; 注意：64 位程序请同时配置 Wow6432Node 项（下面已给出）。
+;       "DumpFolder" 支持环境变量如 %LOCALAPPDATA%，不支持 %EXEDIR%。
+; =====================================================================
+
+[HKEY_LOCAL_MACHINE\SOFTWARE\Microsoft\Windows\Windows Error Reporting\LocalDumps\WindowsFormsApplication1.exe]
+"DumpFolder"="C:\\Program Files\\WindowsFormsApplication1\\CrashDump"
+"DumpType"=dword:00000002
+"DumpCount"=dword:0000000A
+
+[HKEY_LOCAL_MACHINE\SOFTWARE\Wow6432Node\Microsoft\Windows\Windows Error Reporting\LocalDumps\WindowsFormsApplication1.exe]
+"DumpFolder"="C:\\Program Files\\WindowsFormsApplication1\\CrashDump"
+"DumpType"=dword:00000002
+"DumpCount"=dword:0000000A

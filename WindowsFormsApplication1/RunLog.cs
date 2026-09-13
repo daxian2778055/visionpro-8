@@ -1,0 +1,286 @@
+﻿using System;
+using System.Collections.Generic;
+using System.Linq;
+using System.Text;
+using System.IO;
+using System.Windows.Forms;
+
+namespace WindowsFormsApplication1
+{
+    class RunLog
+    {
+        private int processCount;
+        private int iTemp;
+        private string sOrg;
+        private int iflag1;
+        private int IOK;
+        private int ING;
+        private int sumend;
+        private int sumline;
+        private int sumline1;
+        int iTemp1;
+        int Sumss;
+        ErrorLog Errorwrite = new ErrorLog();
+        /*按照年份创建文件夹*/
+        public void CreateDirectoryCsvPath(string path22)
+        {
+            try
+            {
+                string strYear = DateTime.Now.Year.ToString();
+                string strMoth = DateTime.Now.ToString("Y");
+                string strDirectoryCsvPath = @"E:\生产统计\" + "\\" + path22 + "\\" + strYear;
+                string strDirectoryCsvPath1 = @"E:\每日统计\" + "\\" + path22 + "\\" + strYear + "\\" + strMoth;
+                if (!Directory.Exists(strDirectoryCsvPath))
+                {
+                    Directory.CreateDirectory(strDirectoryCsvPath);
+                }
+                if (!Directory.Exists(strDirectoryCsvPath1))
+                {
+                    Directory.CreateDirectory(strDirectoryCsvPath1);
+                }
+            }
+            catch (Exception ex)
+            {
+                Errorwrite.WriteLog("日志文件路径生成出错！" + ex.Message);
+            };
+        }
+
+        /*按照月份创建csv*/
+        public void CreateCsvPath(string path22,string shuju)
+        {
+            try
+            {
+                string strYear = DateTime.Now.Year.ToString();
+                string strMoth = DateTime.Now.ToString("Y");
+                string strDay = DateTime.Now.ToString("m");
+                string strCsvPath = @"E:\生产统计\" + path22 + "\\" + strYear + "\\" + strMoth + ".csv";
+                string strCsvPath2 = @"E:\每日统计\" + path22 + "\\" + strYear + "\\" + strMoth + "\\" + strDay + ".csv";
+                FileStream file = null;
+                if (!File.Exists(strCsvPath))
+                {
+                    file = new FileStream(strCsvPath, FileMode.OpenOrCreate, FileAccess.ReadWrite);
+                    file.Close();
+                    StreamWriter sw = new StreamWriter(File.OpenWrite(strCsvPath), Encoding.Default);
+                    sw.BaseStream.Seek(0, SeekOrigin.Begin);
+                    sw.Write("日期,总量,OK,NG,型号,合格率");
+                    sw.Flush();
+                    sw.Close();
+                }
+                FileStream file2 = null;
+                if (!File.Exists(strCsvPath2))
+                {
+                    file2 = new FileStream(strCsvPath2, FileMode.OpenOrCreate, FileAccess.ReadWrite);
+                    file2.Close();
+                    StreamWriter sw2 = new StreamWriter(File.OpenWrite(strCsvPath2), Encoding.Default);
+                    sw2.BaseStream.Seek(0, SeekOrigin.Begin);
+                    sw2.WriteLine("序号,日期,"+shuju+"结果");
+                    sw2.Flush();
+                    sw2.Close();
+                }
+            }
+            catch (Exception ex)
+            {
+                Errorwrite.WriteLog("日志文件生成出错!"+ex.Message);
+            };
+
+
+        }
+
+        public void WriteDate(int okss, int ng1, string path22)
+        {
+            try
+            {
+                string strYear = DateTime.Now.Year.ToString();
+                string strMoth = DateTime.Now.ToString("Y");
+                string str = DateTime.Now.ToString("m");
+                string strCsvPath = @"E:\生产统计\" + path22 + "\\" + strYear + "\\" + strMoth + ".csv";
+                // ch:P2-④ 写入前确保目录存在，避免 E: 盘/目录缺失时 FileStream 打开静默失败
+                try { Directory.CreateDirectory(Path.GetDirectoryName(strCsvPath)); } catch (Exception ex) { Errorwrite.WriteLog("生产统计目录创建失败:" + ex.Message); }
+                sOrg = "mode";
+                // ch:R3 改为按行读入内存 → 直接替换目标行 → 全量重写，彻底消除原"逐字节计数 + Seek(iTemp / iTemp-20)"
+                //   在含中文(GBK 双字节)时偏移错位、写坏 CSV 的问题。
+                List<string> lines = new List<string>();
+                if (File.Exists(strCsvPath))
+                {
+                    using (StreamReader reader = new StreamReader(strCsvPath, System.Text.Encoding.Default))
+                    {
+                        string line;
+                        while ((line = reader.ReadLine()) != null)
+                            lines.Add(line);
+                    }
+                }
+                sumline1 = 0;
+                for (int i = 0; i < lines.Count; i++)
+                {
+                    if (lines[i] != "")
+                        sumline1++;
+                }
+                string[] strs = (lines.Count > 0) ? lines[lines.Count - 1].Split(',') : new string[5];
+                processCount = 0;
+                sumend = 0;
+                sumline = 0;
+
+                try
+                {
+
+                    if (strs != null && strs.Length > 4 && strs[0] == str)
+                    {
+
+                        if (strs[4].Contains(sOrg))
+                        {
+                            if (okss == 1)
+                            {
+
+                                IOK = int.Parse(strs[2]) + 1;
+                                ING = int.Parse(strs[3]);
+                            }
+                            else
+                            {
+                                IOK = int.Parse(strs[2]);
+                                ING = int.Parse(strs[3]) + 1;
+                            }
+
+                        }
+                        else
+                        {
+                            if (okss == 1)
+                            {
+                                IOK = int.Parse(strs[2]) + 1;
+                                ING = int.Parse(strs[3]);
+                            }
+                            else
+                            {
+                                IOK = int.Parse(strs[2]);
+                                ING = int.Parse(strs[3]) + 1;
+                            }
+                            sOrg = strs[4] + sOrg;
+                        }
+                        // ch:R3 直接替换最后一行（原为 Seek 定位覆盖），全量重写
+                        string s = str + "," + (IOK + ING) + "," + IOK + "," + ING + "," + sOrg + "," + IOK * 1.0f / (IOK + ING);
+                        if (lines.Count > 0)
+                            lines[lines.Count - 1] = s;
+                        else
+                            lines.Add(s);
+                        WriteAllLinesSafe(strCsvPath, lines);
+                    }
+                    else
+                    {
+                        // ch:R3 追加新行；原 sumline1>=35 分支为 Seek 后写入空串（等价不改动文件），这里保持不写
+                        if (sumline1 < 35)
+                        {
+                            string s = str + "," + (okss + ng1) + "," + okss + "," + ng1 + "," + sOrg + "," + okss * 1.0f / (okss + ng1);
+                            lines.Add(s);
+                            WriteAllLinesSafe(strCsvPath, lines);
+                        }
+                    }
+
+
+                }
+                catch (Exception ex)
+                {
+                    Errorwrite.WriteLog(ex.Message + "记录1");
+                };
+            }
+            catch (Exception ex)
+            {
+
+                Errorwrite.WriteLog(ex.Message + "记录2");
+            };
+
+
+        }
+
+        // ch:R3 全量重写 CSV（统一 \r\n 行尾），替代原 File.OpenWrite + BaseStream.Seek 的字节级就地修改
+        private void WriteAllLinesSafe(string path, List<string> lines)
+        {
+            using (StreamWriter sw = new StreamWriter(path, false, Encoding.Default))
+            {
+                for (int i = 0; i < lines.Count; i++)
+                {
+                    if (i > 0)
+                        sw.Write("\r\n");
+                    sw.Write(lines[i]);
+                }
+            }
+        }
+        public void WriteDate1(string jilu, string path22, int okss)
+        {
+            string jieguo;
+            string strYear = DateTime.Now.Year.ToString();
+            string strMoth = DateTime.Now.ToString("Y");
+            string str = DateTime.Now.ToString("m");
+            string strCsvPath = @"E:\每日统计\" + path22 + "\\" + strYear + "\\" + strMoth + "\\" + str + ".csv";
+            // ch:P2-④ 写入前确保目录存在，避免 E: 盘/目录缺失时 FileStream 打开静默失败
+            try { Directory.CreateDirectory(Path.GetDirectoryName(strCsvPath)); } catch (Exception ex) { Errorwrite.WriteLog("每日统计目录创建失败:" + ex.Message); }
+            string str1 = null;
+            StringBuilder sb_swrite = new StringBuilder();
+            FileStream fs = new FileStream(strCsvPath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
+            StreamReader reader = new StreamReader(fs, System.Text.Encoding.Default);
+            string[] strs = new string[5];
+            byte[] strbyte = null;
+            processCount = 0;
+            int temp = 0;
+            int iflag = 0;
+
+            while ((str1 = reader.ReadLine()) != null)
+            {
+                strs = str1.Split(',');
+                ASCIIEncoding ascii = new ASCIIEncoding();
+                strbyte = ascii.GetBytes(str1);
+                iflag++;
+
+                for (int i = 0; i < strbyte.Length; i++)
+                {
+                    if ((int)strbyte[i] == 63)
+                    {
+                        processCount += 2;
+                        temp += 2;
+                    }
+                    else
+                    {
+                        processCount++;
+                        temp++;
+                    }
+                }
+
+
+            }
+            iTemp1 = processCount - temp + (iflag - 1) * 2;
+            processCount = 0;
+            reader.Close();      		   		
+            try
+            {
+
+                // ch:P2-④ 空文件/仅表头时 strs[0] 可能为 null 或非数字；原实现 int.Parse 抛异常被静默吞掉导致漏记
+                if (string.IsNullOrEmpty(strs[0]) || strs[0] == "次序" || strs[0] == "序号")
+                    strs[0] = "0";
+                if (!int.TryParse(strs[0], out Sumss))
+                {
+                    Errorwrite.WriteLog("每日统计序号解析失败，按 0 续写。原始值：" + (strs[0] ?? "null"));
+                    Sumss = 0;
+                }
+                Sumss = Sumss + 1;
+                string strsecond = DateTime.Now.ToString("s");
+                StreamWriter sw4 = new StreamWriter(strCsvPath, true, Encoding.Default);
+                if (okss == 1)
+                    jieguo = "OK";
+                else
+                    jieguo = "NG";
+                string s = Sumss + "," + strsecond + "," + jilu + "," + jieguo;
+
+                //sw1.BaseStream.Seek(iTemp1,SeekOrigin.Begin);			
+                sw4.WriteLine(s);
+                sw4.Flush();
+                sw4.Close();
+
+
+            }
+            catch (Exception ex)
+            {
+                // ch:P2-④ 原空 catch 会静默吞掉写入异常，导致每日统计缺行却无任何线索
+                Errorwrite.WriteLog("每日统计写入失败:" + ex.Message);
+            }
+        }
+    }
+
+}

@@ -1,0 +1,38 @@
+# 备份目录/文件：与活跃代码隔离，避免被误提交或误编译
+# （.NET Framework 旧式 csproj 为逐文件列出，备份文件当前未被编译；此处仅做版本库侧兜底）
+_backup_SQL/
+_backup_catchlog/
+*.bak
+*.bak_*
+Form1.cs.bak_*
+
+# 构建产物 / IDE 临时
+[Bb]in/
+[Oo]bj/
+.vs/
+*.suo
+*.user
+
+# 审计/构建产物、日志、错误转储（体积大，非源码）
+audit-build/
+audit-recheck/
+audit-third/
+audit-recheck-build.log
+audit-third-build.log
+error/
+*.log
+
+# 本机工具/代理/编辑器缓存
+.agnes/
+.cursor/
+.reasonix/
+.reasonix.toml
+reasonix.toml
+
+# 安装包工程（体积大，非源码；主 C# 工程不受影响）
+Setup2/
+
+# 根目录散落的旧副本与截图（非编译所用；真实工程在 WindowsFormsApplication1/）
+/*.cs
+/*.png
+/新建文本文档.txt

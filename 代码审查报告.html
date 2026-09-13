@@ -1,0 +1,209 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>VP八相机连续海康 代码审查报告</title>
+<style>
+  :root{
+    --bg:#0f1420; --panel:#1a2131; --panel2:#212a3d; --line:#2e3a52;
+    --text:#e6ecf5; --muted:#93a1bb; --accent:#4a8bff; --accent2:#7fd1ff;
+    --crit:#ff5c6c; --high:#ffb347; --med:#ffd166; --low:#7fd1a0; --ok:#8de0a0;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{background:var(--bg);color:var(--text);font-family:"Segoe UI","Microsoft YaHei",system-ui,sans-serif;line-height:1.65;padding:40px 20px}
+  .wrap{max-width:1050px;margin:0 auto}
+  header{text-align:center;padding:36px 20px 28px;border:1px solid var(--line);border-radius:16px;background:linear-gradient(135deg,#16203a,#1a2131);margin-bottom:30px}
+  h1{font-size:28px;letter-spacing:.5px;background:linear-gradient(90deg,#7fd1ff,#4a8bff);-webkit-background-clip:text;background-clip:text;color:transparent}
+  .sub{margin-top:10px;color:var(--muted);font-size:14px}
+  .meta{display:flex;flex-wrap:wrap;gap:10px;justify-content:center;margin-top:20px}
+  .chip{background:var(--panel2);border:1px solid var(--line);color:var(--accent2);padding:6px 14px;border-radius:999px;font-size:12.5px}
+  .stat{display:flex;flex-wrap:wrap;gap:14px;justify-content:center;margin:26px 8px 6px}
+  .stat div{flex:1;min-width:140px;max-width:220px;background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:16px 12px;text-align:center}
+  .stat b{display:block;font-size:30px;line-height:1.2}
+  .stat span{color:var(--muted);font-size:12.5px}
+  .n-crit b{color:var(--crit)} .n-high b{color:var(--high)} .n-med b{color:var(--med)} .n-ok b{color:var(--ok)}
+  section{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:24px 26px;margin-bottom:22px}
+  h2{font-size:19px;margin-bottom:16px;display:flex;align-items:center;gap:10px}
+  .tag{display:inline-block;font-size:11px;padding:2px 10px;border-radius:999px;vertical-align:middle;font-weight:600}
+  .tag-crit{background:rgba(255,92,108,.15);color:var(--crit);border:1px solid rgba(255,92,108,.4)}
+  .tag-high{background:rgba(255,179,71,.14);color:var(--high);border:1px solid rgba(255,179,71,.4)}
+  .tag-med{background:rgba(255,209,102,.13);color:var(--med);border:1px solid rgba(255,209,102,.4)}
+  .tag-low{background:rgba(127,209,160,.12);color:var(--low);border:1px solid rgba(127,209,160,.4)}
+  .tag-ok{background:rgba(141,224,160,.12);color:var(--ok);border:1px solid rgba(141,224,160,.4)}
+  .item{border:1px solid var(--line);border-radius:10px;padding:14px 16px;margin-bottom:12px;background:var(--panel2)}
+  .item:last-child{margin-bottom:0}
+  .item h3{font-size:15px;margin-bottom:6px;color:var(--text)}
+  .loc{color:var(--accent2);font-family:Consolas,monospace;font-size:12px;background:rgba(74,139,255,.12);padding:1px 7px;border-radius:6px;margin-right:8px}
+  .desc{color:var(--muted);font-size:13.5px}
+  .num{display:inline-block;width:20px;height:20px;line-height:20px;text-align:center;border-radius:50%;font-size:12px;font-weight:700;margin-right:8px;background:var(--panel);border:1px solid var(--line);color:var(--accent2)}
+  p.lead{color:var(--muted);font-size:14px;margin-bottom:6px}
+  code{font-family:Consolas,monospace;background:rgba(0,0,0,.25);padding:1px 6px;border-radius:5px;font-size:12.5px;color:#ffd9a0}
+  ul{list-style:none}
+  li{position:relative;padding-left:22px;margin-bottom:8px;color:var(--muted);font-size:13.5px}
+  li::before{content:"▹";position:absolute;left:0;color:var(--accent);}
+  .order{background:linear-gradient(135deg,#142039,#1a2131);border:1px solid var(--line);border-radius:14px;padding:22px 26px}
+  .order ol{list-style:none;counter-reset:s;margin-top:10px}
+  .order li{counter-increment:s;padding-left:44px;position:relative}
+  .order li::before{content:counter(s);position:absolute;left:0;width:28px;height:28px;background:var(--accent);color:#fff;border-radius:8px;text-align:center;line-height:28px;font-weight:700;font-size:13px}
+  footer{text-align:center;color:var(--muted);font-size:12px;padding:20px 0 10px}
+  .note{border-left:3px solid var(--high);background:rgba(255,179,71,.06);padding:10px 14px;border-radius:0 8px 8px 0;font-size:13px;color:var(--muted);margin-bottom:14px}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>VP八相机连续海康 · 代码审查报告</h1>
+    <div class="sub">Cognex VisionPro 59.2 二次开发 · .NET Framework 4.6 · WinForms</div>
+    <div class="meta">
+      <span class="chip">HslCommunication 通讯</span>
+      <span class="chip">8 相机连续采集</span>
+      <span class="chip">Modbus / RTU / Omron / Melsec</span>
+      <span class="chip">审查日期 2026-09-09</span>
+    </div>
+    <div class="stat">
+      <div class="n-crit"><b>6</b><span>高危 · 崩溃/死锁/丢帧</span></div>
+      <div class="n-high"><b>6</b><span>中危 · 健壮性/资源</span></div>
+      <div class="n-med"><b>7</b><span>轻微 · 可维护性</span></div>
+      <div class="n-ok"><b>4</b><span>亮点</span></div>
+    </div>
+  </header>
+
+  <section>
+    <h2><span class="tag tag-crit">总体印象</span></h2>
+    <p class="lead">
+      典型"单窗体堆叠式"架构：<code>Form1.cs</code> 约 2.5 万行承载全部核心视觉流程，各 PLC 通讯窗体亦各约上万行。近期已有一层
+      "防死锁 / 防泄漏 / 事件判空"的重构痕迹（<code>SafeBeginInvoke</code>、<code>_cameraLock</code>、<code>_disposingFlag</code>），
+      说明作者一直在打补丁；但根因性问题——回调线程做同步检测、海量空 <code>catch</code>、巨型复制粘贴 switch——仍大量存在，
+      系统扩展与维护成本高，且存在真实触发崩溃 / 死亡 / 丢帧的路径。
+    </p>
+  </section>
+
+  <section>
+    <h2><span class="tag tag-crit">一 · 高危问题</span></h2>
+
+    <div class="item">
+      <h3><span class="num">1</span>回调线程被检测与 IO 阻塞（相机丢帧）</h3>
+      <div><span class="loc">Form1.cs</span>ImageCallBack / getrecord / myhandle</div>
+      <p class="desc">
+        相机 SDK 回调线程内<strong>同步</strong>调用 <code>myjob.block.Run()</code> 做视觉检测，<code>getrecord</code> 内
+        <code>Thread.Sleep(feng_temp)</code> 节流，IO 输出执行 <code>this.Invoke</code>（同步）+ <code>Thread.Sleep(IOyanshi)</code>。
+        后果：高速连续采集必<strong>丢帧</strong>；<code>Invoke</code> 在 UI 忙时可能阻塞回调甚至<strong>死锁</strong>。
+        这是全项目最该优先处理的点。
+      </p>
+    </div>
+
+    <div class="item">
+      <h3><span class="num">2</span>共享 Bitmap 无锁竞争</h3>
+      <div><span class="loc">Form1.cs</span>bmp[nIndex] / getrecord</div>
+      <p class="desc">
+        <code>bmp[nIndex]</code> 在回调线程创建/释放，同时被 <code>getrecord</code> 消费、可能被显示线程读取，
+        无锁也无 volatile 同步，存在 GDI 对象与像素数据竞争，可能偶发花屏 / 崩溃。
+      </p>
+    </div>
+
+    <div class="item">
+      <h3><span class="num">3</span>jinduqiao 忙碌自旋</h3>
+      <div><span class="loc">Form1.cs</span>2684</div>
+      <p class="desc"><code>while(!_disposing) start1=Frm2.end;</code> 无 <code>Sleep</code> 空转，占满一个 CPU 核。</p>
+    </div>
+
+    <div class="item">
+      <h3><span class="num">4</span>PLC 串口并发无锁 + 无限阻塞</h3>
+      <div><span class="loc">Modbus.cs</span>ReadData · FormMelsecSerial.cs thread_test2</div>
+      <p class="desc">
+        <code>ReadData</code> 的 while 循环在 <code>ReadTimeout</code> 未设置（默认 -1 无限阻塞）时等待响应，PLC 无响应会
+        永久阻塞 / 假死 UI。<code>thread_test2</code> 并发 3 线程无同步读写同一串口，物理线路上收发交错，数据损坏 / 超时误判。
+      </p>
+    </div>
+
+    <div class="item">
+      <h3><span class="num">5</span>PLC 轮询线程直接写 GridView</h3>
+      <div><span class="loc">FormModbus.cs</span>SetModbusGridValue · FormModbusRtu · FormOmron</div>
+      <p class="desc">
+        后台线程<strong>直接</strong>写 <code>dataGridView1</code> 单元格，无 <code>BeginInvoke</code>、空 <code>catch{}</code>
+        吞掉跨线程异常——WinForms 跨线程违例被静默忽略，表格刷新不可靠。
+      </p>
+    </div>
+
+    <div class="item">
+      <h3><span class="num">6</span>E环回线程锁内触发上层事件 / 废弃 Thread.Abort</h3>
+      <div><span class="loc">FormModbus.cs</span>Fins_duxie · Form3.cs btnReceive_Click</div>
+      <p class="desc">
+        Fins_duxie 在锁内做阻塞读写并同步调用 <code>getData</code>（可能含图像处理），阻塞真正的写线程，相机结果写 PLC 延迟。
+        Form3 用 <code>Thread.Abort()</code> 终止接收线程，已废弃、易致句柄未释放 / 死锁。Form3 <code>chushihua</code>(242)、
+        <code>changeok</code>(1579) 在后台读取 UI 控件，间歇抛 <code>InvalidOperationException</code>。
+      </p>
+    </div>
+  </section>
+
+  <section>
+    <h2><span class="tag tag-high">二 · 中危问题</span></h2>
+
+    <div class="item">
+      <h3><span class="num">8</span>海量空 catch 吞异常</h3>
+      <div><span class="loc">Form1.cs / PLC 模块 / RunLog.cs</span></div>
+      <p class="desc">数十处 <code>catch { }</code> 及 <code>catch { Thread.Sleep(100); }</code>。故障被静默吞掉，排障极难，建议系统排查并记录日志。</p>
+    </div>
+
+    <div class="item">
+      <h3><span class="num">9</span>_backup_SQL 旧代码 SQL 注入 + 越界</h3>
+      <div><span class="loc">guanli.cs / denglu.cs / mainForm.cs</span></div>
+      <p class="desc">表名/字段/where 全部用户输入字符串拼接（注入风险）；<code>Rows[0][1]</code> 无行数校验（空表越界）。废弃代码，若仍在用需修复。</p>
+    </div>
+
+    <div class="item">
+      <h3><span class="num">10</span>资源未用 using / finally 释放</h3>
+      <div><span class="loc">Form7.cs xie · ClassIni.cs · RunLog.cs</span></div>
+      <p class="desc">多处 <code>FileStream</code>/<code>StreamWriter</code> 异常路径不释放；<code>RunLog.cs:WriteDate</code>(150) 空文件直接抛 NullReference。</p>
+    </div>
+
+    <div class="item">
+      <h3><span class="num">11</span>断线重连缺失</h3>
+      <div><span class="loc">FormModbusRtu / FormOmron</span></div>
+      <p class="desc">Modbus TCP 有断线重建，但 RTU / Omron 断线后仅 <code>continue</code>，串口占用后无法自动恢复。</p>
+    </div>
+
+    <div class="item">
+      <h3><span class="num">12</span>硬编码绝对路径</h3>
+      <div><span class="loc">RunLog.cs / Menu.ini</span></div>
+      <p class="desc">硬编码 <code>E:\生产统计</code>、<code>F:\正泰\...\di.vpp</code> 等绝对路径，换机迁移即失效。</p>
+    </div>
+  </section>
+
+  <section>
+    <h2><span class="tag tag-med">三 · 轻微 / 可维护性</span></h2>
+    <div class="item"><h3><span class="num">13</span>魔法数字与拼音命名散落</h3><div><span class="loc">Form1.cs</span></div><p class="desc"><code>&lt;3</code>、<code>999</code>、<code>12槽</code> 等魔法数字；<code>sum/oksun/zhuanpanEn/jiajutemp</code> 等拼音命名，影响可读性。</p></div>
+    <div class="item"><h3><span class="num">14</span>巨型复制粘贴</h3><div><span class="loc">Form1.cs / SubSet.cs</span></div><p class="desc">12 段 IO <code>switch</code>(4560)、12 个 <code>myjob*</code> 硬编码索引、SubSet 8 路 comboBox 复制粘贴数百行（204 疑似取错对象）。</p></div>
+    <div class="item"><h3><span class="num">15</span>热路径冗余分配</h3><div><span class="loc">Form1.cs</span>13753</div><p class="desc">Mono8 每帧重建 256 色 Palette 的冗余分配，应缓存。</p></div>
+    <div class="item"><h3><span class="num">16</span>Form9 假成功提示</h3><div><span class="loc">Form9.cs</span></div><p class="desc">catch 分支 <code>tishi="保存模板成功"</code> 与成功文案相同，失败不报告。</p></div>
+    <div class="item"><h3><span class="num">17</span>锁内不 Invoke 死锁原则有约束但仍存隐患</h3><div><span class="loc">FormModbus.cs</span></div><p class="desc">Fins_duxie 持锁调用 getData 事件，若订阅方阻塞等待该锁，存在间接死锁隐患。</p></div>
+  </section>
+
+  <section>
+    <h2><span class="tag tag-ok">四 · 亮点</span></h2>
+    <ul>
+      <li><code>SafeBeginInvoke</code>(7121) 统一封装跨线程 UI 回调并对句柄销毁做防御，方向正确。</li>
+      <li>对"锁内不 Invoke / 不弹窗"的死锁原则已有明确注释约束（3655、8710-8719），关闭流程考虑了回调线程退出时序。</li>
+      <li><code>m_pSaveImageBuf</code> 原生内存缓冲复用 + 多处释放，Native 内存管理总体妥善。</li>
+      <li><code>Myjob</code> 属性 setter 加了事件判空，避免未订阅时空引用。</li>
+    </ul>
+  </section>
+
+  <div class="note">注：口令 / 授权校验模块依据用户要求不在本次审查与优化范围内。</div>
+
+  <section class="order">
+    <h2><span class="tag tag-crit" style="background:rgba(74,139,255,.15);color:#7fd1ff;border-color:rgba(74,139,255,.4)">建议修复顺序</span></h2>
+    <ol>
+      <li>Form1 回调线程异步化：把 <code>Run()</code> 视觉检测与 UI/IO 剥离，<code>BeginInvoke</code> 派发结果，消除丢帧与死锁。</li>
+      <li>共享 Bitmap / 计数器加锁或 volatile；jinduqiao 自旋加 Sleep。</li>
+      <li>串口 / GridView 跨线程整改 + 加 ReadTimeout + RTU / Omron 断线重连。</li>
+      <li>系统排查空 catch，至少把异常写入日志。</li>
+      <li>资源用 using / finally 包裹；_backup_SQL 若在用则参数化 SQL。<small>（口令 / 加密项已跳过）</small></li>
+    </ol>
+  </section>
+
+  <footer>VP八相机连续海康 代码审查报告 · 2026-09-09</footer>
+</div>
+</body>
+</html>
