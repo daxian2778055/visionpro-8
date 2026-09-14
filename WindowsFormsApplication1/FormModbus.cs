@@ -1650,17 +1650,23 @@ namespace WindowsFormsApplication1
         {
             try
             {
-                if (clearing) return;
-                if (!chushihua || !fins_en) return;
-                if (!camera_dic.ContainsKey(camIndex)) return;
-                camera_dic[camIndex][4] = value;
-                camera_dic[camIndex][5] = camera_dic[camIndex][3];
-                if (camIndex >= 1 && camIndex <= fins_xie.Length)
-                    fins_xie[camIndex - 1] = true;
-                if (useXieWu)
-                    XieWuWriteOne(camIndex, value);
-                else
-                    xie(value);
+                // 单一写入模式下，登记 pending 与消费必须是同一事务；否则同一相机的
+                // 下一帧可能在本帧清标志前覆盖/被本帧清掉。xie 内部和
+                // XieWuWriteOne 内部都使用同一把锁，Monitor 可重入。
+                lock (modbusIoLock)
+                {
+                    if (clearing) return;
+                    if (!chushihua || !fins_en) return;
+                    if (!camera_dic.ContainsKey(camIndex)) return;
+                    camera_dic[camIndex][4] = value;
+                    camera_dic[camIndex][5] = camera_dic[camIndex][3];
+                    if (camIndex >= 1 && camIndex <= fins_xie.Length)
+                        fins_xie[camIndex - 1] = true;
+                    if (useXieWu)
+                        XieWuWriteOne(camIndex, value);
+                    else
+                        xie(value);
+                }
             }
             catch (Exception ex)
             {

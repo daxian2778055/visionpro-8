@@ -4025,31 +4025,36 @@ namespace WindowsFormsApplication1
                             Interlocked.Increment(ref _detectingCount);
                             bool runError = false;
                             long perfRunT0 = System.Diagnostics.Stopwatch.GetTimestamp();
-                            if (inputAssignFailed) // ch:R2-supplement 传图失败/无效输入：跳过 Run，不执行旧图，直接记故障帧
-                            {
-                                runError = true;
-                                MsgErroeLog.WriteLog("相机" + myjob.path_number + " 传图失败，跳过 block.Run()，本帧按故障(999)处理");
-                            }
-                            else
                             try
                             {
-                                myjob.block.Run();
-                                if (myjob.block.RunStatus != null && myjob.block.RunStatus.Result == CogToolResultConstants.Error)
+                                if (inputAssignFailed) // ch:R2-supplement 传图失败/无效输入：跳过 Run，不执行旧图，直接记故障帧
                                 {
                                     runError = true;
-                                    int now = Environment.TickCount;
-                                    if (now - _lastGroupRunLogMs > 3000)
+                                    MsgErroeLog.WriteLog("相机" + myjob.path_number + " 传图失败，跳过 block.Run()，本帧按故障(999)处理");
+                                }
+                                else
+                                {
+                                    try
                                     {
-                                        _lastGroupRunLogMs = now;
-                                        MsgErroeLog.WriteLog("相机" + myjob.path_number + "方案脚本:" + myjob.block.RunStatus.Message);
+                                        myjob.block.Run();
+                                        if (myjob.block.RunStatus != null && myjob.block.RunStatus.Result == CogToolResultConstants.Error)
+                                        {
+                                            runError = true;
+                                            int now = Environment.TickCount;
+                                            if (now - _lastGroupRunLogMs > 3000)
+                                            {
+                                                _lastGroupRunLogMs = now;
+                                                MsgErroeLog.WriteLog("相机" + myjob.path_number + "方案脚本:" + myjob.block.RunStatus.Message);
+                                            }
+                                        }
+                                    }
+                                    catch (Exception runEx)
+                                    {
+                                        // ch:R2 block.Run 直接抛异常（非 RunStatus.Error）也视为故障帧，走 999/NG 路径
+                                        runError = true;
+                                        MsgErroeLog.WriteLog("相机" + myjob.path_number + " block.Run 异常:" + runEx.Message + "，本帧按故障(999)处理");
                                     }
                                 }
-                            }
-                            catch (Exception runEx)
-                            {
-                                // ch:R2 block.Run 直接抛异常（非 RunStatus.Error）也视为故障帧，走 999/NG 路径
-                                runError = true;
-                                MsgErroeLog.WriteLog("相机" + myjob.path_number + " block.Run 异常:" + runEx.Message + "，本帧按故障(999)处理");
                             }
                             finally
                             {
@@ -4360,11 +4365,9 @@ namespace WindowsFormsApplication1
                                 {
                                     try
                                     {
-                                        omron.camera_dic[int.Parse(myjob.path_number)][4] = fins;
-                                        omron.camera_dic[int.Parse(myjob.path_number)][5] = omron.camera_dic[int.Parse(myjob.path_number)][3];
-                                        omron.fins_xie[int.Parse(myjob.path_number) - 1] = true;
-                                        omron.xie(fins);
+                                        // ch:R4 登记与 xie 消费由 Omron 窗体内部同一把锁保护
                                     }
+                                        omron.WriteCameraResult(int.Parse(myjob.path_number), fins); // ch:R4 登记+消费同一把锁，避免同一相机相邻帧覆盖 pending
                                     catch (Exception ex) { MsgErroeLog.WriteLog("异常:" + ex.Message); }
                                 });
                             }
@@ -4401,10 +4404,8 @@ namespace WindowsFormsApplication1
                                 {
                                     try
                                     {
-                                        modbusrtu.camera_dic[int.Parse(myjob.path_number)][4] = modbusrtus;
-                                        modbusrtu.camera_dic[int.Parse(myjob.path_number)][5] = modbusrtu.camera_dic[int.Parse(myjob.path_number)][3];
-                                        modbusrtu.fins_xie[int.Parse(myjob.path_number) - 1] = true;
-                                        modbusrtu.xie_wu(modbusrtus);
+                                        // 登记与 xie_wu 消费由 RTU 窗体内部同一把锁保护，避免同一相机相邻帧覆盖 pending。
+                                        modbusrtu.WriteCameraResult(int.Parse(myjob.path_number), modbusrtus);
                                     }
                                     catch (Exception ex) { MsgErroeLog.WriteLog("异常:" + ex.Message); }
                                 });
@@ -5737,8 +5738,10 @@ namespace WindowsFormsApplication1
             _ioWorkerThread.Start();
         }
 
-        // ch:R6 执行中任务计数：FlushIoWork 需等"队列空 AND 无执行中任务"，否则最后一项被取走未执行完就返回
+        // ch:R6 待完成任务计数：在入队前登记，覆盖“已出队但尚未开始执行”的窗口。
+        // _ioWorkExecuting 继续保留用于诊断；FlushIoWork 以 outstanding 作为排空条件。
         private int _ioWorkExecuting = 0;
+        private int _ioWorkOutstanding = 0;
         private void IoWorkerLoop()
         {
             try
@@ -5748,7 +5751,11 @@ namespace WindowsFormsApplication1
                     System.Threading.Interlocked.Increment(ref _ioWorkExecuting);
                     try { act(); }
                     catch (Exception ex) { MsgErroeLog.WriteLog("IO输出异常:" + ex.Message); }
-                    finally { System.Threading.Interlocked.Decrement(ref _ioWorkExecuting); }
+                    finally
+                    {
+                        System.Threading.Interlocked.Decrement(ref _ioWorkExecuting);
+                        System.Threading.Interlocked.Decrement(ref _ioWorkOutstanding);
+                    }
                 }
             }
             catch (Exception ex) { MsgErroeLog.WriteLog("IO工作线程退出异常:" + ex.Message); }
@@ -5763,7 +5770,19 @@ namespace WindowsFormsApplication1
             try
             {
                 if (!_ioWorkQueue.IsAddingCompleted)
-                    _ioWorkQueue.Add(act);
+                {
+                    // 先登记再入队，避免消费者已取走任务但尚未递增 executing 时 Flush 误判为空。
+                    System.Threading.Interlocked.Increment(ref _ioWorkOutstanding);
+                    try
+                    {
+                        _ioWorkQueue.Add(act);
+                    }
+                    catch
+                    {
+                        System.Threading.Interlocked.Decrement(ref _ioWorkOutstanding);
+                        throw;
+                    }
+                }
             }
             catch (Exception ex) { MsgErroeLog.WriteLog("IO入队异常:" + ex.Message); }
         }
@@ -5777,9 +5796,8 @@ namespace WindowsFormsApplication1
             Stopwatch sw = Stopwatch.StartNew();
             while (sw.ElapsedMilliseconds < timeoutMs)
             {
-                int qCount = _ioWorkQueue.Count;
-                int executing = System.Threading.Interlocked.CompareExchange(ref _ioWorkExecuting, 0, 0);
-                if (qCount == 0 && executing == 0)
+                int outstanding = System.Threading.Interlocked.CompareExchange(ref _ioWorkOutstanding, 0, 0);
+                if (outstanding == 0)
                     return;
                 Thread.Sleep(5);
             }

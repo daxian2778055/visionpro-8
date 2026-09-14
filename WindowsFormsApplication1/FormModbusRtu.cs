@@ -113,6 +113,8 @@ namespace WindowsFormsApplication1
         private readonly object _rtuReconnectLock = new object();
         private long _rtuLastReconnectTick = 0;
         private volatile bool _rtuAutoReconnect = false;
+        // 结果登记与 xie_wu 消费必须串行；单一 RTU 写入模式下，避免同一相机下一帧覆盖上一帧 pending。
+        private readonly object _rtuIoLock = new object();
 
 
         private void FormSiemens_Load( object sender, EventArgs e )
@@ -2356,23 +2358,40 @@ namespace WindowsFormsApplication1
                 MsgErroeLog.WriteLog(ex.Message + "modbusrtu");
             }
         }
+        // 由检测线程按相机提交不可变结果；登记和消费放在同一事务内。
+        public void WriteCameraResult(int camIndex, string value)
+        {
+            lock (_rtuIoLock)
+            {
+                if (clearing || !chushihua || !fins_en || !camera_dic.ContainsKey(camIndex))
+                    return;
+                camera_dic[camIndex][4] = value;
+                camera_dic[camIndex][5] = camera_dic[camIndex][3];
+                if (camIndex >= 1 && camIndex <= fins_xie.Length)
+                    fins_xie[camIndex - 1] = true;
+                xie_wu(value);
+            }
+        }
+
         public void xie_wu(string value)
         {
-            try
+            lock (_rtuIoLock)
             {
-                if (!chushihua || !fins_en || fins_dic.Count == 0) return;
-                if (clearing) return;
-
-                foreach (var pat in camera_dic)
+                try
                 {
-                    if (pat.Value[5] != "无")
+                    if (!chushihua || !fins_en || fins_dic.Count == 0) return;
+                    if (clearing) return;
+
+                    foreach (var pat in camera_dic)
                     {
-                        foreach (var par in fins_dic)
+                        if (pat.Value[5] != "无")
                         {
-                            if (pat.Value[5] == par.Value[0])
+                            foreach (var par in fins_dic)
                             {
-                                int addr_start = int.Parse(par.Value[1]);
-                                string fmt = par.Value[4];
+                                if (pat.Value[5] == par.Value[0])
+                                {
+                                    int addr_start = int.Parse(par.Value[1]);
+                                    string fmt = par.Value[4];
 
                                 if (fmt == "int")
                                 {
@@ -2498,6 +2517,7 @@ namespace WindowsFormsApplication1
             {
                 MsgErroeLog.WriteLog(ex.Message + "modbusrtu_xie_wu");
             }
+        }
         }
         private int qiehuan(string aa)
         {

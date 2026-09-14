@@ -43,6 +43,7 @@ namespace WindowsFormsApplication1
         private readonly object _omronReconnectLock = new object();
         private long _omronLastReconnectTick = 0;
         private volatile bool _omronAutoReconnect = false;
+        private readonly object _omronIoLock = new object(); // ch:R4 串行化 pending 登记与消费
         public delegate void GetSeletionData(object Sender, SelectionChangedEventArgs e);
         public event GetSeletionData getData;
         private int x=999;
@@ -1134,8 +1135,23 @@ namespace WindowsFormsApplication1
                 }
             }
         }
+        // ch:R4 单事务入口：登记该相机结果并立即在同一把锁内消费（Monitor 可重入，xie 内部再次加锁不死锁）
+        public void WriteCameraResult(int camIndex, string value)
+        {
+            lock (_omronIoLock)
+            {
+                if (clearing || !chushihua || !fins_en || !camera_dic.ContainsKey(camIndex))
+                return;
+                camera_dic[camIndex][4] = value;
+                camera_dic[camIndex][5] = camera_dic[camIndex][3];
+                if (camIndex >= 1 && camIndex <= fins_xie.Length)
+                fins_xie[camIndex - 1] = true;
+                xie(value);
+            }
+        }
         public void xie(string value)
         {
+            lock (_omronIoLock) { // ch:R4 串行化 pending 全表遍历消费
             try
             {
                 if (!chushihua || fins_dic.Count == 0) return;
@@ -1219,6 +1235,7 @@ namespace WindowsFormsApplication1
             {
                 MsgErroeLog.WriteLog(ex.Message);
             }
+            } // ch:R4 串行化 pending 全表遍历消费(闭合)
         }
         private void timer2_Tick(object sender, EventArgs e)
         {
