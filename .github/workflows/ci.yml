@@ -1,0 +1,33 @@
+name: CI
+
+on:
+  push:
+    branches: [ main, master ]
+  pull_request:
+    branches: [ main, master ]
+  workflow_dispatch: {}
+
+# 说明：本流水线只跑 Tests/UnitTests（纯逻辑，不依赖 Cognex VisionPro 商业 DLL），
+#       因此在 github.com 公共 runner 上即可通过。
+#       完整主工程编译需要 Cognex 商业库（E:\vp\vp\VisionPro\...），
+#       见 项目根 目录的 CI-完整编译说明.md（需 self-hosted runner）。
+jobs:
+  unit-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup .NET 8
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+
+      - name: Restore
+        run: dotnet restore Tests/UnitTests.csproj
+
+      - name: Build
+        run: dotnet build Tests/UnitTests.csproj -c Release --no-restore
+
+      - name: Run tests
+        run: dotnet test Tests/UnitTests.csproj -c Release --no-build -v minimal
