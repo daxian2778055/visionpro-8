@@ -1237,7 +1237,7 @@ namespace WindowsFormsApplication1
             {
                 MsgErroeLog.WriteLog("方案加载失败，跳过视觉流程（仍打开相机供手动操作）");
                 Frm2.start = 1; // ch:关闭加载进度窗，避免主界面被永久遮挡
-                qiehuanzhong = 0; // ch:解锁方案切换门闩，允许后续通过"打开"重新加载方案
+                Volatile.Write(ref qiehuanzhong, 0); // ch:P2 统一 Volatile 族；ch:解锁方案切换门闩，允许后续通过"打开"重新加载方案
                 yijing = 1;
                 // ch:方案失败不阻断相机：仍执行界面初始化并打开相机（流程部分由 initialize_FormSet 内跳过）
                 SafeBeginInvoke(new Action(() => initialize_FormSet()));
@@ -1252,12 +1252,12 @@ namespace WindowsFormsApplication1
                 //   避免相机尚未打开时后台线程就启动采集（StartGrabbing 对空句柄静默失败 → 相机"不能操作"）
                 // ch:等待上限 30 秒：慢电脑+多相机+大方案的正常初始化可能超过 10 秒，固定 10 秒会误判超时
                 int waitMs = 0;
-                while (qiehuanzhong == 1 && waitMs < 30000 && !closing)
+                while (Volatile.Read(ref qiehuanzhong) == 1 && waitMs < 30000 && !closing) // ch:P2 原子读，避免读陈旧 1 白等 30s
                 {
                     Thread.Sleep(100);
                     waitMs += 100;
                 }
-                if (qiehuanzhong == 1 && !closing)
+                if (Volatile.Read(ref qiehuanzhong) == 1 && !closing)
                 {
                     int openedCnt = 0;
                     for (int k = 0; k < 8; k++) { if (m_MyCamera[k] != null) openedCnt++; }
@@ -1395,7 +1395,7 @@ namespace WindowsFormsApplication1
                 {
                     MsgErroeLog.WriteLog("仅相机打开异常:" + ex.Message);
                 }
-                qiehuanzhong = 0; // ch:解除后台线程等待，避免初始化流程超时阻塞
+                Volatile.Write(ref qiehuanzhong, 0); // ch:P2 统一 Volatile 族；ch:解除后台线程等待，避免初始化流程超时阻塞
                 return;
             }
             string pppp = "";
@@ -2490,7 +2490,7 @@ namespace WindowsFormsApplication1
                     }
                     comboBox38.Text = canshuIni.ReadString("canshu", "xuanze", " ");
                 }
-                qiehuanzhong = 0;
+                Volatile.Write(ref qiehuanzhong, 0); // ch:P2 统一 Volatile 族
             }
             catch (Exception ex)
             {
@@ -2500,7 +2500,7 @@ namespace WindowsFormsApplication1
                 //if(ex.Message.Contains("未能找到文件"))
                 //textBoxSolutionPath.Text = "无方案!!!!";
                 Frm2.start = 1;
-                qiehuanzhong = 0;
+                Volatile.Write(ref qiehuanzhong, 0); // ch:P2 统一 Volatile 族
 
 
             };
@@ -5506,7 +5506,7 @@ namespace WindowsFormsApplication1
                             try
                             {
                                 // ch:切换方案期间跳过统计刷新（listBox2 正在 Clear/重建），避免 Items 索引越界
-                                if (qiehuanzhong == 1) return;
+                                if (Volatile.Read(ref qiehuanzhong) == 1) return; // ch:P2 原子读（UI 线程，防陈旧值）
                                 if (myjob1.triggerMode != "连续运行")
                                 {
                                     listBox2.Items[1] = "检测数:" + myjob1.sum.ToString();
@@ -6527,7 +6527,7 @@ namespace WindowsFormsApplication1
         private volatile bool closing = false; // ch:关闭标志，通知后台监控线程退出
         private void timer2_Tick(object sender, EventArgs e)
         {
-            if (closing || reconnecting || qiehuanzhong == 1) // ch:关闭/切换方案期间暂停断线检测，避免与重载并发
+            if (closing || reconnecting || Volatile.Read(ref qiehuanzhong) == 1) // ch:关闭/切换方案期间暂停断线检测，避免与重载并发（ch:P2 原子读）
                 return;
             reconnecting = true; // ch:提前置位，消除相邻两个 400ms tick 间的竞态窗口
             Task.Run(() =>
@@ -7477,6 +7477,11 @@ namespace WindowsFormsApplication1
                             finally { omron.qiehuanzhong = 0; }
                         });
                     }
+                    else
+                    {
+                        // ch:P2 内层未启用(反馈使能非 true)也必须复位回执闩：否则该窗体轮询线程门控永久为 1，cam10 切换事件不再触发
+                        omron.qiehuanzhong = 0;
+                    }
                 }
                 else
                 {
@@ -7714,6 +7719,11 @@ namespace WindowsFormsApplication1
                             finally { modbustcp.qiehuanzhong = 0; }
                         });
                     }
+                    else
+                    {
+                        // ch:P2 内层未启用(反馈使能非 true)也必须复位回执闩：否则该窗体轮询线程门控永久为 1，cam10 切换事件不再触发
+                        modbustcp.qiehuanzhong = 0;
+                    }
                 }
                 else
                 {
@@ -7950,6 +7960,11 @@ namespace WindowsFormsApplication1
                             catch (Exception ex) { MsgErroeLog.WriteLog("异常:" + ex.Message); }
                             finally { modbusrtu.qiehuanzhong = 0; }
                         });
+                    }
+                    else
+                    {
+                        // ch:P2 内层未启用(反馈使能非 true)也必须复位回执闩：否则该窗体轮询线程门控永久为 1，cam10 切换事件不再触发
+                        modbusrtu.qiehuanzhong = 0;
                     }
                 }
                 else
@@ -9345,9 +9360,11 @@ namespace WindowsFormsApplication1
         private static readonly long[] _lastProcMs = new long[8];  // ch:每相机上次开始处理的时刻(ms)，封程限速用
         private void xinghao_qiehuan(string a)
         {
-            if (qiehuanzhong == 0)
+            // ch:P2 方案切换闩改原子 check-then-set：原 if(==0){=1;} 是 TOCTOU——
+            //   三条通讯通道的 cam10 事件可各自通过外层预筛(==0)后同时进到这里，导致两个 xinghao_qiehuan 并发做 Shutdown/重载。
+            //   权威闩由 CompareExchange 把守；外层 7463/7700/7937 的 ==0 仅作预筛，保持不变。
+            if (System.Threading.Interlocked.CompareExchange(ref qiehuanzhong, 1, 0) == 0)
             {
-                qiehuanzhong = 1;
                 if (a.Contains(".vpp"))
                 {
                     label75.Text = a.Split('\\').Last();
@@ -9874,7 +9891,7 @@ namespace WindowsFormsApplication1
                         comboBox38_TextChanged(null, null);
 
                         button1_Click(null, null);
-                        qiehuanzhong = 0;
+                        Volatile.Write(ref qiehuanzhong, 0); // ch:P2 统一 Volatile 族
                         // display();
                     }
                     catch (Exception ex)
@@ -9887,7 +9904,7 @@ namespace WindowsFormsApplication1
                             Frm2.start = 1;
                         }
                         //Frm2.Close();
-                        qiehuanzhong = 0;
+                        Volatile.Write(ref qiehuanzhong, 0); // ch:P2 统一 Volatile 族
                         MsgErroeLog.WriteLog(ex.Message + "切换方案2");
                     };
                 });
@@ -10298,7 +10315,7 @@ namespace WindowsFormsApplication1
             if (m_pDeviceList.nDeviceNum == 0 || cbDeviceList.SelectedIndex == -1)
             {
                 // ch:启动过程中（initialize_FormSet 自动打开）无相机时不弹窗阻塞 UI，只记日志；手动打开时才提示
-                if (qiehuanzhong == 1)
+                if (Volatile.Read(ref qiehuanzhong) == 1)
                     MsgErroeLog.WriteLog("无可用相机设备，跳过打开（启动中不弹窗）");
                 else
                     ShowErrorMsg("No device, please select", 0);
@@ -10408,7 +10425,7 @@ namespace WindowsFormsApplication1
                                 if (nRet == MyCamera.MV_E_ACCESS_DENIED)
                                 {
                                     MsgErroeLog.WriteLog("相机" + (int.Parse(nnn) + 1) + "打开失败(0x80000203 被占用)");
-                                    if (qiehuanzhong == 1)
+                                    if (Volatile.Read(ref qiehuanzhong) == 1) // ch:P2 原子读
                                     {
                                         // ch:启动/切换中不逐台弹窗阻塞，先汇总，方法末尾一次性提示
                                         openFailSummary += "相机" + (int.Parse(nnn) + 1) + "、";
@@ -10538,7 +10555,7 @@ namespace WindowsFormsApplication1
             ApplyTriggerModesForOpenedCameras();
             
             // ch:启动/切换方案期间打开失败汇总提示（一次性，避免逐台弹窗阻塞初始化）
-            if (qiehuanzhong == 1 && openFailSummary != "")
+            if (Volatile.Read(ref qiehuanzhong) == 1 && openFailSummary != "") // ch:P2 原子读
             {
                 string failMsg = openFailSummary.TrimEnd('、');
                 openFailSummary = "";
@@ -11586,9 +11603,9 @@ namespace WindowsFormsApplication1
             // ch:性能埋点：记录本次回调占用海康 SDK 取流线程的时长
             long perfT0 = System.Diagnostics.Stopwatch.GetTimestamp();
             int perfIdx = -1;
-            if (closing || qiehuanzhong == 1)
+            if (closing || Volatile.Read(ref qiehuanzhong) == 1)
             {
-                if (qiehuanzhong == 1 && Environment.TickCount - _lastDropLogMs > 5000)
+                if (Volatile.Read(ref qiehuanzhong) == 1 && Environment.TickCount - _lastDropLogMs > 5000)
                 {
                     _lastDropLogMs = Environment.TickCount;
                     MsgErroeLog.WriteLog("回调帧被丢弃（qiehuanzhong 长时间未复位，检查切换流程）");

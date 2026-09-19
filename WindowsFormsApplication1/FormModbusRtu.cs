@@ -56,7 +56,8 @@ namespace WindowsFormsApplication1
         private string fins_mingcheng = "";
         public string zifu;
         public string lujing;
-        public int qiehuanzhong = 0;
+        // ch:P2 本窗体切换回执闩：轮询线程设置、Form1 的 cam10 分支复位（跨线程），改 volatile 保证可见性
+        public volatile int qiehuanzhong = 0;
         ErrorLog MsgErroeLog = new ErrorLog();
         bool fins_lunxunen = false;
         public bool fins_en = false;
