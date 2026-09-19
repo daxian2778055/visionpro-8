@@ -1160,26 +1160,37 @@ namespace WindowsFormsApplication1
         private const int PendingMaxAgeMs = 10000;
         private readonly Dictionary<int, long> _pendingFirstFailMs = new Dictionary<int, long>();
         private readonly Dictionary<int, int> _pendingFailCount = new Dictionary<int, int>();
+        private readonly Dictionary<int, string> _pendingFailId = new Dictionary<int, string>(); // ch:P2 失败计数绑定的"结果身份"([5]+[4])
         private readonly object _pendingTtlLock = new object();
 
+        // ch:P2 写回失败登记：返回 true 表示该结果已超限，调用方应丢弃 pending。以 [5]+[4] 作为"结果身份"，
+        //   身份变化（新帧登记覆盖了 pending）即重新计数，避免新结果继承旧失败计数/旧起始时刻被误丢。
         private bool NotePendingWriteFailed(int camIndex)
         {
             lock (_pendingTtlLock)
             {
                 long now = Environment.TickCount;
-                long first;
-                if (!_pendingFirstFailMs.TryGetValue(camIndex, out first))
+                string id = "";
+                string[] row;
+                if (camera_dic.TryGetValue(camIndex, out row) && row != null && row.Length > 5)
+                    id = (row[5] ?? "") + "\u0001" + (row[4] ?? "");
+                string lastId;
+                if (!_pendingFailId.TryGetValue(camIndex, out lastId) || lastId != id)
                 {
-                    first = now;
+                    _pendingFailId[camIndex] = id;
                     _pendingFirstFailMs[camIndex] = now;
-                    _pendingFailCount[camIndex] = 0;
+                    _pendingFailCount[camIndex] = 1;
+                    return false; // 新结果首次失败：保留待重试
                 }
                 int n;
                 _pendingFailCount.TryGetValue(camIndex, out n);
                 n++;
                 _pendingFailCount[camIndex] = n;
-                if (n >= PendingMaxFailTimes || unchecked(now - first) > PendingMaxAgeMs)
+                long first;
+                if (!_pendingFirstFailMs.TryGetValue(camIndex, out first)) first = now;
+                if (n >= PendingMaxFailTimes || unchecked((int)now - (int)first) > PendingMaxAgeMs) // ch:P2 用 int 差值：long 相减在 TickCount 回绕瞬间会变巨大负数使时间支路失效
                 {
+                    _pendingFailId.Remove(camIndex);
                     _pendingFirstFailMs.Remove(camIndex);
                     _pendingFailCount.Remove(camIndex);
                     MsgErroeLog.WriteLog("写回 pending 超限已丢弃(防断线恢复后补发旧结果) cam=" + camIndex + " 连续失败=" + n);
@@ -1193,6 +1204,7 @@ namespace WindowsFormsApplication1
         {
             lock (_pendingTtlLock)
             {
+                _pendingFailId.Remove(camIndex);
                 _pendingFirstFailMs.Remove(camIndex);
                 _pendingFailCount.Remove(camIndex);
             }
@@ -1229,6 +1241,12 @@ namespace WindowsFormsApplication1
                         {
                         fins_temp = ""; // ch:P2-② 每轮重置写回渲染结果，避免上一相机失败串入本相机判定
                         bool anyWriteFailed = false; // ch:P2-④ 聚合本相机所有写回的真实结果（多寄存器循环写逐次与）
+                        if (omronFinsNet == null) // ch:P2 客户端为空也计入失败：否则 pending 永不超限、每帧 NRE 刷日志
+                        {
+                            MsgErroeLog.WriteLog("omron 写回失败: 客户端为空 cam=" + pat.Key);
+                            if (NotePendingWriteFailed(pat.Key)) pat.Value[5] = "无";
+                            continue;
+                        }
                         foreach (var par in fins_dic)
                         {
                             if (pat.Value[5] == par.Value[0])
@@ -1306,7 +1324,12 @@ namespace WindowsFormsApplication1
                             if (NotePendingWriteFailed(pat.Key)) pat.Value[5] = "无"; // ch:P2 超限/超时丢弃，防断线恢复后补发旧结果
                         }
                         }
-                        catch (Exception exPer) { MsgErroeLog.WriteLog("写回单相机异常 cam=" + pat.Key + ":" + exPer.Message); } // ch:P2 单相机异常只记日志，继续下一相机
+                        catch (Exception exPer)
+                        {
+                            MsgErroeLog.WriteLog("写回单相机异常 cam=" + pat.Key + ":" + exPer.Message);
+                            // ch:P2 异常同样计入 TTL 失败：坏 pending（值畸形/越界等）否则会无限重试 + 每帧刷日志
+                            if (NotePendingWriteFailed(pat.Key)) pat.Value[5] = "无";
+                        }
                     }
                 }
             }

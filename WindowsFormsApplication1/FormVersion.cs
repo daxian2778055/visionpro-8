@@ -10,13 +10,14 @@ namespace WindowsFormsApplication1
     public partial class FormVersion : Form
     {
         // 当前版本（与推送仓库的 git tag 一一对应）：语义化版本 + 发布日期
-        public const string AppVersion = "1.3.2";
+        public const string AppVersion = "1.3.3";
         public const string AppVersionDate = "2026-09-19";
         public const string AppRepoName = "正泰 VP八相机连续海康（M4 - 加密）";
 
         // 版本时间线：与仓库 git tag 一一对应（新版本在最前）
         private static readonly string[] VersionTimeline = new string[]
         {
+            "v1.3.3  2026-09-19  写回 pending TTL 加固：失败计数改按“结果身份”([5]+[4])计数，新帧登记即自动重置(不再继承旧失败计数/旧起始时刻被误丢)；客户端为空与写路径异常也计入失败(原 NRE 被 per-camera catch 吞掉→无限重试+刷日志；TCP 普通写回漏判空一并补齐)；TTL 时间支路改 int 差值；Modbus.cs 读响应等待改差值式超时(原绝对比较跨 TickCount 回绕会死等)。",
             "v1.3.2  2026-09-19  方案切换门闩原子化：xinghao_qiehuan 改 Interlocked.CompareExchange 根除双切换 TOCTOU；Form1 闩读改 Volatile.Read(含回调热路径/自旋等待/断线检测门控)、写改 Volatile.Write；三窗体回执闩改 volatile；cam10 内层分支补 else 复位(原内层不成立时无复位路径)。",
             "v1.3.1  2026-09-19  第二轮审查修复：极速写清 pending 移入锁内并与本值比对、cam9 周期写回加锁且改用反馈通道、方案切换门闩异常也复位、SubSet 工具字典对象修正(7处)、Global\\ 互斥量降级 Local\\、jiasu 兜底复位、blockLock 补漏(Inputs/CreateLastRunRecord)、手参写入入锁(8处)、cbImage 强引用防 GC、写回每相机独立 try、list_block 改并发字典、pending TTL(3次/10秒)、离线单图检测移后台、Form3 显式 GBK 解码。",
             "v1.3.0  2026-09-19  并发与数据一致性修复：blockLock 覆盖 Outputs 读与结果快照、CSV 串帧改锁内快照、普通/极速写回仅成功才清 pending（按 bool 逐次聚合）、RunStatus 空值保护、曲线线程代际校验、RTU 重连加锁与字节序缓存、触发字边沿记忆、Form3 目标字典线程安全、极速写 string 加载期校验；新增「通讯 → 版本」窗口。",

@@ -44,10 +44,12 @@ namespace WindowsFormsApplication1
                     return r;
                 }
                 // 首帧不匹配：轮询等待直到匹配（按 station）或超时
-                long deadline = Environment.TickCount + 2000L;
+                // ch:P2 改差值式超时：原 long deadline = TickCount + 2000L; if (TickCount > deadline) 在 TickCount 回绕
+                //   （int.MaxValue→int.MinValue）的瞬间会永远不成立 → 死等约 24.9 天。差值式在 24.9 天窗口内恒正确。
+                int waitStart = Environment.TickCount;
                 while (buffer[0] != station || buffer[1] != 0X03)
                 {
-                    if (Environment.TickCount > deadline)
+                    if (unchecked(Environment.TickCount - waitStart) > 2000)
                     {
                         MsgErroeLog.WriteLog("Modbus 读响应超时(站号" + station.ToString("X2") + ")");
                         break;
