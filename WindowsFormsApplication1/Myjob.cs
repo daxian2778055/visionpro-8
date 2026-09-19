@@ -46,7 +46,6 @@ namespace WindowsFormsApplication1
         public ICogRecord newrecod;
         public int temptu;
         public int index;
-        public int xianshi;
         public int fit;
         public int ok1;
         public int ng1;
@@ -57,7 +56,9 @@ namespace WindowsFormsApplication1
         public string triggerZifu;
         public string jieshouZifu;
         public bool shijianEn;
-        public bool jiasu;
+        // ch:P2 跨线程标志：检测线程写 true（Form1.cs 取图渲染前）、UI 线程写 false（FinishOcxPaint/入队失败等），读取侧 IsCameraDisplayBusy 无锁。
+        //   仅 true/false 赋值、无复合读改写，volatile 保证可见性即可，无需并入 _ocxPaintLock。
+        public volatile bool jiasu;
         public string danwu_time;
         public int danwu_cishu;
         public DataTable myTable;

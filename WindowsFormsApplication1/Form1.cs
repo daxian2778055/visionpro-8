@@ -638,14 +638,7 @@ namespace WindowsFormsApplication1
                     myjob6.index = -1;
                     myjob7.index = -1;
                     myjob8.index = -1;
-                    myjob1.xianshi = 0;
-                    myjob2.xianshi = 0;
-                    myjob3.xianshi = 0;
-                    myjob4.xianshi = 0;
-                    myjob5.xianshi = 0;
-                    myjob6.xianshi = 0;
-                    myjob7.xianshi = 0;
-                    myjob8.xianshi = 0;
+                    // ch:P2 已删除死字段 myjobN.xianshi（旧降频方案残留，全工程无消费者）
                     myjob1.shijianEn = false;
                     myjob2.shijianEn = false;
                     myjob3.shijianEn = false;
