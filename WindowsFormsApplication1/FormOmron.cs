@@ -1153,6 +1153,50 @@ namespace WindowsFormsApplication1
                 xie(value);
             }
         }
+        // ch:P2 pending TTL：写失败保留 pending 后若长期写不出去（PLC 断线/掉线），恢复瞬间会把旧结果发给 PLC（错误工位数据）。
+        //   记录"首次失败时刻 + 连续失败次数"，连续 3 次或超过 10 秒即丢弃并告警，避免无限重试。
+        private const int PendingMaxFailTimes = 3;
+        private const int PendingMaxAgeMs = 10000;
+        private readonly Dictionary<int, long> _pendingFirstFailMs = new Dictionary<int, long>();
+        private readonly Dictionary<int, int> _pendingFailCount = new Dictionary<int, int>();
+        private readonly object _pendingTtlLock = new object();
+
+        private bool NotePendingWriteFailed(int camIndex)
+        {
+            lock (_pendingTtlLock)
+            {
+                long now = Environment.TickCount;
+                long first;
+                if (!_pendingFirstFailMs.TryGetValue(camIndex, out first))
+                {
+                    first = now;
+                    _pendingFirstFailMs[camIndex] = now;
+                    _pendingFailCount[camIndex] = 0;
+                }
+                int n;
+                _pendingFailCount.TryGetValue(camIndex, out n);
+                n++;
+                _pendingFailCount[camIndex] = n;
+                if (n >= PendingMaxFailTimes || unchecked(now - first) > PendingMaxAgeMs)
+                {
+                    _pendingFirstFailMs.Remove(camIndex);
+                    _pendingFailCount.Remove(camIndex);
+                    MsgErroeLog.WriteLog("写回 pending 超限已丢弃(防断线恢复后补发旧结果) cam=" + camIndex + " 连续失败=" + n);
+                    return true;
+                }
+                return false;
+            }
+        }
+
+        private void NotePendingWriteOk(int camIndex)
+        {
+            lock (_pendingTtlLock)
+            {
+                _pendingFirstFailMs.Remove(camIndex);
+                _pendingFailCount.Remove(camIndex);
+            }
+        }
+
         // ch:P0 方案切换写回暂存：与 xie 消费共用 _omronIoLock，保证 [4](值)/[5](通道) 原子配对，消除跨线程撕裂
         public void SetSwitchPending(int camIndex)
         {
@@ -1180,13 +1224,16 @@ namespace WindowsFormsApplication1
                 {
                     if (pat.Value[5] != "无")
                     {
+                        try // ch:P2 每相机独立 try：单个相机的坏值/越界不再中断整表写回（原实现一个异常饿死其余相机）
+                        {
                         fins_temp = ""; // ch:P2-② 每轮重置写回渲染结果，避免上一相机失败串入本相机判定
                         bool anyWriteFailed = false; // ch:P2-④ 聚合本相机所有写回的真实结果（多寄存器循环写逐次与）
                         foreach (var par in fins_dic)
                         {
                             if (pat.Value[5] == par.Value[0])
                             {
-                                int addr_start = int.Parse(par.Value[1]);
+                                int addr_start;
+                                if (!int.TryParse(par.Value[1], out addr_start)) { anyWriteFailed = true; MsgErroeLog.WriteLog("写回地址解析失败(保留pending):" + par.Value[1]); break; } // ch:P2 裸 Parse 改 TryParse
                                 string fmt = par.Value[4];
 
                                 if (fmt == "int")
@@ -1248,9 +1295,17 @@ namespace WindowsFormsApplication1
                         }
                         // ch:P2-④ 以逐次写入的真实 bool 结果聚合判定（替代文本判定），避免多寄存器循环写"末次成功掩盖前次失败"
                         if (!anyWriteFailed)
+                        {
                             pat.Value[5] = "无";
+                            NotePendingWriteOk(pat.Key); // ch:P2 写成功清除失败计数
+                        }
                         else
+                        {
                             MsgErroeLog.WriteLog("普通写回失败(保留 pending) cam=" + pat.Key + " ch=" + pat.Value[5] + " val=[" + pat.Value[4] + "] msg=" + fins_temp);
+                            if (NotePendingWriteFailed(pat.Key)) pat.Value[5] = "无"; // ch:P2 超限/超时丢弃，防断线恢复后补发旧结果
+                        }
+                        }
+                        catch (Exception exPer) { MsgErroeLog.WriteLog("写回单相机异常 cam=" + pat.Key + ":" + exPer.Message); } // ch:P2 单相机异常只记日志，继续下一相机
                     }
                 }
             }
@@ -1260,16 +1315,26 @@ namespace WindowsFormsApplication1
             }
             } // ch:R4 串行化 pending 全表遍历消费(闭合)
         }
+        // ch:P2 相机9 周期写回：① 与 xie 消费共用 _omronIoLock，保证 [4](值)/[5](通道) 原子配对；
+        //   ② 通道取"反馈通道"[3]（原实现误取触发通道[0] → 每秒把返回值写进触发寄存器，且破坏配对可写错地址段）
+        public void SetCamera9PeriodicPending()
+        {
+            lock (_omronIoLock)
+            {
+                if (camera_dic.ContainsKey(9) && camera_dic[9].Length > 5 && camera_dic[9][2] == "true")
+                {
+                    camera_dic[9][4] = camera_dic[9][1];
+                    camera_dic[9][5] = camera_dic[9][3];
+                    if (fins_xie.Length > 8) fins_xie[8] = true;
+                }
+            }
+        }
+
         private void timer2_Tick(object sender, EventArgs e)
         {
             try
             {
-                if (camera_dic.ContainsKey(9) && camera_dic[9][2] == "true")
-                {
-                    camera_dic[9][4] = camera_dic[9][1];
-                    camera_dic[9][5] = camera_dic[9][0];
-                    fins_xie[8] = true;
-                }
+                SetCamera9PeriodicPending();
             }
             catch (Exception ex) { MsgErroeLog.WriteLog("异常:" + ex.Message); }
         }

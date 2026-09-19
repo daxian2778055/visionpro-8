@@ -612,6 +612,22 @@ namespace WindowsFormsApplication1
             return sock;
         }
 
+        // ch:P2 显式 GBK 解码：原用 Encoding.Default 依赖系统 ANSI 代码页（中文机=936，英文机=1252 → 中文乱码）。
+        //   注意：TCP 无组帧定界，若一条报文的 GBK 多字节被拆到两个 TCP 段，本段解码会出现 U+FFFD；
+        //   该告警只提示一次，便于现场判断是否需要按分隔符组帧（需先确认现场报文分隔约定）。
+        private static readonly System.Text.Encoding _protoEncoding = System.Text.Encoding.GetEncoding("GB2312");
+        private static bool _decodeWarned = false;
+        private string DecodeProtoBytes(byte[] buf, int len)
+        {
+            string s = _protoEncoding.GetString(buf, 0, len);
+            if (!_decodeWarned && s.IndexOf('\uFFFD') >= 0)
+            {
+                _decodeWarned = true;
+                MsgErroeLog.WriteLog("无协议报文解码出现替换字符(U+FFFD)：GBK 多字节可能被 TCP 分段拆开，或对端非 GBK 编码（仅提示一次）");
+            }
+            return s;
+        }
+
         private void receiveClient()
         {
             Socket sock = socketClient; // ch:P1-⑦ 捕获本次会话 socket，避免重连覆盖字段后 Receive 到新连接
@@ -627,7 +643,7 @@ namespace WindowsFormsApplication1
                         int r = sock.Receive(buffer);
                         if (r == 0)
                         { break; }
-                        string sss = System.Text.Encoding.Default.GetString(buffer, 0, r);
+                        string sss = DecodeProtoBytes(buffer, r); // ch:P2 显式 GBK 解码（原 Encoding.Default 依赖系统代码页）
                         if (jinzhi == 1)
                             sss = sss.Replace('\0', '0');
                         ShowMsgClient(sock.RemoteEndPoint + ":" + sss + "\r\n");
@@ -830,7 +846,7 @@ namespace WindowsFormsApplication1
                         if (rr == 0)
                         { break; }
                         //发送的文字消息
-                        string str = Encoding.Default.GetString(bufferr, 0, rr);
+                        string str = DecodeProtoBytes(bufferr, rr); // ch:P2 显式 GBK 解码（原 Encoding.Default 依赖系统代码页）
                         if (jinzhi == 1)
                             str = str.Replace('\0', '0');
                         ShowMsg(current.RemoteEndPoint + ";" + str + "\r\n");

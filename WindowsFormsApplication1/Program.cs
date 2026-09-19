@@ -161,6 +161,35 @@ namespace WindowsFormsApplication1
         /// <summary>
         /// 应用程序的主入口点。
         /// </summary>
+        /// <summary>
+        /// ch:P2 单实例互斥量：优先 Global\（跨会话唯一）；非管理员账户无 SeCreateGlobalPrivilege 时
+        ///   创建会抛 UnauthorizedAccessException → 降级 Local\（会话级），保证普通用户仍能启动。
+        /// </summary>
+        static Mutex CreateSingleInstanceMutex(out bool created, ErrorLog log)
+        {
+            try
+            {
+                return new Mutex(true, @"Global\ZC_VP8Cam_Mutex", out created);
+            }
+            catch (Exception exGlobal)
+            {
+                try
+                {
+                    Mutex local = new Mutex(true, @"Local\ZC_VP8Cam_Mutex", out created);
+                    if (log != null)
+                        log.WriteLog("Global\\ 互斥量不可用，已降级 Local\\（单实例保护仅限当前会话）：" + exGlobal.Message);
+                    return local;
+                }
+                catch (Exception exLocal)
+                {
+                    created = true; // 放弃单实例检查，优先保证程序可启动
+                    if (log != null)
+                        log.WriteLog("单实例互斥量创建失败，已跳过单实例检查：" + exGlobal.Message + " / " + exLocal.Message);
+                    return null;
+                }
+            }
+        }
+
         [STAThread]
         static void Main()
         {
@@ -168,7 +197,9 @@ namespace WindowsFormsApplication1
             ErrorLog MsgErroeLog = new ErrorLog();
             // ch:P3-⑥ 固定名称 + Global\ 前缀：原用 Assembly.FullName 属会话级互斥，
             //   多用户/远程桌面/快速切换场景下仍可多开；Global\ 前缀保证跨会话唯一。
-            using (new Mutex(true, @"Global\ZC_VP8Cam_Mutex", out newMutexCreated))
+            // ch:P2 非管理员账户对 Global\ 无权限会抛异常导致无法启动 → 由 CreateSingleInstanceMutex 自动降级 Local\
+            Mutex singleInstance = CreateSingleInstanceMutex(out newMutexCreated, MsgErroeLog);
+            using (singleInstance)
             {
                 if (!newMutexCreated)
                 {

@@ -85,6 +85,15 @@ namespace WindowsFormsApplication1
         public UInt32 m_nBufSizeForSaveImage8 = 0;
         // ch:R7 已删除 8 个从未使用的 m_pBufForSaveImage / 2..8 死字段（实际使用的是 m_pSaveImageBuf[8] 数组）
         MyCamera.cbOutputExdelegate cbImage;
+        // ch:P2 保持历史委托强引用：MV_CC_RegisterImageCallBackEx_NET 会把委托编组为函数指针交给 SDK，
+        //   若旧委托实例被 GC 回收而 SDK 仍持有其指针（相机未重新注册），回调会跳到已回收代码 → 进程 AV。
+        private static readonly List<MyCamera.cbOutputExdelegate> _cbImageKeepAlive = new List<MyCamera.cbOutputExdelegate>();
+        // ch:P2 统一入口：重建回调委托并把新旧实例都登记进 keep-alive 列表
+        private void RebuildImageCallback()
+        {
+            cbImage = new MyCamera.cbOutputExdelegate(ImageCallBack);
+            lock (_cbImageKeepAlive) { _cbImageKeepAlive.Add(cbImage); }
+        }
         MyCamera.MV_CC_DEVICE_INFO_LIST m_pDeviceList = new MyCamera.MV_CC_DEVICE_INFO_LIST();
         MyCamera.MV_CC_DEVICE_INFO[] m_pDeviceInfo = new MyCamera.MV_CC_DEVICE_INFO[8];
         private MyCamera[] m_MyCamera = new MyCamera[8];
@@ -193,7 +202,7 @@ namespace WindowsFormsApplication1
             dahua = canshuIni.ReadString("canshu", "dahua", "false").Replace("\0", "") == "true";
             cbDahua.Checked = dahua; // ch:同步 UI 开关状态（Designer 控件，可在设计器里编辑）
             try { DeviceListAcq(); } catch (Exception ex) { MsgErroeLog.WriteLog("设备枚举异常:" + ex.Message); }
-            cbImage = new MyCamera.cbOutputExdelegate(ImageCallBack);
+            RebuildImageCallback(); // ch:P2 重建回调并登记强引用（防 GC 后 SDK 仍持旧指针 → AV）
             StartDetectWorkers(); // ch:P0-① 启动每相机检测工作线程（须在注册回调/开始采集之前）
             for (int i = 0; i < 8; ++i)
             {
@@ -5177,8 +5186,14 @@ namespace WindowsFormsApplication1
                                     {
                                         PictureBox disp = GetCameraPictureBox(myjob.path_number);
                                         ICogImage showImg = tempimage;
-                                        if (showImg == null && myjob.block.Inputs.Contains("Input"))
-                                            showImg = myjob.block.Inputs["Input"].Value as ICogImage;
+                                        if (showImg == null)
+                                        {
+                                            lock (myjob.blockLock) // ch:P2 Inputs 读同样需与通讯线程 SetBlockInputSafe 写串行（本轮补漏）
+                                            {
+                                                if (myjob.block.Inputs.Contains("Input"))
+                                                    showImg = myjob.block.Inputs["Input"].Value as ICogImage;
+                                            }
+                                        }
                                         if (showImg != null)
                                             QueueRawImageDisplay(disp, showImg, myjob);
                                         else
@@ -5188,7 +5203,10 @@ namespace WindowsFormsApplication1
                                     {
                                         try
                                         {
-                                            temprecord = myjob.block.CreateLastRunRecord().SubRecords[0];
+                                            lock (myjob.blockLock) // ch:P2 CreateLastRunRecord 读 block 内部状态，需与通讯线程 Inputs 写串行（本轮补漏）
+                                            {
+                                                temprecord = myjob.block.CreateLastRunRecord().SubRecords[0];
+                                            }
                                         }
                                         catch (Exception ex)
                                         {
@@ -7453,8 +7471,10 @@ namespace WindowsFormsApplication1
 
                         Task.Run(() =>
                         {
-                            xinghao_qiehuan(omron.lujing.Replace("\0", ""));
-                            omron.qiehuanzhong = 0;
+                            // ch:P2 必须 try/finally 复位：原实现若 xinghao_qiehuan 抛异常，omron.qiehuanzhong 永久停在 1 → 后续 cam10 切换事件不再触发
+                            try { xinghao_qiehuan(omron.lujing.Replace("\0", "")); }
+                            catch (Exception ex) { MsgErroeLog.WriteLog("异常:" + ex.Message); }
+                            finally { omron.qiehuanzhong = 0; }
                         });
                     }
                 }
@@ -7688,8 +7708,10 @@ namespace WindowsFormsApplication1
 
                         Task.Run(() =>
                         {
-                            xinghao_qiehuan(modbustcp.lujing.Replace("\0", ""));
-                            modbustcp.qiehuanzhong = 0;
+                            // ch:P2 必须 try/finally 复位：原实现若 xinghao_qiehuan 抛异常，modbustcp.qiehuanzhong 永久停在 1 → 后续 cam10 切换事件不再触发
+                            try { xinghao_qiehuan(modbustcp.lujing.Replace("\0", "")); }
+                            catch (Exception ex) { MsgErroeLog.WriteLog("异常:" + ex.Message); }
+                            finally { modbustcp.qiehuanzhong = 0; }
                         });
                     }
                 }
@@ -7923,8 +7945,10 @@ namespace WindowsFormsApplication1
 
                         Task.Run(() =>
                         {
-                            xinghao_qiehuan(modbusrtu.lujing.Replace("\0", ""));
-                            modbusrtu.qiehuanzhong = 0;
+                            // ch:P2 必须 try/finally 复位：原实现若 xinghao_qiehuan 抛异常，modbusrtu.qiehuanzhong 永久停在 1 → 后续 cam10 切换事件不再触发
+                            try { xinghao_qiehuan(modbusrtu.lujing.Replace("\0", "")); }
+                            catch (Exception ex) { MsgErroeLog.WriteLog("异常:" + ex.Message); }
+                            finally { modbusrtu.qiehuanzhong = 0; }
                         });
                     }
                 }
@@ -8060,7 +8084,8 @@ namespace WindowsFormsApplication1
                     if (myjob1.trriger == 0)
                     {
                         myjob1.trriger = 1;
-                        getrecord(myjob1);
+                        // ch:P2 离线单图检测移后台：getrecord 含 Run/IO/存图，UI 线程直接跑会冻结界面（实时链路本就跑在检测线程）
+                        Task.Run(() => { try { getrecord(myjob1); } catch (Exception ex) { MsgErroeLog.WriteLog("离线单图检测异常:" + ex.Message); } });
                     }
                     _ioPulseEnabled = true;
                     trriger1_temp = 1;
@@ -8086,7 +8111,9 @@ namespace WindowsFormsApplication1
                     if (myjob.trriger == 0)
                     {
                         myjob.trriger = 1;
-                        getrecord(myjob);
+                        // ch:P2 离线单图检测移后台：getrecord 含 Run/IO/存图，UI 线程直接跑会冻结界面（ref 参数不能进 lambda，先取本地副本）
+                        Myjob jobLocal = myjob;
+                        Task.Run(() => { try { getrecord(jobLocal); } catch (Exception ex) { MsgErroeLog.WriteLog("离线单图检测异常:" + ex.Message); } });
                     }
                     trriger_temp = 1;
                     tim.Interval = int.Parse(text.Text);
@@ -10159,6 +10186,20 @@ namespace WindowsFormsApplication1
         // ch:0x80000203=MV_E_ENDPOINT_INVALID(端点无效)：最常见原因是相机 IP 与电脑网卡不在同一网段（GVCP 控制通道不通），
         // ch:其次才是上次程序异常退出后 GigE 会话未释放（约需60秒）或其他程序独占相机。
         // ch:先等待重试；仍失败则尝试抢占模式（仅GigE有效）。
+        // ch:P2 可中断等待：返回 true 表示应中断（程序正在关闭）。
+        //   OpenDeviceWithRetry 可能在 UI 线程执行（bnOpen_Click 持全部相机锁），固定 Thread.Sleep 会让关窗/退出被拖住。
+        private bool WaitInterruptible(int ms)
+        {
+            int waited = 0;
+            while (waited < ms)
+            {
+                if (closing) return true;
+                Thread.Sleep(50);
+                waited += 50;
+            }
+            return closing;
+        }
+
         private Int32 OpenDeviceWithRetry(ref MyCamera cam, ref MyCamera.MV_CC_DEVICE_INFO devInfo)
         {
             if (cam == null) cam = new MyCamera();
@@ -10177,7 +10218,7 @@ namespace WindowsFormsApplication1
                 // ch:超出重试窗口的 GigE 会话残留由下面的抢占模式兜底。
                 for (int retry = 0; retry < 3 && nRet == MyCamera.MV_E_ACCESS_DENIED; retry++)
                 {
-                    Thread.Sleep(2000);
+                    if (WaitInterruptible(2000)) { MsgErroeLog.WriteLog("程序正在关闭，中止相机打开重试"); break; } // ch:P2 可中断，避免关窗被 6 秒重试拖住
                     nRet = cam.MV_CC_CreateDevice_NET(ref devInfo);
                     MsgErroeLog.WriteLog("重试#" + (retry + 1) + " CreateDevice 返回 0x" + ((uint)nRet).ToString("X8"));
                     if (MyCamera.MV_OK != nRet) break;
@@ -10187,9 +10228,11 @@ namespace WindowsFormsApplication1
                 // ch:独占重试仍被拒 → GigE 尝试抢占模式（MV_ACCESS_ExclusiveWithSwitch=2），接管残留会话
                 if (nRet == MyCamera.MV_E_ACCESS_DENIED && devInfo.nTLayerType == MyCamera.MV_GIGE_DEVICE)
                 {
-                    Thread.Sleep(1000);
+                    if (!WaitInterruptible(1000)) // ch:P2 可中断
+                    {
                     nRet = cam.MV_CC_OpenDevice_NET(2, 0);
                     MsgErroeLog.WriteLog("抢占模式 OpenDevice(2,0) 返回 0x" + ((uint)nRet).ToString("X8"));
+                    }
                 }
             }
             swOpen.Stop();
@@ -11311,7 +11354,11 @@ namespace WindowsFormsApplication1
             else
             {
                 try { BeginInvoke(new Action(KickOcxPaint)); }
-                catch (Exception ex) { new ErrorLog().WriteLog(ex.ToString()); }
+                catch (Exception ex)
+                {
+                    new ErrorLog().WriteLog(ex.ToString());
+                    AbortPendingOcxPaint(); // ch:P2 续排失败同样兜底复位，避免其余相机 jiasu 卡死
+                }
             }
         }
 
@@ -11338,14 +11385,39 @@ namespace WindowsFormsApplication1
             KickOcxPaint();
         }
 
+        // ch:P2 jiasu 兜底复位：KickOcxPaint 无法投递（句柄未建/窗体已释放/投递异常）时，清空待渲染槽并复位对应相机 jiasu。
+        //   否则该相机 IsCameraDisplayBusy 永久 true → 检测线程不再入队渲染 → 该相机画面永久卡死（jiasu 卡死路径）
+        private void AbortPendingOcxPaint()
+        {
+            lock (_ocxPaintLock)
+            {
+                for (int i = 1; i <= 8; i++)
+                {
+                    Myjob pj = _pendingOcxJob[i];
+                    if (pj == null) continue;
+                    _pendingOcxRec[i] = null;
+                    _pendingRawImg[i] = null;
+                    _pendingOcxJob[i] = null;
+                    pj.jiasu = false;
+                }
+            }
+        }
+
         private void KickOcxPaint()
         {
             if (closing || IsDisposed || !IsHandleCreated)
+            {
+                AbortPendingOcxPaint(); // ch:P2 无法渲染时兜底复位，避免 jiasu 卡死
                 return;
+            }
             if (InvokeRequired)
             {
                 try { BeginInvoke(new Action(KickOcxPaint)); }
-                catch (Exception ex) { new ErrorLog().WriteLog(ex.ToString()); }
+                catch (Exception ex)
+                {
+                    new ErrorLog().WriteLog(ex.ToString());
+                    AbortPendingOcxPaint(); // ch:P2 投递失败同上，必须复位 jiasu
+                }
                 return;
             }
             if (UserRecentlyInteracted())
@@ -12162,7 +12234,7 @@ namespace WindowsFormsApplication1
             DeviceListAcq();
             m_nFrames = new int[8];
             m_bSaveImg = new bool[8];
-            cbImage = new MyCamera.cbOutputExdelegate(ImageCallBack);
+            RebuildImageCallback(); // ch:P2 重建回调并登记强引用（防 GC 后 SDK 仍持旧指针 → AV）
             //   m_bTimerFlag = false;
             m_hDisplayHandle = new IntPtr[8];
             m_pDeviceInfo = new MyCamera.MV_CC_DEVICE_INFO[8];
@@ -17764,7 +17836,7 @@ namespace WindowsFormsApplication1
             try {
                 if (manager1.JobCount > 0)
                 {
-                    myjob1.block.Inputs[comboBox16.Text].Value = textBox13.Text;
+                    SetBlockInputSafe(myjob1, comboBox16.Text, textBox13.Text); // ch:P2 手参写入改走 blockLock 保护路径，避免与检测线程 Run 并发
                 }
                 MessageBox.Show("参数:" + comboBox16.Text + "写入数值" + textBox13.Text + "成功");
             }
@@ -17814,7 +17886,7 @@ namespace WindowsFormsApplication1
             {
                 if (manager1.JobCount > 7)
                 {
-                    myjob8.block.Inputs[comboBox26.Text].Value = textBox35.Text;
+                    SetBlockInputSafe(myjob8, comboBox26.Text, textBox35.Text); // ch:P2 手参写入改走 blockLock 保护路径
                 }
                 MessageBox.Show("参数:" + comboBox26.Text + "写入数值" + textBox35.Text + "成功");
             }
@@ -17845,7 +17917,7 @@ namespace WindowsFormsApplication1
             {
                 if (manager1.JobCount > 1)
                 {
-                    myjob2.block.Inputs[comboBox17.Text].Value = textBox23.Text;
+                    SetBlockInputSafe(myjob2, comboBox17.Text, textBox23.Text); // ch:P2 手参写入改走 blockLock 保护路径
                 }
                 MessageBox.Show("参数:" + comboBox17.Text + "写入数值" + textBox23.Text + "成功");
             }
@@ -17975,7 +18047,7 @@ namespace WindowsFormsApplication1
             {
                 if (manager1.JobCount > 6)
                 {
-                    myjob7.block.Inputs[comboBox24.Text].Value = textBox31.Text;
+                    SetBlockInputSafe(myjob7, comboBox24.Text, textBox31.Text); // ch:P2 手参写入改走 blockLock 保护路径
                 }
                 MessageBox.Show("参数:" + comboBox24.Text + "写入数值" + textBox31.Text + "成功");
             }
@@ -17991,7 +18063,7 @@ namespace WindowsFormsApplication1
             {
                 if (manager1.JobCount > 5)
                 {
-                    myjob6.block.Inputs[comboBox23.Text].Value = textBox30.Text;
+                    SetBlockInputSafe(myjob6, comboBox23.Text, textBox30.Text); // ch:P2 手参写入改走 blockLock 保护路径
                 }
                 MessageBox.Show("参数:" + comboBox23.Text + "写入数值" + textBox30.Text + "成功");
             }
@@ -18007,7 +18079,7 @@ namespace WindowsFormsApplication1
             {
                 if (manager1.JobCount > 4)
                 {
-                    myjob5.block.Inputs[comboBox20.Text].Value = textBox29.Text;
+                    SetBlockInputSafe(myjob5, comboBox20.Text, textBox29.Text); // ch:P2 手参写入改走 blockLock 保护路径
                 }
                 MessageBox.Show("参数:" + comboBox20.Text + "写入数值" + textBox29.Text + "成功");
             }
@@ -18023,7 +18095,7 @@ namespace WindowsFormsApplication1
             {
                 if (manager1.JobCount > 3)
                 {
-                    myjob4.block.Inputs[comboBox19.Text].Value = textBox25.Text;
+                    SetBlockInputSafe(myjob4, comboBox19.Text, textBox25.Text); // ch:P2 手参写入改走 blockLock 保护路径
                 }
                 MessageBox.Show("参数:" + comboBox19.Text + "写入数值" + textBox25.Text + "成功");
             }
@@ -18039,7 +18111,7 @@ namespace WindowsFormsApplication1
             {
                 if (manager1.JobCount > 2)
                 {
-                    myjob3.block.Inputs[comboBox18.Text].Value = textBox24.Text;
+                    SetBlockInputSafe(myjob3, comboBox18.Text, textBox24.Text); // ch:P2 手参写入改走 blockLock 保护路径
                 }
                 MessageBox.Show("参数:" + comboBox18.Text + "写入数值" + textBox24.Text + "成功");
             }
@@ -18241,7 +18313,7 @@ namespace WindowsFormsApplication1
                                                     c15.Visible = true;
                                                     break;
                                             }
-                                            myjob1.list_block.Add(myjob1.list_block.Count + 1, block_temp);
+                                            myjob1.list_block[myjob1.list_block.Count + 1] = block_temp; // ch:P2 ConcurrentDictionary 的 Add 是显式接口实现，改索引器赋值（重复键覆盖而非抛异常）
                                         }
                                     }
                                 }
@@ -18283,7 +18355,7 @@ namespace WindowsFormsApplication1
                                                                 c15.Visible = true;
                                                                 break;
                                                         }
-                                                        myjob1.list_block.Add(myjob1.list_block.Count + 1, block_temp);
+                                                        myjob1.list_block[myjob1.list_block.Count + 1] = block_temp; // ch:P2 ConcurrentDictionary 的 Add 是显式接口实现，改索引器赋值（重复键覆盖而非抛异常）
                                                     }
                                                 }
                                             }
@@ -18325,7 +18397,7 @@ namespace WindowsFormsApplication1
                                                                             c15.Visible = true;
                                                                             break;
                                                                     }
-                                                                    myjob1.list_block.Add(myjob1.list_block.Count + 1, block_temp);
+                                                                    myjob1.list_block[myjob1.list_block.Count + 1] = block_temp; // ch:P2 ConcurrentDictionary 的 Add 是显式接口实现，改索引器赋值（重复键覆盖而非抛异常）
                                                                 }
                                                             }
                                                         }
@@ -18397,7 +18469,7 @@ namespace WindowsFormsApplication1
                                                     c25.Visible = true;
                                                     break;
                                             }
-                                            myjob2.list_block.Add(myjob2.list_block.Count + 1, block_temp);
+                                            myjob2.list_block[myjob2.list_block.Count + 1] = block_temp; // ch:P2 ConcurrentDictionary 的 Add 是显式接口实现，改索引器赋值（重复键覆盖而非抛异常）
                                         }
                                     }
                                 }
@@ -18439,7 +18511,7 @@ namespace WindowsFormsApplication1
                                                                 c25.Visible = true;
                                                                 break;
                                                         }
-                                                        myjob2.list_block.Add(myjob2.list_block.Count + 1, block_temp);
+                                                        myjob2.list_block[myjob2.list_block.Count + 1] = block_temp; // ch:P2 ConcurrentDictionary 的 Add 是显式接口实现，改索引器赋值（重复键覆盖而非抛异常）
                                                     }
                                                 }
                                             }
@@ -18481,7 +18553,7 @@ namespace WindowsFormsApplication1
                                                                             c25.Visible = true;
                                                                             break;
                                                                     }
-                                                                    myjob2.list_block.Add(myjob2.list_block.Count + 1, block_temp);
+                                                                    myjob2.list_block[myjob2.list_block.Count + 1] = block_temp; // ch:P2 ConcurrentDictionary 的 Add 是显式接口实现，改索引器赋值（重复键覆盖而非抛异常）
                                                                 }
                                                             }
                                                         }
@@ -18594,7 +18666,7 @@ namespace WindowsFormsApplication1
                                                         break;
                                                 }
                                             }
-                                            myjob3.list_block.Add(myjob3.list_block.Count + 1, block_temp);
+                                            myjob3.list_block[myjob3.list_block.Count + 1] = block_temp; // ch:P2 ConcurrentDictionary 的 Add 是显式接口实现，改索引器赋值（重复键覆盖而非抛异常）
                                         }
                                     }
                                 }
@@ -18657,7 +18729,7 @@ namespace WindowsFormsApplication1
                                                                     break;
                                                             }
                                                         }
-                                                        myjob3.list_block.Add(myjob3.list_block.Count + 1, block_temp);
+                                                        myjob3.list_block[myjob3.list_block.Count + 1] = block_temp; // ch:P2 ConcurrentDictionary 的 Add 是显式接口实现，改索引器赋值（重复键覆盖而非抛异常）
                                                     }
                                                 }
                                             }
@@ -18699,7 +18771,7 @@ namespace WindowsFormsApplication1
                                                                             c35.Visible = true;
                                                                             break;
                                                                     }
-                                                                    myjob3.list_block.Add(myjob3.list_block.Count + 1, block_temp);
+                                                                    myjob3.list_block[myjob3.list_block.Count + 1] = block_temp; // ch:P2 ConcurrentDictionary 的 Add 是显式接口实现，改索引器赋值（重复键覆盖而非抛异常）
                                                                 }
                                                             }
                                                         }
@@ -18813,7 +18885,7 @@ namespace WindowsFormsApplication1
                                                         break;
                                                 }
                                             }
-                                            myjob4.list_block.Add(myjob4.list_block.Count + 1, block_temp);
+                                            myjob4.list_block[myjob4.list_block.Count + 1] = block_temp; // ch:P2 ConcurrentDictionary 的 Add 是显式接口实现，改索引器赋值（重复键覆盖而非抛异常）
                                         }
                                     }
                                 }
@@ -18876,7 +18948,7 @@ namespace WindowsFormsApplication1
                                                                     break;
                                                             }
                                                         }
-                                                        myjob4.list_block.Add(myjob4.list_block.Count + 1, block_temp);
+                                                        myjob4.list_block[myjob4.list_block.Count + 1] = block_temp; // ch:P2 ConcurrentDictionary 的 Add 是显式接口实现，改索引器赋值（重复键覆盖而非抛异常）
                                                     }
                                                 }
                                             }
@@ -18939,7 +19011,7 @@ namespace WindowsFormsApplication1
                                                                                 break;
                                                                         }
                                                                     }
-                                                                    myjob4.list_block.Add(myjob4.list_block.Count + 1, block_temp);
+                                                                    myjob4.list_block[myjob4.list_block.Count + 1] = block_temp; // ch:P2 ConcurrentDictionary 的 Add 是显式接口实现，改索引器赋值（重复键覆盖而非抛异常）
                                                                 }
                                                             }
                                                         }
@@ -19011,7 +19083,7 @@ namespace WindowsFormsApplication1
                                                     c55.Visible = true;
                                                     break;
                                             }
-                                            myjob5.list_block.Add(myjob5.list_block.Count + 1, block_temp);
+                                            myjob5.list_block[myjob5.list_block.Count + 1] = block_temp; // ch:P2 ConcurrentDictionary 的 Add 是显式接口实现，改索引器赋值（重复键覆盖而非抛异常）
                                         }
                                     }
                                 }
@@ -19055,7 +19127,7 @@ namespace WindowsFormsApplication1
                                                                 c55.Visible = true;
                                                                 break;
                                                         }
-                                                        myjob5.list_block.Add(myjob5.list_block.Count + 1, block_temp);
+                                                        myjob5.list_block[myjob5.list_block.Count + 1] = block_temp; // ch:P2 ConcurrentDictionary 的 Add 是显式接口实现，改索引器赋值（重复键覆盖而非抛异常）
                                                     }
                                                 }
                                             }
@@ -19097,7 +19169,7 @@ namespace WindowsFormsApplication1
                                                                             c55.Visible = true;
                                                                             break;
                                                                     }
-                                                                    myjob5.list_block.Add(myjob5.list_block.Count + 1, block_temp);
+                                                                    myjob5.list_block[myjob5.list_block.Count + 1] = block_temp; // ch:P2 ConcurrentDictionary 的 Add 是显式接口实现，改索引器赋值（重复键覆盖而非抛异常）
                                                                 }
                                                             }
                                                         }
@@ -19169,7 +19241,7 @@ namespace WindowsFormsApplication1
                                                     c65.Visible = true;
                                                     break;
                                             }
-                                            myjob6.list_block.Add(myjob6.list_block.Count + 1, block_temp);
+                                            myjob6.list_block[myjob6.list_block.Count + 1] = block_temp; // ch:P2 ConcurrentDictionary 的 Add 是显式接口实现，改索引器赋值（重复键覆盖而非抛异常）
                                         }
                                     }
                                 }
@@ -19211,7 +19283,7 @@ namespace WindowsFormsApplication1
                                                                 c65.Visible = true;
                                                                 break;
                                                         }
-                                                        myjob6.list_block.Add(myjob6.list_block.Count + 1, block_temp);
+                                                        myjob6.list_block[myjob6.list_block.Count + 1] = block_temp; // ch:P2 ConcurrentDictionary 的 Add 是显式接口实现，改索引器赋值（重复键覆盖而非抛异常）
                                                     }
                                                 }
                                             }
@@ -19253,7 +19325,7 @@ namespace WindowsFormsApplication1
                                                                             c65.Visible = true;
                                                                             break;
                                                                     }
-                                                                    myjob6.list_block.Add(myjob6.list_block.Count + 1, block_temp);
+                                                                    myjob6.list_block[myjob6.list_block.Count + 1] = block_temp; // ch:P2 ConcurrentDictionary 的 Add 是显式接口实现，改索引器赋值（重复键覆盖而非抛异常）
                                                                 }
                                                             }
                                                         }
@@ -19325,7 +19397,7 @@ namespace WindowsFormsApplication1
                                                     c75.Visible = true;
                                                     break;
                                             }
-                                            myjob7.list_block.Add(myjob7.list_block.Count + 1, block_temp);
+                                            myjob7.list_block[myjob7.list_block.Count + 1] = block_temp; // ch:P2 ConcurrentDictionary 的 Add 是显式接口实现，改索引器赋值（重复键覆盖而非抛异常）
                                         }
                                     }
                                 }
@@ -19367,7 +19439,7 @@ namespace WindowsFormsApplication1
                                                                 c75.Visible = true;
                                                                 break;
                                                         }
-                                                        myjob7.list_block.Add(myjob7.list_block.Count + 1, block_temp);
+                                                        myjob7.list_block[myjob7.list_block.Count + 1] = block_temp; // ch:P2 ConcurrentDictionary 的 Add 是显式接口实现，改索引器赋值（重复键覆盖而非抛异常）
                                                     }
                                                 }
                                             }
@@ -19409,7 +19481,7 @@ namespace WindowsFormsApplication1
                                                                             c75.Visible = true;
                                                                             break;
                                                                     }
-                                                                    myjob7.list_block.Add(myjob7.list_block.Count + 1, block_temp);
+                                                                    myjob7.list_block[myjob7.list_block.Count + 1] = block_temp; // ch:P2 ConcurrentDictionary 的 Add 是显式接口实现，改索引器赋值（重复键覆盖而非抛异常）
                                                                 }
                                                             }
                                                         }
@@ -19481,7 +19553,7 @@ namespace WindowsFormsApplication1
                                                     c85.Visible = true;
                                                     break;
                                             }
-                                            myjob8.list_block.Add(myjob8.list_block.Count + 1, block_temp);
+                                            myjob8.list_block[myjob8.list_block.Count + 1] = block_temp; // ch:P2 ConcurrentDictionary 的 Add 是显式接口实现，改索引器赋值（重复键覆盖而非抛异常）
                                         }
                                     }
                                 }
@@ -19523,7 +19595,7 @@ namespace WindowsFormsApplication1
                                                                 c85.Visible = true;
                                                                 break;
                                                         }
-                                                        myjob8.list_block.Add(myjob8.list_block.Count + 1, block_temp);
+                                                        myjob8.list_block[myjob8.list_block.Count + 1] = block_temp; // ch:P2 ConcurrentDictionary 的 Add 是显式接口实现，改索引器赋值（重复键覆盖而非抛异常）
                                                     }
                                                 }
                                             }
@@ -19565,7 +19637,7 @@ namespace WindowsFormsApplication1
                                                                             c85.Visible = true;
                                                                             break;
                                                                     }
-                                                                    myjob8.list_block.Add(myjob8.list_block.Count + 1, block_temp);
+                                                                    myjob8.list_block[myjob8.list_block.Count + 1] = block_temp; // ch:P2 ConcurrentDictionary 的 Add 是显式接口实现，改索引器赋值（重复键覆盖而非抛异常）
                                                                 }
                                                             }
                                                         }

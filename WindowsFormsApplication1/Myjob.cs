@@ -4,6 +4,7 @@ using Cognex.VisionPro.ImageFile;
 using Cognex.VisionPro.QuickBuild;
 using Cognex.VisionPro.ToolBlock;
 using System;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Data;
 using System.Diagnostics;
@@ -98,7 +99,9 @@ namespace WindowsFormsApplication1
         // ch:P0 工具块并发保护锁：轮询/通讯事件线程写 block.Inputs 与检测线程 block.Run() 必须互斥，
         //   VisionPro CogToolBlock 非线程安全，并发可致崩溃或读到半帧。
         public readonly object blockLock = new object();
-        public Dictionary<int, CogToolBlock> list_block=new Dictionary<int, CogToolBlock>();
+        // ch:P2 并发安全：载入线程 Clear/Add 与 UI 端 list_block[n] 读并发，普通 Dictionary 会内部损坏/抛异常。
+        //   改 ConcurrentDictionary（Clear/Count/索引器/枚举均线程安全）；.Add(k,v) 是显式接口实现，写入点统一改索引器赋值。
+        public ConcurrentDictionary<int, CogToolBlock> list_block = new ConcurrentDictionary<int, CogToolBlock>();
         public int outputok
         {
             get { return changel1; }

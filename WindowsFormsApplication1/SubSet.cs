@@ -239,7 +239,7 @@ namespace WindowsFormsApplication1
                         block_11 = tool as CogToolBlock;
                     foreach (ICogTool tool1 in block_11.Tools)
                     {
-                        tools.Add("工具块" + i + "-" + tool1.Name, tool);
+                        tools.Add("工具块" + i + "-" + tool1.Name, tool1); // ch:P2 修正：原误存外层工具块 tool，导致下拉选中后拿到的是块而不是具体工具
                         // toolName.Add("斑点工具0-0", tool1.Name.ToString());
                         comboBox6.Items.Add(tools.Keys.Last());
                     }
@@ -794,7 +794,7 @@ namespace WindowsFormsApplication1
                         block_11 = tool as CogToolBlock;
                     foreach (ICogTool tool1 in block_11.Tools)
                     {
-                        tools.Add("工具块" + i + "-" + tool1.Name, tool);
+                        tools.Add("工具块" + i + "-" + tool1.Name, tool1); // ch:P2 修正：原误存外层工具块 tool，导致下拉选中后拿到的是块而不是具体工具
                         // toolName.Add("斑点工具0-0", tool1.Name.ToString());
                         comboBox7.Items.Add(tools.Keys.Last());
                     }
@@ -824,7 +824,7 @@ namespace WindowsFormsApplication1
                         block_11 = tool as CogToolBlock;
                     foreach (ICogTool tool1 in block_11.Tools)
                     {
-                        tools.Add("工具块" + i + "-" + tool1.Name, tool);
+                        tools.Add("工具块" + i + "-" + tool1.Name, tool1); // ch:P2 修正：原误存外层工具块 tool，导致下拉选中后拿到的是块而不是具体工具
                         // toolName.Add("斑点工具0-0", tool1.Name.ToString());
                         comboBox8.Items.Add(tools.Keys.Last());
                     }
@@ -854,7 +854,7 @@ namespace WindowsFormsApplication1
                         block_11 = tool as CogToolBlock;
                     foreach (ICogTool tool1 in block_11.Tools)
                     {
-                        tools.Add("工具块" + i + "-" + tool1.Name, tool);
+                        tools.Add("工具块" + i + "-" + tool1.Name, tool1); // ch:P2 修正：原误存外层工具块 tool，导致下拉选中后拿到的是块而不是具体工具
                         // toolName.Add("斑点工具0-0", tool1.Name.ToString());
                         comboBox15.Items.Add(tools.Keys.Last());
                     }
@@ -884,7 +884,7 @@ namespace WindowsFormsApplication1
                         block_11 = tool as CogToolBlock;
                     foreach (ICogTool tool1 in block_11.Tools)
                     {
-                        tools.Add("工具块" + i + "-" + tool1.Name, tool);
+                        tools.Add("工具块" + i + "-" + tool1.Name, tool1); // ch:P2 修正：原误存外层工具块 tool，导致下拉选中后拿到的是块而不是具体工具
                         // toolName.Add("斑点工具0-0", tool1.Name.ToString());
                         comboBox13.Items.Add(tools.Keys.Last());
                     }
@@ -914,7 +914,7 @@ namespace WindowsFormsApplication1
                         block_11 = tool as CogToolBlock;
                     foreach (ICogTool tool1 in block_11.Tools)
                     {
-                        tools.Add("工具块" + i + "-" + tool1.Name, tool);
+                        tools.Add("工具块" + i + "-" + tool1.Name, tool1); // ch:P2 修正：原误存外层工具块 tool，导致下拉选中后拿到的是块而不是具体工具
                         // toolName.Add("斑点工具0-0", tool1.Name.ToString());
                         comboBox11.Items.Add(tools.Keys.Last());
                     }
@@ -944,7 +944,7 @@ namespace WindowsFormsApplication1
                         block_11 = tool as CogToolBlock;
                     foreach (ICogTool tool1 in block_11.Tools)
                     {
-                        tools.Add("工具块" + i + "-" + tool1.Name, tool);
+                        tools.Add("工具块" + i + "-" + tool1.Name, tool1); // ch:P2 修正：原误存外层工具块 tool，导致下拉选中后拿到的是块而不是具体工具
                         // toolName.Add("斑点工具0-0", tool1.Name.ToString());
                         comboBox9.Items.Add(tools.Keys.Last());
                     }

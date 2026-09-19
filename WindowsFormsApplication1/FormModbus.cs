@@ -60,6 +60,51 @@ namespace WindowsFormsApplication1
         private readonly object xieWuLock = new object();
         private readonly object modbusIoLock = new object(); // ch:轮询读与极速写互斥，避免双连接并发把寄存器冲成 0
         private int _tcpDataFormatIndex = 0; // ch:P2-⑤ 缓存 DataFormat 选择，避免后台重连线程跨线程读 comboBox1.SelectedIndex
+        // ch:P2 pending TTL：写失败保留 pending 后若长期写不出去（PLC 断线/掉线），恢复瞬间会把旧结果发给 PLC（错误工位数据）。
+        //   记录"首次失败时刻 + 连续失败次数"，连续 3 次或超过 10 秒即丢弃并告警，避免无限重试。
+        private const int PendingMaxFailTimes = 3;
+        private const int PendingMaxAgeMs = 10000;
+        private readonly Dictionary<int, long> _pendingFirstFailMs = new Dictionary<int, long>();
+        private readonly Dictionary<int, int> _pendingFailCount = new Dictionary<int, int>();
+        private readonly object _pendingTtlLock = new object();
+
+        // ch:P2 写回失败登记：返回 true 表示已超限，调用方应丢弃 pending（不再重试）
+        private bool NotePendingWriteFailed(int camIndex)
+        {
+            lock (_pendingTtlLock)
+            {
+                long now = Environment.TickCount;
+                long first;
+                if (!_pendingFirstFailMs.TryGetValue(camIndex, out first))
+                {
+                    first = now;
+                    _pendingFirstFailMs[camIndex] = now;
+                    _pendingFailCount[camIndex] = 0;
+                }
+                int n;
+                _pendingFailCount.TryGetValue(camIndex, out n);
+                n++;
+                _pendingFailCount[camIndex] = n;
+                if (n >= PendingMaxFailTimes || unchecked(now - first) > PendingMaxAgeMs)
+                {
+                    _pendingFirstFailMs.Remove(camIndex);
+                    _pendingFailCount.Remove(camIndex);
+                    MsgErroeLog.WriteLog("写回 pending 超限已丢弃(防断线恢复后补发旧结果) cam=" + camIndex + " 连续失败=" + n);
+                    return true;
+                }
+                return false;
+            }
+        }
+
+        // ch:P2 写回成功：清除失败计数
+        private void NotePendingWriteOk(int camIndex)
+        {
+            lock (_pendingTtlLock)
+            {
+                _pendingFirstFailMs.Remove(camIndex);
+                _pendingFailCount.Remove(camIndex);
+            }
+        }
         private System.Collections.Generic.HashSet<int> _xieWuStringWarned = new System.Collections.Generic.HashSet<int>(); // ch:P2-③ 极速写 string 格式仅提示一次，避免每帧刷屏（访问均处于 modbusIoLock 内）
         private volatile bool xieWuClosing = false;
         private string xieWuCachedIp = "";
@@ -1455,13 +1500,16 @@ namespace WindowsFormsApplication1
                 {
                     if (pat.Value[5] != "无")
                     {
+                        try // ch:P2 每相机独立 try：单个相机的坏值/越界不再中断整表写回（原实现一个异常饿死其余相机）
+                        {
                         fins_temp = ""; // ch:P2-② 每轮重置写回渲染结果，避免上一相机失败串入本相机判定
                         bool anyWriteFailed = false; // ch:P2-④ 聚合本相机所有写回的真实结果（多寄存器循环写逐次与）
                         foreach (var par in fins_dic)
                         {
                             if (pat.Value[5] == par.Value[0])
                             {
-                                int addr_start = int.Parse(par.Value[1]);
+                                int addr_start;
+                                if (!int.TryParse(par.Value[1], out addr_start)) { anyWriteFailed = true; MsgErroeLog.WriteLog("写回地址解析失败(保留pending):" + par.Value[1]); break; } // ch:P2 裸 Parse 改 TryParse
                                 string fmt = par.Value[4];
 
                                 if (fmt == "int")
@@ -1540,9 +1588,17 @@ namespace WindowsFormsApplication1
                         }
                         // ch:P2-④ 以逐次写入的真实 bool 结果聚合判定（替代文本判定），避免多寄存器循环写"末次成功掩盖前次失败"
                         if (!anyWriteFailed)
+                        {
                             pat.Value[5] = "无";
+                            NotePendingWriteOk(pat.Key); // ch:P2 写成功清除失败计数
+                        }
                         else
+                        {
                             MsgErroeLog.WriteLog("普通写回失败(保留 pending) cam=" + pat.Key + " ch=" + pat.Value[5] + " val=[" + pat.Value[4] + "] msg=" + fins_temp);
+                            if (NotePendingWriteFailed(pat.Key)) pat.Value[5] = "无"; // ch:P2 超限/超时丢弃，防断线恢复后补发旧结果
+                        }
+                        }
+                        catch (Exception exPer) { MsgErroeLog.WriteLog("写回单相机异常 cam=" + pat.Key + ":" + exPer.Message); } // ch:P2 单相机异常只记日志，继续下一相机
                     }
                 }
                 }
@@ -1852,6 +1908,8 @@ namespace WindowsFormsApplication1
             if (parts.Length == 0) return;
 
             OperateResult wr = null;
+            string consumedCh = pat[5]; // ch:P2 记录本次消费的 [5](通道)，清除前比对
+            string consumedVal = pat[4]; // ch:P2 记录本次消费的 [4](值)，清除前比对
             lock (modbusIoLock)
             {
                 if (busTcpClient == null) { MsgErroeLog.WriteLog("modbustcp 极速写失败: 客户端为空 cam=" + camIndex); return; } // ch:P1-⑧ 不清除 pending，下次触发重试
@@ -1901,14 +1959,27 @@ namespace WindowsFormsApplication1
                         _xieWuStringWarned.Add(camIndex);
                         MsgErroeLog.WriteLog("modbustcp 极速写不支持的格式:" + fmt + " cam=" + camIndex + " (仅提示一次，pending 保留)");
                     }
+                    if (NotePendingWriteFailed(camIndex)) pat[5] = "无"; // ch:P2 该帧永远写不出去，超限后丢弃，避免永久重试
                     return;
                 }
+                // ch:P2 清除 pending 必须在锁内、且与"本次消费的 [4]/[5]"比对：
+                //   否则与并发 WriteCameraResult/SetSwitchPending 新登记的 pending 竞争，会把新帧结果清掉 → 新结果永久丢失
+                if (wr != null && wr.IsSuccess)
+                {
+                    if (pat[5] == consumedCh && pat[4] == consumedVal)
+                    {
+                        pat[5] = "无"; // ch:P1-⑧ 仅在写成功后才清除 pending
+                        NotePendingWriteOk(camIndex); // ch:P2 写成功清除失败计数
+                    }
+                    else
+                        MsgErroeLog.WriteLog("modbustcp 极速写完成但 pending 已被新帧覆盖，保留新结果 cam=" + camIndex);
+                }
+                else if (wr != null)
+                {
+                    MsgErroeLog.WriteLog("modbustcp 极速写失败 cam=" + camIndex + " addr=" + addr_start + " fmt=" + fmt + " err=" + wr.Message + " value=[" + value + "]");
+                    if (NotePendingWriteFailed(camIndex)) pat[5] = "无"; // ch:P2 超限/超时丢弃，防断线恢复后补发旧结果
+                }
             }
-            bool ok = wr != null && wr.IsSuccess;
-            if (ok)
-                pat[5] = "无"; // ch:P1-⑧ 仅在写成功后才清除 pending
-            else if (wr != null)
-                MsgErroeLog.WriteLog("modbustcp 极速写失败 cam=" + camIndex + " addr=" + addr_start + " fmt=" + fmt + " err=" + wr.Message + " value=[" + value + "]");
         }
 
         public void xie_wu(string value)
@@ -1920,8 +1991,12 @@ namespace WindowsFormsApplication1
                 {
                     if (pat.Value[5] != "无")
                     {
+                        try // ch:P2 每相机独立 try：单个相机异常不再中断其余相机的极速写
+                        {
                         string writeVal = string.IsNullOrEmpty(pat.Value[4]) || pat.Value[4] == "无" ? value : pat.Value[4];
                         XieWuWriteOne(pat.Key, writeVal);
+                        }
+                        catch (Exception exPer) { MsgErroeLog.WriteLog("极速写单相机异常 cam=" + pat.Key + ":" + exPer.Message); }
                     }
                 }
             }
@@ -1989,16 +2064,26 @@ namespace WindowsFormsApplication1
             }
         }
 
+        // ch:P2 相机9 周期写回：① 与 xie/XieWuWriteOne 消费共用 modbusIoLock，保证 [4](值)/[5](通道) 原子配对；
+        //   ② 通道取"反馈通道"[3]（原实现误取触发通道[0] → 每秒把返回值写进触发寄存器，且破坏配对可写错地址段）
+        public void SetCamera9PeriodicPending()
+        {
+            lock (modbusIoLock)
+            {
+                if (camera_dic.ContainsKey(9) && camera_dic[9].Length > 5 && camera_dic[9][2] == "true")
+                {
+                    camera_dic[9][4] = camera_dic[9][1];
+                    camera_dic[9][5] = camera_dic[9][3];
+                    if (fins_xie.Length > 8) fins_xie[8] = true;
+                }
+            }
+        }
+
         private void timer2_Tick(object sender, EventArgs e)
         {
             try
             {
-                if (camera_dic.ContainsKey(9) && camera_dic[9][2] == "true")
-                {
-                    camera_dic[9][4] = camera_dic[9][1];
-                    camera_dic[9][5] = camera_dic[9][0];
-                    fins_xie[8] = true;
-                }
+                SetCamera9PeriodicPending();
             }
             catch (Exception ex) { MsgErroeLog.WriteLog("异常:" + ex.Message); }
         }
