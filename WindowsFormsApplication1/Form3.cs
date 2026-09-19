@@ -593,6 +593,7 @@ namespace WindowsFormsApplication1
                 IPAddress ip = IPAddress.Parse(textBox6.Text.Trim());
                 IPEndPoint point = new IPEndPoint(ip, Convert.ToInt32(textBox5.Text));
                 sock.Connect(point);
+                EnableTcpKeepAlive(sock); // ch:P2 半开检测：30s 探活，PLC 掉电可及时触发重连
             }
             catch
             {
@@ -617,6 +618,50 @@ namespace WindowsFormsApplication1
         //   该告警只提示一次，便于现场判断是否需要按分隔符组帧（需先确认现场报文分隔约定）。
         private static readonly System.Text.Encoding _protoEncoding = System.Text.Encoding.GetEncoding("GB2312");
         private static bool _decodeWarned = false;
+
+        // ch:P2 半开检测：开启 TCP KeepAlive 并把探活压到 30s（系统默认 2 小时）。
+        //   现场"PLC 掉电/网线拔掉"时对端不发明文 RST，Receive 会一直阻塞且不报错（半开），
+        //   上位机要等 2 小时才走重连；30s 探活后内核判定对端不可达 → Receive 抛错 → 触发重连。
+        //   对健康连接零影响（探活包由对端内核应答）。
+        private static void EnableTcpKeepAlive(Socket sock)
+        {
+            if (sock == null) return;
+            try
+            {
+                sock.SetSocketOption(SocketOptionLevel.Socket, SocketOptionName.KeepAlive, true);
+                // SIO_KEEPALIVE_VALS(0x98000004)：开关=1、空闲 30000ms、间隔 5000ms
+                byte[] inVals = new byte[12];
+                BitConverter.GetBytes(1u).CopyTo(inVals, 0);
+                BitConverter.GetBytes(30000u).CopyTo(inVals, 4);
+                BitConverter.GetBytes(5000u).CopyTo(inVals, 8);
+                sock.IOControl(unchecked((int)0x98000004), inVals, null);
+            }
+            catch (Exception ex) { new ErrorLog().WriteLog(ex.ToString()); }
+        }
+
+        // ch:P2 粘包/拆包可观测性：现场协议是"8 条精确匹配的触发串"，无分隔符/无长度前缀，
+        //   因此报文被 TCP 合并（如 "A1B1"）或拆开时，qiehuan 与后续 DataChange 都匹配不上 → 静默无动作，
+        //   这是最难排查的失败模式。这里只在"段内包含某条已配置触发串、但整段不等于它"时记一条限流日志
+        //   （正常报文不触发），用于现场判断是否需要与对端约定组帧。
+        private int _lastFrameAnomalyLogMs = 0;
+        private void NoteProtoFrameAnomaly(string s)
+        {
+            if (string.IsNullOrEmpty(s)) return;
+            string[] cfg = new string[] { textBox18.Text, textBox19.Text, textBox21.Text, textBox20.Text,
+                                          textBox23.Text, textBox22.Text, textBox25.Text, textBox24.Text };
+            string hit = null;
+            foreach (string t in cfg)
+            {
+                if (!string.IsNullOrEmpty(t) && s.Length > t.Length && s.Contains(t)) { hit = t; break; }
+            }
+            if (hit == null) return;
+            int now = Environment.TickCount;
+            if (unchecked(now - _lastFrameAnomalyLogMs) < 5000) return;
+            _lastFrameAnomalyLogMs = now;
+            MsgErroeLog.WriteLog("无协议报文疑似粘包/拆包：整段含已配置触发串[" + hit + "]但不等于它，整段=["
+                + s.Replace("\r", "\\r").Replace("\n", "\\n").Replace("\0", "\\0") + "] 长度=" + s.Length
+                + "；若频繁出现请与对端确认是否分段/合并发送或需要约定组帧");
+        }
         private string DecodeProtoBytes(byte[] buf, int len)
         {
             string s = _protoEncoding.GetString(buf, 0, len);
@@ -651,6 +696,7 @@ namespace WindowsFormsApplication1
                         {
                             if (qiehuan(sss) == 0)
                             {
+                                NoteProtoFrameAnomaly(sss); // ch:P2 未匹配时诊断是否被 TCP 粘包/拆包（限流，正常报文不记）
                                 SelectionChangedEventArgs E = new SelectionChangedEventArgs(sss);
                                 getData(this, E);
                             }
@@ -790,6 +836,7 @@ namespace WindowsFormsApplication1
                     if (socketWatch == null)
                         break; // ch:监听套接字为空（已被关闭/释放）时结束监听线程，避免空引用忙循环
                     socketServer = socketWatch.Accept();
+                    EnableTcpKeepAlive(socketServer); // ch:P2 半开检测：接入的连接同样 30s 探活
                     string remoteTemp = socketServer.RemoteEndPoint.ToString();
                     // ch:P1-⑥ 同客户端重连：先关旧连接，再用索引器原子替换（ConcurrentDictionary 索引器 = 新增或覆盖，无重复键异常）
                     Socket old = null;
@@ -855,6 +902,7 @@ namespace WindowsFormsApplication1
                         {
                             if (qiehuan(str) == 0)
                             {
+                                NoteProtoFrameAnomaly(str); // ch:P2 未匹配时诊断是否被 TCP 粘包/拆包（限流，正常报文不记）
                                 SelectionChangedEventArgs E = new SelectionChangedEventArgs(str);
                                 getData(this, E);
                             }
