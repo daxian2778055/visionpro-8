@@ -115,6 +115,7 @@ namespace WindowsFormsApplication1
         private volatile bool _rtuAutoReconnect = false;
         // 结果登记与 xie_wu 消费必须串行；单一 RTU 写入模式下，避免同一相机下一帧覆盖上一帧 pending。
         private readonly object _rtuIoLock = new object();
+        private int _rtuDataFormatIndex = 0; // ch:P2-⑤ 缓存 DataFormat 选择，避免后台重连线程跨线程读 comboBox2.SelectedIndex
 
 
         private void FormSiemens_Load( object sender, EventArgs e )
@@ -125,6 +126,7 @@ namespace WindowsFormsApplication1
 
 
             comboBox2.SelectedIndex = 0;
+            _rtuDataFormatIndex = 0; // ch:P2-⑤ 缓存初始 DataFormat 索引
             comboBox2.SelectedIndexChanged += ComboBox2_SelectedIndexChanged;
             checkBox3.CheckedChanged += CheckBox3_CheckedChanged;
 
@@ -427,8 +429,23 @@ namespace WindowsFormsApplication1
                     default: break;
                 }
             }
+            _rtuDataFormatIndex = comboBox2.SelectedIndex; // ch:P2-⑤ UI 线程缓存，供后台重连线程使用
         }
 
+
+        // ch:P1-⑦ 自动重连创建新 ModbusRtu 后，新连接 DataFormat 会退回 HSL 默认(ABCD)，
+        //   必须按当前 comboBox2 选择重新设回，否则重连后 float/long 静默写错。
+        private void ApplyRtuDataFormat( ModbusRtu client )
+        {
+            if ( client == null ) return;
+            switch ( _rtuDataFormatIndex ) // ch:P2-⑤ 用 UI 线程缓存的索引，避免后台线程跨线程读 comboBox2
+            {
+                case 0: client.DataFormat = HslCommunication.Core.DataFormat.ABCD; break;
+                case 1: client.DataFormat = HslCommunication.Core.DataFormat.BADC; break;
+                case 2: client.DataFormat = HslCommunication.Core.DataFormat.CDAB; break;
+                case 3: client.DataFormat = HslCommunication.Core.DataFormat.DCBA; break;
+            }
+        }
 
         private void FormSiemens_FormClosing( object sender, FormClosingEventArgs e )
         {
@@ -546,10 +563,11 @@ namespace WindowsFormsApplication1
                         sp.Parity = _rtuParity;
                     } );
                     nc.Open( );
+                    ApplyRtuDataFormat( nc ); // ch:P1-⑦ 新连接补设字节序，避免重连后 float/long 写错
                     busRtuClient = nc; // 原子替换引用，轮询线程下一轮即使用新连接
                     userControlCurve1.ReadWriteNet = nc;
                     MsgErroeLog.WriteLog( "RTU PLC 自动重连成功" );
-                    try { old?.Close( ); } catch { }
+                    try { lock ( _rtuIoLock ) { old?.Close( ); } } catch { } // ch:P2-⑤ 关闭旧连接前先与写线程(xie_wu)串行，避免写线程正用旧实例时被关
                 }
                 catch ( Exception ex )
                 {
@@ -2245,6 +2263,7 @@ namespace WindowsFormsApplication1
                                                             {
                                                                 SelectionChangedEventArgs E = new SelectionChangedEventArgs(shuju_temp, pap.Key.ToString(), fins_zuhe[camera_dic[pap.Key][0]]);
                                                                 getData(this, E);
+                                                                camera_dic[pap.Key][1] = shuju_temp; // ch:P2-⑥ 记录已处理触发值，防止 PLC 触发字保持期间重复触发采图
                                                             }
                                                         }
 
@@ -2285,6 +2304,8 @@ namespace WindowsFormsApplication1
                 {
                     if (pat.Value[5] != "无")
                     {
+                        fins_temp = ""; // ch:P2-② 每轮重置写回渲染结果，避免上一相机失败串入本相机判定
+                        bool anyWriteFailed = false; // ch:P2-④ 聚合本相机所有写回的真实结果（多寄存器循环写逐次与）
                         foreach (var par in fins_dic)
                         {
                             if (pat.Value[5] == par.Value[0])
@@ -2299,7 +2320,7 @@ namespace WindowsFormsApplication1
                                     short[] vals = new short[parts.Length];
                                     for (int i = 0; i < parts.Length; i++)
                                         vals[i] = (short)Math.Round(double.Parse(parts[i].Trim()));
-                                    DemoUtils.WriteResultRender1(() => busRtuClient.Write(addr_start.ToString(), vals), addr_start.ToString(), out fins_temp);
+                                    if (!DemoUtils.WriteResultRenderOk(() => busRtuClient.Write(addr_start.ToString(), vals), addr_start.ToString(), out fins_temp)) anyWriteFailed = true; // ch:P2-④
                                     for (int j = 0; j < vals.Length; j++)
                                     {
                                         int xuanzhong_temp = addr_start - int.Parse(address_qishi.ToString()) + j;
@@ -2313,7 +2334,7 @@ namespace WindowsFormsApplication1
                                     int[] vals = new int[parts.Length];
                                     for (int i = 0; i < parts.Length; i++)
                                         vals[i] = (int)Math.Round(double.Parse(parts[i].Trim()));
-                                    DemoUtils.WriteResultRender1(() => busRtuClient.Write(addr_start.ToString(), vals), addr_start.ToString(), out fins_temp);
+                                    if (!DemoUtils.WriteResultRenderOk(() => busRtuClient.Write(addr_start.ToString(), vals), addr_start.ToString(), out fins_temp)) anyWriteFailed = true; // ch:P2-④
                                     for (int j = 0; j < vals.Length * 2; j++)
                                     {
                                         int xuanzhong_temp = addr_start - int.Parse(address_qishi.ToString()) + j;
@@ -2327,7 +2348,7 @@ namespace WindowsFormsApplication1
                                     float[] vals = new float[parts.Length];
                                     for (int i = 0; i < parts.Length; i++)
                                         vals[i] = float.Parse(parts[i].Trim());
-                                    DemoUtils.WriteResultRender1(() => busRtuClient.Write(addr_start.ToString(), vals), addr_start.ToString(), out fins_temp);
+                                    if (!DemoUtils.WriteResultRenderOk(() => busRtuClient.Write(addr_start.ToString(), vals), addr_start.ToString(), out fins_temp)) anyWriteFailed = true; // ch:P2-④
                                     for (int j = 0; j < vals.Length * 2; j++)
                                     {
                                         int xuanzhong_temp = addr_start - int.Parse(address_qishi.ToString()) + j;
@@ -2341,7 +2362,7 @@ namespace WindowsFormsApplication1
                                     for (int j = 0; j < parts.Length; j++)
                                     {
                                         int xuanzhong_temp = addr_start - int.Parse(address_qishi.ToString()) + j;
-                                        DemoUtils.WriteResultRender1(() => busRtuClient.Write((addr_start + j).ToString(), parts[j].Trim()), (addr_start + j).ToString(), out fins_temp);
+                                        if (!DemoUtils.WriteResultRenderOk(() => busRtuClient.Write((addr_start + j).ToString(), parts[j].Trim()), (addr_start + j).ToString(), out fins_temp)) anyWriteFailed = true; // ch:P2-④ 逐寄存器聚合，避免末次成功掩盖前次失败
                                         if (gridUi)
                                             SetModbusGridValue(fins_data[xuanzhong_temp][0], fins_data[xuanzhong_temp][1], fins_temp);
                                     }
@@ -2349,7 +2370,11 @@ namespace WindowsFormsApplication1
                                 break;
                             }
                         }
-                        pat.Value[5] = "无";
+                        // ch:P2-④ 以逐次写入的真实 bool 结果聚合判定（替代文本判定），避免多寄存器循环写"末次成功掩盖前次失败"
+                        if (!anyWriteFailed)
+                            pat.Value[5] = "无";
+                        else
+                            MsgErroeLog.WriteLog("普通写回失败(保留 pending) cam=" + pat.Key + " ch=" + pat.Value[5] + " val=[" + pat.Value[4] + "] msg=" + fins_temp);
                     }
                 }
             }
@@ -2372,6 +2397,19 @@ namespace WindowsFormsApplication1
                 xie_wu(value);
             }
         }
+        // ch:P0 方案切换写回暂存：与 xie_wu 消费共用 _rtuIoLock，保证 [4](值)/[5](通道) 原子配对，消除跨线程撕裂
+        public void SetSwitchPending(int camIndex)
+        {
+            lock (_rtuIoLock)
+            {
+                if (camera_dic.ContainsKey(camIndex) && !camera_dic[camIndex][1].Contains("无"))
+                {
+                    camera_dic[camIndex][4] = camera_dic[camIndex][1];
+                    camera_dic[camIndex][5] = camera_dic[camIndex][0];
+                    if (camIndex >= 1 && camIndex <= fins_xie.Length) fins_xie[camIndex - 1] = true;
+                }
+            }
+        }
 
         public void xie_wu(string value)
         {
@@ -2386,12 +2424,15 @@ namespace WindowsFormsApplication1
                     {
                         if (pat.Value[5] != "无")
                         {
+                            bool patWrote = false; // ch:P1-⑧ 是否发起过写
+                            bool patWriteOk = true; // ch:P1-⑧ 写是否全部成功
+                            string fmt = ""; // ch:P1-⑧ 供失败日志使用
                             foreach (var par in fins_dic)
                             {
                                 if (pat.Value[5] == par.Value[0])
                                 {
                                     int addr_start = int.Parse(par.Value[1]);
-                                    string fmt = par.Value[4];
+                                    fmt = par.Value[4];
 
                                 if (fmt == "int")
                                 {
@@ -2401,6 +2442,7 @@ namespace WindowsFormsApplication1
                                         vals[i] = (short)Math.Round(double.Parse(parts[i].Trim()));
                                     OperateResult wr = busRtuClient.Write(addr_start.ToString(), vals); // ch:R7 捕获写结果
                                     bool writeOk = wr != null && wr.IsSuccess; // ch:R7 仅成功才显示"已发送"，失败显示"发送失败"
+                                    patWrote = true; if (!writeOk) patWriteOk = false; // ch:P1-⑧ 跟踪写结果
                                     try
                                     {
                                         if (this.IsHandleCreated)
@@ -2428,6 +2470,7 @@ namespace WindowsFormsApplication1
                                         vals[i] = (int)Math.Round(double.Parse(parts[i].Trim()));
                                     OperateResult wr = busRtuClient.Write(addr_start.ToString(), vals); // ch:R7 捕获写结果
                                     bool writeOk = wr != null && wr.IsSuccess; // ch:R7 仅成功才显示"已发送"，失败显示"发送失败"
+                                    patWrote = true; if (!writeOk) patWriteOk = false; // ch:P1-⑧ 跟踪写结果
                                     try
                                     {
                                         if (this.IsHandleCreated)
@@ -2455,6 +2498,7 @@ namespace WindowsFormsApplication1
                                         vals[i] = float.Parse(parts[i].Trim());
                                     OperateResult wr = busRtuClient.Write(addr_start.ToString(), vals); // ch:R7 捕获写结果
                                     bool writeOk = wr != null && wr.IsSuccess; // ch:R7 仅成功才显示"已发送"，失败显示"发送失败"
+                                    patWrote = true; if (!writeOk) patWriteOk = false; // ch:P1-⑧ 跟踪写结果
                                     try
                                     {
                                         if (this.IsHandleCreated)
@@ -2478,6 +2522,7 @@ namespace WindowsFormsApplication1
                                 {
                                     string[] parts = pat.Value[4].Split(new char[] { ',' }, StringSplitOptions.RemoveEmptyEntries);
                                     bool writeOk = true; // ch:R7 聚合逐寄存器写结果，任一失败即整体失败
+                                    patWrote = true;
                                     for (int j = 0; j < parts.Length; j++)
                                     {
                                         OperateResult wr = busRtuClient.Write((addr_start + j).ToString(), parts[j].Trim());
@@ -2509,7 +2554,10 @@ namespace WindowsFormsApplication1
                                 break;
                             }
                         }
-                        pat.Value[5] = "无";
+                        if (patWrote && patWriteOk)
+                            pat.Value[5] = "无"; // ch:P1-⑧ 仅写成功才清 pending，避免写失败永久丢失结果
+                        else if (!patWriteOk)
+                            MsgErroeLog.WriteLog("modbusrtu 极速写失败 cam=" + pat.Key + " fmt=" + fmt + " value=[" + pat.Value[4] + "]");
                     }
                 }
             }
@@ -2577,6 +2625,7 @@ namespace WindowsFormsApplication1
 
         private void comboBox2_SelectedIndexChanged_1(object sender, EventArgs e)
         {
+            _rtuDataFormatIndex = comboBox2.SelectedIndex; // ch:P2-⑤ UI 线程缓存，供后台重连线程使用
             if (chushihua)
             {
                 wdini.WriteString("modbusrtu", "abcd", comboBox2.Text);

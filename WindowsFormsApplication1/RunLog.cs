@@ -191,9 +191,11 @@ namespace WindowsFormsApplication1
         }
 
         // ch:R3 全量重写 CSV（统一 \r\n 行尾），替代原 File.OpenWrite + BaseStream.Seek 的字节级就地修改
+        // ch:P1 改为「先写 .tmp 再原子替换」：直接截断目标文件在写入中途掉电/异常会导致整月产量归零。
         private void WriteAllLinesSafe(string path, List<string> lines)
         {
-            using (StreamWriter sw = new StreamWriter(path, false, Encoding.Default))
+            string tmp = path + ".tmp";
+            using (StreamWriter sw = new StreamWriter(tmp, false, Encoding.Default))
             {
                 for (int i = 0; i < lines.Count; i++)
                 {
@@ -201,6 +203,20 @@ namespace WindowsFormsApplication1
                         sw.Write("\r\n");
                     sw.Write(lines[i]);
                 }
+                sw.Flush();
+            }
+            try
+            {
+                if (File.Exists(path))
+                    File.Replace(tmp, path, path + ".bak"); // 原子替换，旧文件留作 .bak
+                else
+                    File.Move(tmp, path);
+            }
+            catch (Exception ex)
+            {
+                Errorwrite.WriteLog("CSV 原子替换失败，回退为直接覆盖:" + ex.Message);
+                try { File.Copy(tmp, path, true); } catch (Exception ex2) { Errorwrite.WriteLog("CSV 回退写入失败:" + ex2.Message); }
+                try { if (File.Exists(tmp)) File.Delete(tmp); } catch (Exception ex3) { Errorwrite.WriteLog("CSV 临时文件清理失败:" + ex3.Message); }
             }
         }
         public void WriteDate1(string jilu, string path22, int okss)

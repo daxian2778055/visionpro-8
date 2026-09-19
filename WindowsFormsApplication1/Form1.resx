@@ -882,6 +882,12 @@
   <data name="modbusrtuToolStripMenuItem.Text" xml:space="preserve">
     <value>modbusrtu</value>
   </data>
+  <data name="版本ToolStripMenuItem.Size" type="System.Drawing.Size, System.Drawing">
+    <value>172, 22</value>
+  </data>
+  <data name="版本ToolStripMenuItem.Text" xml:space="preserve">
+    <value>版本</value>
+  </data>
   <data name="查找ToolStripMenuItem.ImageAlign" type="System.Drawing.ContentAlignment, System.Drawing">
     <value>MiddleLeft</value>
   </data>
@@ -20319,6 +20325,12 @@
     <value>modbusrtuToolStripMenuItem</value>
   </data>
   <data name="&gt;&gt;modbusrtuToolStripMenuItem.Type" xml:space="preserve">
+    <value>System.Windows.Forms.ToolStripMenuItem, System.Windows.Forms, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value>
+  </data>
+  <data name="&gt;&gt;版本ToolStripMenuItem.Name" xml:space="preserve">
+    <value>版本ToolStripMenuItem</value>
+  </data>
+  <data name="&gt;&gt;版本ToolStripMenuItem.Type" xml:space="preserve">
     <value>System.Windows.Forms.ToolStripMenuItem, System.Windows.Forms, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value>
   </data>
   <data name="&gt;&gt;timer6.Name" xml:space="preserve">

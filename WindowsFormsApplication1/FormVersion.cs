@@ -1,0 +1,70 @@
+using System;
+using System.Windows.Forms;
+
+namespace WindowsFormsApplication1
+{
+    /// <summary>
+    /// ch:P2 版本信息窗口：显示当前软件版本、发布日期与版本时间线。
+    /// 版本号 = 推送仓库时打标签的版本（语义化 主.次.修订 + 发布日期），非随机字符串。
+    /// </summary>
+    public partial class FormVersion : Form
+    {
+        // 当前版本（与推送仓库的 git tag 一一对应）：语义化版本 + 发布日期
+        public const string AppVersion = "1.3.0";
+        public const string AppVersionDate = "2026-09-19";
+        public const string AppRepoName = "正泰 VP八相机连续海康（M4 - 加密）";
+
+        // 版本时间线：与仓库 git tag 一一对应（新版本在最前）
+        private static readonly string[] VersionTimeline = new string[]
+        {
+            "v1.3.0  2026-09-19  并发与数据一致性修复：blockLock 覆盖 Outputs 读与结果快照、CSV 串帧改锁内快照、普通/极速写回仅成功才清 pending（按 bool 逐次聚合）、RunStatus 空值保护、曲线线程代际校验、RTU 重连加锁与字节序缓存、触发字边沿记忆、Form3 目标字典线程安全、极速写 string 加载期校验；新增「通讯 → 版本」窗口。",
+            "v1.2.0  2026-09-14  新增 GitHub Actions CI（单元测试自动构建）。",
+            "v1.1.0  2026-09-14  R4 补齐 Omron pending 单事务提交 + 新增单元测试 19 项 + 行尾归一。",
+            "v1.0.0  2026-09-13  仓库首个提交：8 相机 Cognex VisionPro 视觉检测（含 P1/P2 审查修复）。09-03~09-05 的通信多实例化与「连接设备」管理器成果已并入此提交（仓库历史压缩，无独立提交）。",
+        };
+
+        private static FormVersion _instance;
+
+        /// <summary>
+        /// 单例显示：已打开则前置激活，不重复创建（与项目内其它工具窗一致）。
+        /// </summary>
+        public static void ShowVersion(IWin32Window owner)
+        {
+            if (_instance == null || _instance.IsDisposed)
+                _instance = new FormVersion();
+            if (!_instance.Visible)
+                _instance.Show(owner);
+            _instance.BringToFront();
+            _instance.Activate();
+        }
+
+        public FormVersion()
+        {
+            InitializeComponent();
+
+            lblVersion.Text = "当前版本：v" + AppVersion;
+            lblReleaseDate.Text = "发布日期：" + AppVersionDate;
+            lblRepo.Text = "所属仓库：" + AppRepoName;
+            lblTag.Text = "仓库标签：v" + AppVersion + "（git tag，随推送仓库发布）";
+
+            try
+            {
+                string exePath = Application.ExecutablePath;
+                lblBuild.Text = "程序生成时间：" + System.IO.File.GetLastWriteTime(exePath).ToString("yyyy-MM-dd HH:mm:ss");
+            }
+            catch
+            {
+                lblBuild.Text = "程序生成时间：-";
+            }
+
+            lstTimeline.Items.Clear();
+            foreach (string line in VersionTimeline)
+                lstTimeline.Items.Add(line);
+        }
+
+        private void btnOk_Click(object sender, EventArgs e)
+        {
+            this.Close();
+        }
+    }
+}

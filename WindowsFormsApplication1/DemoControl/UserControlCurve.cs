@@ -79,6 +79,8 @@ namespace WindowsFormsApplication1.DemoControl
                 while (isThreadRun && generation == _threadGeneration) // ch:P2-new 代际不符（已停止又启动）立即退出
                 {
                     Thread.Sleep( timeSleep );
+                    // ch:P2 醒来后复核代际：避免"已停止又启动"的旧线程再补一次陈旧数据
+                    if (!isThreadRun || generation != _threadGeneration) break;
 
                     try
                     {
@@ -86,20 +88,22 @@ namespace WindowsFormsApplication1.DemoControl
                         if (read.IsSuccess)
                         {
                             // 显示曲线
-                            if (isThreadRun) Invoke( new Action<short>( AddDataCurve ), read.Content );
+                            if (isThreadRun && !IsDisposed) Invoke( new Action<short, int>( AddDataCurve ), read.Content, generation ); // ch:P2-④ 传代际+释放检查，避免旧线程/已释放控件补点
                         }
                     }
                     catch (Exception ex)
                     {
-                        MessageBox.Show( "Read failed：" + ex.Message );
+                        new ErrorLog().WriteLog("曲线读取失败:" + ex.Message); // ch:P2-④ 后台线程不弹模态框，避免阻塞读线程
                     }
                 }
             }
         }
 
 
-        private void AddDataCurve( short data )
+        private void AddDataCurve( short data, int generation )
         {
+            // ch:P2-④ 控件已释放、代际不符(已停止又启动的旧线程)、或已停止，均不补陈旧数据点
+            if (IsDisposed || generation != _threadGeneration || !isThreadRun) return;
             userCurve1.AddCurveData( "A", data );
         }
 

@@ -12,6 +12,7 @@ using System.Windows.Forms;
 using System.IO;
 using System.IO.Ports;
 using System.Threading.Tasks;
+using System.Collections.Concurrent;
 using System.Globalization;
 using demo;
 using HslCommunication.ModBus;
@@ -668,7 +669,8 @@ namespace WindowsFormsApplication1
             // ch:清理 TCP 服务器已接入的客户端 socket（serverSocket 字典），避免残留句柄
             try
             {
-                foreach (Socket s in serverSocket.Values)
+                // ch:P1-⑥ 用 ToArray() 快照枚举，避免并发 Add/Remove 时枚举抛 "集合已修改" 异常
+                foreach (Socket s in serverSocket.Values.ToArray())
                 {
                     try { if (s != null) s.Close(); } catch (Exception ex) { new ErrorLog().WriteLog(ex.ToString()); }
                 }
@@ -725,7 +727,9 @@ namespace WindowsFormsApplication1
         }
         Socket socketWatch;
         Socket socketServer;
-        Dictionary<string, Socket> serverSocket = new Dictionary<string, Socket>();
+        // ch:P1-⑥ 原 Dictionary 在监听线程(Add/Remove)、UI 发送线程(读/Remove)、CloseResources(Clear) 并发下会重复键异常/内部结构损坏。
+        //   改用 ConcurrentDictionary，所有单步操作线程安全。
+        ConcurrentDictionary<string, Socket> serverSocket = new ConcurrentDictionary<string, Socket>();
         private void button1_Click(object sender, EventArgs e)
         {
             try
@@ -771,17 +775,13 @@ namespace WindowsFormsApplication1
                         break; // ch:监听套接字为空（已被关闭/释放）时结束监听线程，避免空引用忙循环
                     socketServer = socketWatch.Accept();
                     string remoteTemp = socketServer.RemoteEndPoint.ToString();
-                    // ch:同一客户端重复接入时先关闭旧连接，避免 Add 重复键抛异常导致新 socket 泄漏
-                    if (serverSocket.ContainsKey(remoteTemp))
+                    // ch:P1-⑥ 同客户端重连：先关旧连接，再用索引器原子替换（ConcurrentDictionary 索引器 = 新增或覆盖，无重复键异常）
+                    Socket old = null;
+                    if (serverSocket.TryGetValue(remoteTemp, out old))
                     {
-                        Socket old = null;
-                        if (serverSocket.TryGetValue(remoteTemp, out old))
-                        {
-                            try { if (old != null) old.Close(); } catch (Exception exInner) { new ErrorLog().WriteLog(exInner.ToString()); }
-                        }
-                        serverSocket.Remove(remoteTemp);
+                        try { if (old != null) old.Close(); } catch (Exception exInner) { new ErrorLog().WriteLog(exInner.ToString()); }
                     }
-                    serverSocket.Add(remoteTemp, socketServer);
+                    serverSocket[remoteTemp] = socketServer;
                     //将远程连接的IP地址和端口号填入下拉菜单
                     if (this.InvokeRequired)
                         this.BeginInvoke(new Action(() =>
@@ -857,7 +857,8 @@ namespace WindowsFormsApplication1
                 // ch:客户端断开后关闭 socket 并从字典移除，
                 // ch:否则后续 serverSocket[ip].Send 对已释放对象抛 ObjectDisposedException
                 try { if (current != null) current.Close(); } catch (Exception ex) { new ErrorLog().WriteLog(ex.ToString()); }
-                try { if (remoteKey != "" && serverSocket.ContainsKey(remoteKey)) serverSocket.Remove(remoteKey); } catch (Exception ex) { new ErrorLog().WriteLog(ex.ToString()); }
+                // ch:P1-⑥ 断开后从字典移除（ConcurrentDictionary.TryRemove 线程安全）
+                try { if (remoteKey != "") serverSocket.TryRemove(remoteKey, out _); } catch (Exception ex) { new ErrorLog().WriteLog(ex.ToString()); }
             }
         }
         private int qiehuan(string aa)
@@ -948,15 +949,16 @@ namespace WindowsFormsApplication1
                 }
                 string ip = comboBox1.SelectedItem.ToString();
                 // ch:发送前校验目标连接，断开时清理字典，避免向已释放 socket 发送抛 ObjectDisposedException
-                if (serverSocket.ContainsKey(ip))
+                // ch:P1-⑥ 用 TryGetValue 取连接（ConcurrentDictionary 索引器在键缺失时会抛异常），失败或断开则关闭并移除
+                Socket target;
+                if (serverSocket.TryGetValue(ip, out target))
                 {
-                    Socket target = serverSocket[ip];
                     if (target != null && target.Connected)
                         target.Send(buffer);
                     else
                     {
                         try { if (target != null) target.Close(); } catch (Exception ex) { new ErrorLog().WriteLog(ex.ToString()); }
-                        serverSocket.Remove(ip);
+                        serverSocket.TryRemove(ip, out _);
                         MsgErroeLog.WriteLog("TCP服务器发送目标已断开并移除:" + ip);
                     }
                 }
@@ -1727,7 +1729,7 @@ namespace WindowsFormsApplication1
                                     else
                                     {
                                         try { if (target != null) target.Close(); } catch (Exception ex) { new ErrorLog().WriteLog(ex.ToString()); }
-                                        serverSocket.Remove(ip);
+                                        serverSocket.TryRemove(ip, out _); // ch:P0 ConcurrentDictionary 无 Remove，改 TryRemove
                                         MsgErroeLog.WriteLog("TCP服务器发送目标已断开并移除:" + ip);
                                     }
                                 }
@@ -1884,7 +1886,7 @@ namespace WindowsFormsApplication1
                                     else
                                     {
                                         try { if (target != null) target.Close(); } catch (Exception ex) { new ErrorLog().WriteLog(ex.ToString()); }
-                                        serverSocket.Remove(ip);
+                                        serverSocket.TryRemove(ip, out _); // ch:P0 ConcurrentDictionary 无 Remove，改 TryRemove
                                         MsgErroeLog.WriteLog("TCP服务器发送目标已断开并移除:" + ip);
                                     }
                                 }

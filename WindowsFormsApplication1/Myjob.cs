@@ -94,6 +94,9 @@ namespace WindowsFormsApplication1
         public int outputng2 = 0;
         public object locker_ok = new object();
         public object locker_ng = new object();
+        // ch:P0 工具块并发保护锁：轮询/通讯事件线程写 block.Inputs 与检测线程 block.Run() 必须互斥，
+        //   VisionPro CogToolBlock 非线程安全，并发可致崩溃或读到半帧。
+        public readonly object blockLock = new object();
         public Dictionary<int, CogToolBlock> list_block=new Dictionary<int, CogToolBlock>();
         public int outputok
         {

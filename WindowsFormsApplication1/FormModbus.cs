@@ -59,6 +59,8 @@ namespace WindowsFormsApplication1
         private Socket xieWuSocket;
         private readonly object xieWuLock = new object();
         private readonly object modbusIoLock = new object(); // ch:轮询读与极速写互斥，避免双连接并发把寄存器冲成 0
+        private int _tcpDataFormatIndex = 0; // ch:P2-⑤ 缓存 DataFormat 选择，避免后台重连线程跨线程读 comboBox1.SelectedIndex
+        private System.Collections.Generic.HashSet<int> _xieWuStringWarned = new System.Collections.Generic.HashSet<int>(); // ch:P2-③ 极速写 string 格式仅提示一次，避免每帧刷屏（访问均处于 modbusIoLock 内）
         private volatile bool xieWuClosing = false;
         private string xieWuCachedIp = "";
         private int xieWuCachedPort = 0;
@@ -132,6 +134,7 @@ namespace WindowsFormsApplication1
             panel2.Enabled = false;
 
             comboBox1.SelectedIndex = 0;
+            _tcpDataFormatIndex = 0; // ch:P2-⑤ 缓存初始 DataFormat 索引
 
             comboBox1.SelectedIndexChanged += ComboBox1_SelectedIndexChanged;
             checkBox3.CheckedChanged += CheckBox3_CheckedChanged;
@@ -218,6 +221,18 @@ namespace WindowsFormsApplication1
                         }
                     }
                 }
+            }
+            // ch:P2-③ 加载期校验：极速写(Send-and-Forget)不支持 string 格式，启动即提示，避免运行期才发现该通道永远写不出去
+            if (useXieWu)
+            {
+                System.Collections.Generic.List<string> xieWuStringNames = new System.Collections.Generic.List<string>();
+                foreach (var fd in fins_dic)
+                {
+                    if (fd.Value.Length > 4 && string.Equals(fd.Value[4], "string", StringComparison.OrdinalIgnoreCase))
+                        xieWuStringNames.Add(fd.Key);
+                }
+                if (xieWuStringNames.Count > 0)
+                    MsgErroeLog.WriteLog("modbustcp 极速写不支持 string 格式通道：" + string.Join(",", xieWuStringNames.ToArray()) + "；请改为 int/long/float 或关闭极速写改用普通写回");
             }
             for (int i = 0; i < 10; i++)
             {
@@ -442,7 +457,22 @@ namespace WindowsFormsApplication1
                     default: break;
                 }
             }
+            _tcpDataFormatIndex = comboBox1.SelectedIndex; // ch:P2-⑤ UI 线程缓存，供后台重连线程使用
         }
+        // ch:P1-⑦ 重连/自动创建新 ModbusTcpNet 后，新连接 DataFormat 会退回 HSL 默认(ABCD)，
+        //   必须按当前 comboBox1 选择重新设回，否则重连后 float/long 静默写错。
+        private void ApplyTcpDataFormat()
+        {
+            if (busTcpClient == null) return;
+            switch (_tcpDataFormatIndex) // ch:P2-⑤ 用 UI 线程缓存的索引，避免后台线程跨线程读 comboBox1
+            {
+                case 0: busTcpClient.DataFormat = HslCommunication.Core.DataFormat.ABCD; break;
+                case 1: busTcpClient.DataFormat = HslCommunication.Core.DataFormat.BADC; break;
+                case 2: busTcpClient.DataFormat = HslCommunication.Core.DataFormat.CDAB; break;
+                case 3: busTcpClient.DataFormat = HslCommunication.Core.DataFormat.DCBA; break;
+            }
+        }
+
         private void CheckBox3_CheckedChanged(object sender, EventArgs e)
         {
             if (busTcpClient != null)
@@ -1277,6 +1307,7 @@ namespace WindowsFormsApplication1
                                         busTcpClient.IsStringReverse = checkBox3.Checked;
                                         busTcpClient.SetLoginAccount(textBox14.Text, textBox12.Text);
                                         busTcpClient.ConnectServer();
+                                        ApplyTcpDataFormat(); // ch:P1-⑦ 新连接补设字节序，避免重连后 float/long 写错
                                     }
                                     catch (Exception ex) { MsgErroeLog.WriteLog("ModbusTCP 自动连接失败:" + ex.Message); }
                                     if (busTcpClient == null) continue;
@@ -1387,6 +1418,7 @@ namespace WindowsFormsApplication1
                                         busTcpClient.IsStringReverse = checkBox3.Checked;
                                         busTcpClient.SetLoginAccount(textBox14.Text, textBox12.Text);
                                         busTcpClient.ConnectServer();
+                                        ApplyTcpDataFormat(); // ch:P1-⑦ 重连分支补设字节序，避免重连后 float/long 写错
                                     }
                                     catch (Exception ex) { new ErrorLog().WriteLog(ex.ToString()); }
                                 }
@@ -1423,6 +1455,8 @@ namespace WindowsFormsApplication1
                 {
                     if (pat.Value[5] != "无")
                     {
+                        fins_temp = ""; // ch:P2-② 每轮重置写回渲染结果，避免上一相机失败串入本相机判定
+                        bool anyWriteFailed = false; // ch:P2-④ 聚合本相机所有写回的真实结果（多寄存器循环写逐次与）
                         foreach (var par in fins_dic)
                         {
                             if (pat.Value[5] == par.Value[0])
@@ -1449,11 +1483,11 @@ namespace WindowsFormsApplication1
                                             if (wr != null && !wr.IsSuccess)
                                                 fallbackResult = wr;
                                         }
-                                        DemoUtils.WriteResultRender1(() => fallbackResult, addr_start.ToString(), out fins_temp);
+                                        if (!DemoUtils.WriteResultRenderOk(() => fallbackResult, addr_start.ToString(), out fins_temp)) anyWriteFailed = true; // ch:P2-④
                                     }
                                     else
                                     {
-                                        DemoUtils.WriteResultRender1(() => batchResult, addr_start.ToString(), out fins_temp);
+                                        if (!DemoUtils.WriteResultRenderOk(() => batchResult, addr_start.ToString(), out fins_temp)) anyWriteFailed = true; // ch:P2-④
                                     }
                                     for (int j = 0; j < vals.Length; j++)
                                     {
@@ -1468,7 +1502,7 @@ namespace WindowsFormsApplication1
                                     int[] vals = new int[parts.Length];
                                     for (int i = 0; i < parts.Length; i++)
                                         vals[i] = (int)Math.Round(double.Parse(parts[i].Trim()));
-                                    DemoUtils.WriteResultRender1(() => busTcpClient.Write(addr_start.ToString(), vals), addr_start.ToString(), out fins_temp);
+                                    if (!DemoUtils.WriteResultRenderOk(() => busTcpClient.Write(addr_start.ToString(), vals), addr_start.ToString(), out fins_temp)) anyWriteFailed = true; // ch:P2-④
                                     for (int j = 0; j < vals.Length * 2; j++)
                                     {
                                         if (!gridUi) break;
@@ -1482,7 +1516,7 @@ namespace WindowsFormsApplication1
                                     float[] vals = new float[parts.Length];
                                     for (int i = 0; i < parts.Length; i++)
                                         vals[i] = float.Parse(parts[i].Trim());
-                                    DemoUtils.WriteResultRender1(() => busTcpClient.Write(addr_start.ToString(), vals), addr_start.ToString(), out fins_temp);
+                                    if (!DemoUtils.WriteResultRenderOk(() => busTcpClient.Write(addr_start.ToString(), vals), addr_start.ToString(), out fins_temp)) anyWriteFailed = true; // ch:P2-④
                                     for (int j = 0; j < vals.Length * 2; j++)
                                     {
                                         if (!gridUi) break;
@@ -1496,7 +1530,7 @@ namespace WindowsFormsApplication1
                                     for (int j = 0; j < parts.Length; j++)
                                     {
                                         int xuanzhong_temp = addr_start - int.Parse(address_qishi.ToString()) + j;
-                                        DemoUtils.WriteResultRender1(() => busTcpClient.Write((addr_start + j).ToString(), parts[j].Trim()), (addr_start + j).ToString(), out fins_temp);
+                                        if (!DemoUtils.WriteResultRenderOk(() => busTcpClient.Write((addr_start + j).ToString(), parts[j].Trim()), (addr_start + j).ToString(), out fins_temp)) anyWriteFailed = true; // ch:P2-④ 逐寄存器聚合，避免末次成功掩盖前次失败
                                         if (gridUi)
                                             SetModbusGridValue(fins_data[xuanzhong_temp][0], fins_data[xuanzhong_temp][1], fins_temp);
                                     }
@@ -1504,7 +1538,11 @@ namespace WindowsFormsApplication1
                                 break;
                             }
                         }
-                        pat.Value[5] = "无";
+                        // ch:P2-④ 以逐次写入的真实 bool 结果聚合判定（替代文本判定），避免多寄存器循环写"末次成功掩盖前次失败"
+                        if (!anyWriteFailed)
+                            pat.Value[5] = "无";
+                        else
+                            MsgErroeLog.WriteLog("普通写回失败(保留 pending) cam=" + pat.Key + " ch=" + pat.Value[5] + " val=[" + pat.Value[4] + "] msg=" + fins_temp);
                     }
                 }
                 }
@@ -1673,6 +1711,19 @@ namespace WindowsFormsApplication1
                 MsgErroeLog.WriteLog(ex.Message + "WriteCameraResult");
             }
         }
+        // ch:P0 方案切换写回暂存：与 xie/XieWuWriteOne 消费共用 modbusIoLock，保证 [4](值)/[5](通道) 原子配对，消除跨线程撕裂
+        public void SetSwitchPending(int camIndex)
+        {
+            lock (modbusIoLock)
+            {
+                if (camera_dic.ContainsKey(camIndex) && !camera_dic[camIndex][1].Contains("无"))
+                {
+                    camera_dic[camIndex][4] = camera_dic[camIndex][1];
+                    camera_dic[camIndex][5] = camera_dic[camIndex][0];
+                    if (camIndex >= 1 && camIndex <= fins_xie.Length) fins_xie[camIndex - 1] = true;
+                }
+            }
+        }
 
         public void CloseXieWuSocket()
         {
@@ -1772,6 +1823,8 @@ namespace WindowsFormsApplication1
             }
         }
 
+        // ch:P1-⑧ 极速写：① 写成功后才清 pending(pat[5])，写失败/客户端空/格式不支持均保留 pending 以便下次重试，避免结果永久丢失；
+        //   ② 数值/地址解析改用 TryParse，解析失败记录日志且不发起写；③ 未知格式(string 等)不再静默丢弃，记日志后保留 pending。
         private void XieWuWriteOne(int camIndex, string value)
         {
             if (!camera_dic.ContainsKey(camIndex)) return;
@@ -1787,12 +1840,13 @@ namespace WindowsFormsApplication1
                     break;
                 }
             }
-            pat[5] = "无";
-            if (par == null) return;
+            if (par == null) { pat[5] = "无"; return; } // ch:P1-⑧ 无匹配寄存器，永久无法写，清理避免重复重试
             string addrText = par[1];
-            ushort addr_start = ushort.Parse(addrText);
+            ushort addr_start;
+            if (!ushort.TryParse(addrText, out addr_start)) { MsgErroeLog.WriteLog("modbustcp 极速写地址解析失败:" + addrText); pat[5] = "无"; return; }
             string fmt = par[4];
-            int regLen = int.Parse(par[2]);
+            int regLen;
+            if (!int.TryParse(par[2], out regLen)) { MsgErroeLog.WriteLog("modbustcp 极速写寄存器长度解析失败:" + par[2]); pat[5] = "无"; return; }
             if (string.IsNullOrEmpty(value) || value == "无") return;
             string[] parts = value.Split(new char[] { ',' }, StringSplitOptions.RemoveEmptyEntries);
             if (parts.Length == 0) return;
@@ -1800,14 +1854,18 @@ namespace WindowsFormsApplication1
             OperateResult wr = null;
             lock (modbusIoLock)
             {
-                if (busTcpClient == null) return;
+                if (busTcpClient == null) { MsgErroeLog.WriteLog("modbustcp 极速写失败: 客户端为空 cam=" + camIndex); return; } // ch:P1-⑧ 不清除 pending，下次触发重试
                 if (fmt == "int")
                 {
                     int writeCount = Math.Min(parts.Length, regLen);
                     short[] vals = new short[writeCount];
                     for (int i = 0; i < writeCount; i++)
-                        vals[i] = (short)Math.Round(double.Parse(parts[i].Trim()));
-                    wr = busTcpClient.Write(addrText, vals);
+                    {
+                        double d;
+                        if (!double.TryParse(parts[i].Trim(), out d)) { wr = new OperateResult { Message = "数值解析失败:" + parts[i] }; break; }
+                        vals[i] = (short)Math.Round(d);
+                    }
+                    if (wr == null) wr = busTcpClient.Write(addrText, vals);
                 }
                 else if (fmt == "long")
                 {
@@ -1815,8 +1873,12 @@ namespace WindowsFormsApplication1
                     int writeCount = Math.Min(parts.Length, valLen);
                     int[] vals = new int[writeCount];
                     for (int i = 0; i < writeCount; i++)
-                        vals[i] = (int)Math.Round(double.Parse(parts[i].Trim()));
-                    wr = busTcpClient.Write(addrText, vals);
+                    {
+                        double d;
+                        if (!double.TryParse(parts[i].Trim(), out d)) { wr = new OperateResult { Message = "数值解析失败:" + parts[i] }; break; }
+                        vals[i] = (int)Math.Round(d);
+                    }
+                    if (wr == null) wr = busTcpClient.Write(addrText, vals);
                 }
                 else if (fmt == "float")
                 {
@@ -1824,17 +1886,29 @@ namespace WindowsFormsApplication1
                     int writeCount = Math.Min(parts.Length, valLen);
                     float[] vals = new float[writeCount];
                     for (int i = 0; i < writeCount; i++)
-                        vals[i] = float.Parse(parts[i].Trim());
-                    wr = busTcpClient.Write(addrText, vals);
+                    {
+                        float f;
+                        if (!float.TryParse(parts[i].Trim(), out f)) { wr = new OperateResult { Message = "数值解析失败:" + parts[i] }; break; }
+                        vals[i] = f;
+                    }
+                    if (wr == null) wr = busTcpClient.Write(addrText, vals);
                 }
                 else
                 {
+                    // ch:P2-③ string/未知格式无法写入：仅首次提示一次避免每帧刷屏；pending 保留以便后续支持或人工排查
+                    if (!_xieWuStringWarned.Contains(camIndex))
+                    {
+                        _xieWuStringWarned.Add(camIndex);
+                        MsgErroeLog.WriteLog("modbustcp 极速写不支持的格式:" + fmt + " cam=" + camIndex + " (仅提示一次，pending 保留)");
+                    }
                     return;
                 }
             }
             bool ok = wr != null && wr.IsSuccess;
-            if (!ok)
-                MsgErroeLog.WriteLog("modbustcp 极速写失败 cam=" + camIndex + " addr=" + addr_start + " fmt=" + fmt + " err=" + (wr == null ? "null" : wr.Message) + " value=[" + value + "]");
+            if (ok)
+                pat[5] = "无"; // ch:P1-⑧ 仅在写成功后才清除 pending
+            else if (wr != null)
+                MsgErroeLog.WriteLog("modbustcp 极速写失败 cam=" + camIndex + " addr=" + addr_start + " fmt=" + fmt + " err=" + wr.Message + " value=[" + value + "]");
         }
 
         public void xie_wu(string value)
@@ -2889,6 +2963,7 @@ namespace WindowsFormsApplication1
         private void comboBox1_SelectedIndexChanged_1(object sender, EventArgs e)
         {
             xieWuDataFmt = comboBox1.SelectedIndex;
+            _tcpDataFormatIndex = comboBox1.SelectedIndex; // ch:P2-⑤ UI 线程缓存，供后台重连线程使用
             if (chushihua)
             {
                 wdini.WriteString("modbustcp", "abcd", comboBox1.Text);

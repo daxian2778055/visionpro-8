@@ -1,4 +1,4 @@
-using Cognex.VisionPro;
+﻿using Cognex.VisionPro;
 using Cognex.VisionPro.ImageFile;
 using Cognex.VisionPro.QuickBuild;
 using Cognex.VisionPro.ToolBlock;
@@ -3773,13 +3773,26 @@ namespace WindowsFormsApplication1
             }
             try
             {
-                myjob.block.Inputs["Input"].Value = CreateCogImageFromBitmap(src, myjob.Color);
+                SetBlockInputSafe(myjob, "Input", CreateCogImageFromBitmap(src, myjob.Color));
                 return myjob.block.Inputs["Input"].Value != null;
             }
             catch (Exception ex)
             {
                 MsgErroeLog.WriteLog("相机" + myjob.path_number + "传图失败:" + ex.Message);
                 return false;
+            }
+        }
+
+        // ch:P0 工具块输入安全设置：事件线程（通讯/轮询回调）直接写 block.Inputs 会与检测线程 block.Run() 并发。
+        //   统一走本方法，按 job 粒度加锁，与 block.Run() 的临界区互斥。
+        private void SetBlockInputSafe(Myjob job, string inputName, object value)
+        {
+            if (job == null || job.block == null || string.IsNullOrEmpty(inputName))
+                return;
+            lock (job.blockLock)
+            {
+                try { job.block.Inputs[inputName].Value = value; }
+                catch (Exception ex) { MsgErroeLog.WriteLog("设置工具块输入失败[" + inputName + "]:" + ex.Message); }
             }
         }
 
@@ -3821,9 +3834,9 @@ namespace WindowsFormsApplication1
                                         if (bmp[0] != null)
                                         {
                                             if (myjob.Color)
-                                                myjob.block.Inputs["Input"].Value = new CogImage24PlanarColor(bmp[0]);
+                                                SetBlockInputSafe(myjob, "Input", new CogImage24PlanarColor(bmp[0]));
                                             else
-                                                myjob.block.Inputs["Input"].Value = new CogImage8Grey(bmp[0]);
+                                                SetBlockInputSafe(myjob, "Input", new CogImage8Grey(bmp[0]));
                                             
 
                                         }
@@ -3833,63 +3846,63 @@ namespace WindowsFormsApplication1
                                         if (bmp[1] != null)
                                         {
                                             if (myjob.Color)
-                                                myjob.block.Inputs["Input"].Value = new CogImage24PlanarColor(bmp[1]);
+                                                SetBlockInputSafe(myjob, "Input", new CogImage24PlanarColor(bmp[1]));
                                             else
-                                                myjob.block.Inputs["Input"].Value = new CogImage8Grey(bmp[1]);
+                                                SetBlockInputSafe(myjob, "Input", new CogImage8Grey(bmp[1]));
                                         }
                                         break;
                                     case "3":
                                         if (bmp[2] != null)
                                         {
                                             if (myjob.Color)
-                                                myjob.block.Inputs["Input"].Value = new CogImage24PlanarColor(bmp[2]);
+                                                SetBlockInputSafe(myjob, "Input", new CogImage24PlanarColor(bmp[2]));
                                             else
-                                                myjob.block.Inputs["Input"].Value = new CogImage8Grey(bmp[2]);
+                                                SetBlockInputSafe(myjob, "Input", new CogImage8Grey(bmp[2]));
                                         }
                                         break;
                                     case "4":
                                         if (bmp[3] != null)
                                         {
                                             if (myjob.Color)
-                                                myjob.block.Inputs["Input"].Value = new CogImage24PlanarColor(bmp[3]);
+                                                SetBlockInputSafe(myjob, "Input", new CogImage24PlanarColor(bmp[3]));
                                             else
-                                                myjob.block.Inputs["Input"].Value = new CogImage8Grey(bmp[3]);
+                                                SetBlockInputSafe(myjob, "Input", new CogImage8Grey(bmp[3]));
                                         }
                                         break;
                                     case "5":
                                         if (bmp[4] != null)
                                         {
                                             if (myjob.Color)
-                                                myjob.block.Inputs["Input"].Value = new CogImage24PlanarColor(bmp[4]);
+                                                SetBlockInputSafe(myjob, "Input", new CogImage24PlanarColor(bmp[4]));
                                             else
-                                                myjob.block.Inputs["Input"].Value = new CogImage8Grey(bmp[4]);
+                                                SetBlockInputSafe(myjob, "Input", new CogImage8Grey(bmp[4]));
                                         }
                                         break;
                                     case "6":
                                         if (bmp[5] != null)
                                         {
                                             if (myjob.Color)
-                                                myjob.block.Inputs["Input"].Value = new CogImage24PlanarColor(bmp[5]);
+                                                SetBlockInputSafe(myjob, "Input", new CogImage24PlanarColor(bmp[5]));
                                             else
-                                                myjob.block.Inputs["Input"].Value = new CogImage8Grey(bmp[5]);
+                                                SetBlockInputSafe(myjob, "Input", new CogImage8Grey(bmp[5]));
                                         }
                                         break;
                                     case "7":
                                         if (bmp[6] != null)
                                         {
                                             if (myjob.Color)
-                                                myjob.block.Inputs["Input"].Value = new CogImage24PlanarColor(bmp[6]);
+                                                SetBlockInputSafe(myjob, "Input", new CogImage24PlanarColor(bmp[6]));
                                             else
-                                                myjob.block.Inputs["Input"].Value = new CogImage8Grey(bmp[6]);
+                                                SetBlockInputSafe(myjob, "Input", new CogImage8Grey(bmp[6]));
                                         }
                                         break;
                                     case "8":
                                         if (bmp[7] != null)
                                         {
                                             if (myjob.Color)
-                                                myjob.block.Inputs["Input"].Value = new CogImage24PlanarColor(bmp[7]);
+                                                SetBlockInputSafe(myjob, "Input", new CogImage24PlanarColor(bmp[7]));
                                             else
-                                                myjob.block.Inputs["Input"].Value = new CogImage8Grey(bmp[7]);
+                                                SetBlockInputSafe(myjob, "Input", new CogImage8Grey(bmp[7]));
                                         }
                                         break;
                                 }
@@ -4034,25 +4047,30 @@ namespace WindowsFormsApplication1
                                 }
                                 else
                                 {
-                                    try
+                                    // ch:P0 与 SetBlockInputSafe 共用同一把 blockLock：通讯/轮询线程写 block.Inputs
+                                    //   不得与本地 block.Run()/RunStatus 读取并发（VisionPro CogToolBlock 非线程安全）
+                                    lock (myjob.blockLock)
                                     {
-                                        myjob.block.Run();
-                                        if (myjob.block.RunStatus != null && myjob.block.RunStatus.Result == CogToolResultConstants.Error)
+                                        try
                                         {
-                                            runError = true;
-                                            int now = Environment.TickCount;
-                                            if (now - _lastGroupRunLogMs > 3000)
+                                            myjob.block.Run();
+                                            if (myjob.block.RunStatus != null && myjob.block.RunStatus.Result == CogToolResultConstants.Error)
                                             {
-                                                _lastGroupRunLogMs = now;
-                                                MsgErroeLog.WriteLog("相机" + myjob.path_number + "方案脚本:" + myjob.block.RunStatus.Message);
+                                                runError = true;
+                                                int now = Environment.TickCount;
+                                                if (now - _lastGroupRunLogMs > 3000)
+                                                {
+                                                    _lastGroupRunLogMs = now;
+                                                    MsgErroeLog.WriteLog("相机" + myjob.path_number + "方案脚本:" + myjob.block.RunStatus.Message);
+                                                }
                                             }
                                         }
-                                    }
-                                    catch (Exception runEx)
-                                    {
-                                        // ch:R2 block.Run 直接抛异常（非 RunStatus.Error）也视为故障帧，走 999/NG 路径
-                                        runError = true;
-                                        MsgErroeLog.WriteLog("相机" + myjob.path_number + " block.Run 异常:" + runEx.Message + "，本帧按故障(999)处理");
+                                        catch (Exception runEx)
+                                        {
+                                            // ch:R2 block.Run 直接抛异常（非 RunStatus.Error）也视为故障帧，走 999/NG 路径
+                                            runError = true;
+                                            MsgErroeLog.WriteLog("相机" + myjob.path_number + " block.Run 异常:" + runEx.Message + "，本帧按故障(999)处理");
+                                        }
                                     }
                                 }
                             }
@@ -4075,6 +4093,9 @@ namespace WindowsFormsApplication1
                                 }
                             }
 
+                            // ch:P0 读取 block.Outputs 同样需在 blockLock 内，避免与通讯线程写 Inputs 并发
+                            lock (myjob.blockLock)
+                            {
                             if (myjob.tishi)
                             {
                                 try
@@ -4097,6 +4118,7 @@ namespace WindowsFormsApplication1
                                 tempout2 = myjob.block.Outputs["Output1"].Value.ToString();
                             else
                                 tempout2 = "Reject";
+                            }
 
                             if (myjob.trriger != 1)
                             {
@@ -4134,10 +4156,12 @@ namespace WindowsFormsApplication1
 
                            
                             // Thread.Sleep(15);
+                            // ch:P0 跳过 Run(传图失败)或首帧 RunStatus 为空时 runtime 显式赋 0：既避免 NRE 被外层 catch 吞掉导致整帧结果丢失，也避免沿用旧耗时误判超时 Reject
+                            double runProcessingTime = (inputAssignFailed || myjob.block.RunStatus == null) ? 0 : myjob.block.RunStatus.ProcessingTime;
                             switch (myjob.path_number)
                             {
                                 case "1":
-                                    myjob1.runtime = myjob.block.RunStatus.ProcessingTime;
+                                    myjob1.runtime = runProcessingTime;
                                     if (NG)
                                     {
                                         if (myjob1.runtime >= jiankongshijian)
@@ -4150,7 +4174,7 @@ namespace WindowsFormsApplication1
 
                                     break;
                                 case "2":
-                                    myjob2.runtime = myjob.block.RunStatus.ProcessingTime;
+                                    myjob2.runtime = runProcessingTime;
                                     if (NG)
                                     {
                                         if (myjob2.runtime >= jiankongshijian)
@@ -4162,7 +4186,7 @@ namespace WindowsFormsApplication1
                                     }
                                     break;
                                 case "3":
-                                    myjob3.runtime = myjob.block.RunStatus.ProcessingTime;
+                                    myjob3.runtime = runProcessingTime;
                                     if (NG)
                                     {
                                         if (myjob3.runtime >= jiankongshijian)
@@ -4174,7 +4198,7 @@ namespace WindowsFormsApplication1
                                     }
                                     break;
                                 case "4":
-                                    myjob4.runtime = myjob.block.RunStatus.ProcessingTime;
+                                    myjob4.runtime = runProcessingTime;
                                     if (NG)
                                     {
                                         if (myjob4.runtime >= jiankongshijian)
@@ -4186,7 +4210,7 @@ namespace WindowsFormsApplication1
                                     }
                                     break;
                                 case "5":
-                                    myjob5.runtime = myjob.block.RunStatus.ProcessingTime;
+                                    myjob5.runtime = runProcessingTime;
                                     if (NG)
                                     {
                                         if (myjob5.runtime >= jiankongshijian)
@@ -4198,7 +4222,7 @@ namespace WindowsFormsApplication1
                                     }
                                     break;
                                 case "6":
-                                    myjob6.runtime = myjob.block.RunStatus.ProcessingTime;
+                                    myjob6.runtime = runProcessingTime;
                                     if (NG)
                                     {
                                         if (myjob6.runtime >= jiankongshijian)
@@ -4210,7 +4234,7 @@ namespace WindowsFormsApplication1
                                     }
                                     break;
                                 case "7":
-                                    myjob7.runtime = myjob.block.RunStatus.ProcessingTime;
+                                    myjob7.runtime = runProcessingTime;
                                     if (NG)
                                     {
                                         if (myjob7.runtime >= jiankongshijian)
@@ -4222,7 +4246,7 @@ namespace WindowsFormsApplication1
                                     }
                                     break;
                                 case "8":
-                                    myjob8.runtime = myjob.block.RunStatus.ProcessingTime;
+                                    myjob8.runtime = runProcessingTime;
                                     if (NG)
                                     {
                                         if (myjob8.runtime >= jiankongshijian)
@@ -4244,14 +4268,34 @@ namespace WindowsFormsApplication1
                                 cuowu1 = "NG";
                             }
                             // ch:P1-04 结果快照：检测线程一次性捕获通讯/曝光端子值；Task.Run 后台线程改用这些不可变快照，避免下一帧改写 ToolBlock 后串帧
-                            string snapTcp;
+                            // ch:P2-① 快照读取同样纳入 blockLock：与 block.Run / SetBlockInputSafe 串行，消除锁外读 Outputs
+                            string snapTcp, snapSerial, snapMtcp, snapBuchang;
+                            // ch:P2-① CSV 用不可变快照：检测线程锁内一次性拼好 "ji*" 输出串，Task 不再回读 block.Outputs，消除把 N+1 帧结果记到 N 帧行
+                            string jiSnapshot = "";
+                            lock (myjob.blockLock)
+                            {
                             try { snapTcp = faultThisFrame ? "999" : (myjob.block.Outputs.Contains("tcp") && myjob.block.Outputs["tcp"].Value != null ? myjob.block.Outputs["tcp"].Value.ToString() : ""); } catch { snapTcp = ""; }
-                            string snapSerial;
                             try { snapSerial = faultThisFrame ? "999" : (myjob.block.Outputs.Contains("serial") && myjob.block.Outputs["serial"].Value != null ? myjob.block.Outputs["serial"].Value.ToString() : ""); } catch { snapSerial = ""; }
-                            string snapMtcp;
                             try { snapMtcp = faultThisFrame ? "999" : (myjob.block.Outputs.Contains("modbustcp") && myjob.block.Outputs["modbustcp"].Value != null ? myjob.block.Outputs["modbustcp"].Value.ToString() : ""); } catch { snapMtcp = ""; }
-                            string snapBuchang;
                             try { snapBuchang = (myjob.block.Outputs.Contains("buchang") && myjob.block.Outputs["buchang"].Value != null ? myjob.block.Outputs["buchang"].Value.ToString() : "0"); } catch { snapBuchang = "0"; }
+                            try
+                            {
+                                if (datajilu == 1)
+                                {
+                                    StringBuilder sbJi = new StringBuilder();
+                                    for (int i = 0; i < myjob.block.Outputs.Count; i++)
+                                    {
+                                        if (myjob.block.Outputs[i].Name.Contains("ji"))
+                                        {
+                                            sbJi.Append(myjob.block.Outputs[i].Value);
+                                            sbJi.Append(",");
+                                        }
+                                    }
+                                    jiSnapshot = sbJi.ToString();
+                                }
+                            }
+                            catch { jiSnapshot = ""; }
+                            }
 
                             if (myjob.IO)
                             {
@@ -4355,7 +4399,10 @@ namespace WindowsFormsApplication1
                             {
                                 try
                                 {
-                                    fins = faultThisFrame ? "999" : myjob.block.Outputs["fins"].Value.ToString(); // ch:P1-03 故障帧：欧姆龙通道发 999
+                                    lock (myjob.blockLock) // ch:P2-① 检测线程读 Outputs 与 Run 互斥，避免并发访问非线程安全对象
+                                    {
+                                        fins = faultThisFrame ? "999" : myjob.block.Outputs["fins"].Value.ToString(); // ch:P1-03 故障帧：欧姆龙通道发 999
+                                    }
                                 }
                                 catch
                                 {
@@ -4366,8 +4413,8 @@ namespace WindowsFormsApplication1
                                     try
                                     {
                                         // ch:R4 登记与 xie 消费由 Omron 窗体内部同一把锁保护
-                                    }
                                         omron.WriteCameraResult(int.Parse(myjob.path_number), fins); // ch:R4 登记+消费同一把锁，避免同一相机相邻帧覆盖 pending
+                                    }
                                     catch (Exception ex) { MsgErroeLog.WriteLog("异常:" + ex.Message); }
                                 });
                             }
@@ -4375,7 +4422,10 @@ namespace WindowsFormsApplication1
                             {
                                 try
                                 {
-                                    modbustcps = faultThisFrame ? "999" : myjob.block.Outputs["modbustcp"].Value.ToString(); // ch:P1-03 故障帧：ModbusTCP 通道发 999
+                                    lock (myjob.blockLock) // ch:P2-① 检测线程读 Outputs 与 Run 互斥，避免并发访问非线程安全对象
+                                    {
+                                        modbustcps = faultThisFrame ? "999" : myjob.block.Outputs["modbustcp"].Value.ToString(); // ch:P1-03 故障帧：ModbusTCP 通道发 999
+                                    }
                                 }
                                 catch
                                 {
@@ -4394,7 +4444,10 @@ namespace WindowsFormsApplication1
                             {
                                 try
                                 {
-                                    modbusrtus = faultThisFrame ? "999" : myjob.block.Outputs["modbusrtu"].Value.ToString(); // ch:P1-03 故障帧：ModbusRTU 通道发 999
+                                    lock (myjob.blockLock) // ch:P2-① 检测线程读 Outputs 与 Run 互斥，避免并发访问非线程安全对象
+                                    {
+                                        modbusrtus = faultThisFrame ? "999" : myjob.block.Outputs["modbusrtu"].Value.ToString(); // ch:P1-03 故障帧：ModbusRTU 通道发 999
+                                    }
                                 }
                                 catch
                                 {
@@ -4410,7 +4463,10 @@ namespace WindowsFormsApplication1
                                     catch (Exception ex) { MsgErroeLog.WriteLog("异常:" + ex.Message); }
                                 });
                             }
-                            tempimage = (ICogImage)myjob.block.Inputs["Input"].Value;
+                            lock (myjob.blockLock) // ch:P2-① 读 Inputs 与 SetBlockInputSafe 写 Inputs 互斥，避免并发访问非线程安全对象
+                            {
+                                tempimage = (ICogImage)myjob.block.Inputs["Input"].Value;
+                            }
                             if (myjob.zidongbaoguang)
                             {
                                 Task.Run(() =>
@@ -4534,7 +4590,7 @@ namespace WindowsFormsApplication1
                             }
                             if (myjob.trrigerEn == true)
                             {
-                                temptime = DateTime.Now.ToLongTimeString().ToString();
+                                temptime = DateTime.Now.ToString("HH:mm:ss"); // ch:P1 原 ToLongTimeString() 在 en-US 等区域带 "PM"，后续 int.Parse 会抛异常导致存图静默失败
                             }
                             #region 总数计算
                             switch (myjob.path_number)
@@ -5070,14 +5126,7 @@ namespace WindowsFormsApplication1
                                                 if (tempout1 == "Accept")
                                                 {
                                                     runlog1(1, 0, myjob.path_number);
-                                                    myjob.tianbiao = "";
-                                                    for (int i = 0; i < myjob.block.Outputs.Count; i++)
-                                                    {
-                                                        if (myjob.block.Outputs[i].Name.Contains("ji"))
-                                                        {
-                                                            myjob.tianbiao += myjob.block.Outputs[i].Value + ",";
-                                                        }
-                                                    }
+                                                    myjob.tianbiao = jiSnapshot; // ch:P2-① 用检测线程锁内快照，Task 不再回读 Outputs（消除 N+1 帧记到 N 帧行）
                                                     if (myjob.tianbiao.Contains(","))
                                                     {
                                                         myjob.tianbiao = myjob.tianbiao.Remove(myjob.tianbiao.Length - 1, 1);
@@ -5087,14 +5136,7 @@ namespace WindowsFormsApplication1
                                                 else
                                                 {
                                                     runlog1(0, 1, myjob.path_number);
-                                                    myjob.tianbiao = "";
-                                                    for (int i = 0; i < myjob.block.Outputs.Count; i++)
-                                                    {
-                                                        if (myjob.block.Outputs[i].Name.Contains("ji"))
-                                                        {
-                                                            myjob.tianbiao += myjob.block.Outputs[i].Value + ",";
-                                                        }
-                                                    }
+                                                    myjob.tianbiao = jiSnapshot; // ch:P2-① 用检测线程锁内快照，Task 不再回读 Outputs（消除 N+1 帧记到 N 帧行）
                                                     if (myjob.tianbiao.Contains(","))
                                                     {
                                                         myjob.tianbiao = myjob.tianbiao.Remove(myjob.tianbiao.Length - 1, 1);
@@ -5113,28 +5155,14 @@ namespace WindowsFormsApplication1
                                                 if (tempout1 == "Accept")
                                                 {
                                                     runlog1(1, 0, myjob.path_number);
-                                                    myjob.tianbiao = "";
-                                                    for (int i = 0; i < myjob.block.Outputs.Count; i++)
-                                                    {
-                                                        if (myjob.block.Outputs[i].Name.Contains("ji"))
-                                                        {
-                                                            myjob.tianbiao += myjob.block.Outputs[i].Value + ",";
-                                                        }
-                                                    }
+                                                    myjob.tianbiao = jiSnapshot; // ch:P2-① 用检测线程锁内快照，Task 不再回读 Outputs（消除 N+1 帧记到 N 帧行）
                                                     if (myjob.tianbiao.Contains(","))
                                                         runlog2(myjob.tianbiao, myjob.tianbiao, myjob.path_number, 1);
                                                 }
                                                 else
                                                 {
                                                     runlog1(0, 1, myjob.path_number);
-                                                    myjob.tianbiao = "";
-                                                    for (int i = 0; i < myjob.block.Outputs.Count; i++)
-                                                    {
-                                                        if (myjob.block.Outputs[i].Name.Contains("ji"))
-                                                        {
-                                                            myjob.tianbiao += myjob.block.Outputs[i].Value + ",";
-                                                        }
-                                                    }
+                                                    myjob.tianbiao = jiSnapshot; // ch:P2-① 用检测线程锁内快照，Task 不再回读 Outputs（消除 N+1 帧记到 N 帧行）
                                                     if (myjob.tianbiao.Contains(","))
                                                         runlog2(myjob.tianbiao, myjob.tianbiao, myjob.path_number, 0);
                                                 }
@@ -5738,9 +5766,7 @@ namespace WindowsFormsApplication1
             _ioWorkerThread.Start();
         }
 
-        // ch:R6 待完成任务计数：在入队前登记，覆盖“已出队但尚未开始执行”的窗口。
-        // _ioWorkExecuting 继续保留用于诊断；FlushIoWork 以 outstanding 作为排空条件。
-        private int _ioWorkExecuting = 0;
+        // ch:R6 待完成任务计数：在入队前登记，覆盖“已出队但尚未开始执行”的窗口；FlushIoWork 以其为排空条件。
         private int _ioWorkOutstanding = 0;
         private void IoWorkerLoop()
         {
@@ -5748,12 +5774,10 @@ namespace WindowsFormsApplication1
             {
                 foreach (Action act in _ioWorkQueue.GetConsumingEnumerable())
                 {
-                    System.Threading.Interlocked.Increment(ref _ioWorkExecuting);
                     try { act(); }
                     catch (Exception ex) { MsgErroeLog.WriteLog("IO输出异常:" + ex.Message); }
                     finally
                     {
-                        System.Threading.Interlocked.Decrement(ref _ioWorkExecuting);
                         System.Threading.Interlocked.Decrement(ref _ioWorkOutstanding);
                     }
                 }
@@ -5794,14 +5818,15 @@ namespace WindowsFormsApplication1
             if (_ioWorkerThread == null)
                 return;
             Stopwatch sw = Stopwatch.StartNew();
+            int outstanding = 0;
             while (sw.ElapsedMilliseconds < timeoutMs)
             {
-                int outstanding = System.Threading.Interlocked.CompareExchange(ref _ioWorkOutstanding, 0, 0);
+                outstanding = System.Threading.Interlocked.CompareExchange(ref _ioWorkOutstanding, 0, 0);
                 if (outstanding == 0)
                     return;
                 Thread.Sleep(5);
             }
-            MsgErroeLog.WriteLog("P1-07 关闭：IO 队列排空超时(" + timeoutMs + "ms)，可能残留输出");
+            MsgErroeLog.WriteLog("P1-07 关闭：IO 队列排空超时(" + timeoutMs + "ms)，剩余未完成项=" + outstanding + "，可能残留输出");
         }
 
         private void RequestIoPulse(Myjob job, bool okLine)
@@ -7071,56 +7096,56 @@ namespace WindowsFormsApplication1
                 {
                     if (myjob1.block.Inputs.Contains("jieshou"))
                     {
-                        myjob1.block.Inputs["jieshou"].Value = e.Selection;
+                        SetBlockInputSafe(myjob1, "jieshou", e.Selection);
                     }
                 }
                 if (manager1.JobCount > 1)
                 {
                     if (myjob2.block.Inputs.Contains("jieshou"))
                     {
-                        myjob2.block.Inputs["jieshou"].Value = e.Selection;
+                        SetBlockInputSafe(myjob2, "jieshou", e.Selection);
                     }
                 }
                 if (manager1.JobCount > 2)
                 {
                     if (myjob3.block.Inputs.Contains("jieshou"))
                     {
-                        myjob3.block.Inputs["jieshou"].Value = e.Selection;
+                        SetBlockInputSafe(myjob3, "jieshou", e.Selection);
                     }
                 }
                 if (manager1.JobCount > 3)
                 {
                     if (myjob4.block.Inputs.Contains("jieshou"))
                     {
-                        myjob4.block.Inputs["jieshou"].Value = e.Selection;
+                        SetBlockInputSafe(myjob4, "jieshou", e.Selection);
                     }
                 }
                 if (manager1.JobCount > 4)
                 {
                     if (myjob5.block.Inputs.Contains("jieshou"))
                     {
-                        myjob5.block.Inputs["jieshou"].Value = e.Selection;
+                        SetBlockInputSafe(myjob5, "jieshou", e.Selection);
                     }
                 }
                 if (manager1.JobCount > 5)
                 {
                     if (myjob6.block.Inputs.Contains("jieshou"))
                     {
-                        myjob6.block.Inputs["jieshou"].Value = e.Selection;
+                        SetBlockInputSafe(myjob6, "jieshou", e.Selection);
                     }
                 }
                 if (manager1.JobCount > 6)
                 {
                     if (myjob7.block.Inputs.Contains("jieshou"))
                     {
-                        myjob7.block.Inputs["jieshou"].Value = e.Selection;
+                        SetBlockInputSafe(myjob7, "jieshou", e.Selection);
                     }
                 }
                 if (manager1.JobCount > 7)
                 {
                     if (myjob8.block.Inputs.Contains("jieshou"))
                     {
-                        myjob8.block.Inputs["jieshou"].Value = e.Selection;
+                        SetBlockInputSafe(myjob8, "jieshou", e.Selection);
                     }
                 }
             }
@@ -7230,7 +7255,7 @@ namespace WindowsFormsApplication1
                 {
                     if (myjob1.block.Inputs.Contains("fins"))
                     {
-                        myjob1.block.Inputs["fins"].Value = e.Selection;
+                        SetBlockInputSafe(myjob1, "fins", e.Selection);
                     }
                 }
                 catch (Exception ex) { MsgErroeLog.WriteLog("异常:" + ex.Message); }
@@ -7255,7 +7280,7 @@ namespace WindowsFormsApplication1
                 {
                     if (myjob2.block.Inputs.Contains("fins"))
                     {
-                        myjob2.block.Inputs["fins"].Value = e.Selection;
+                        SetBlockInputSafe(myjob2, "fins", e.Selection);
                     }
                 }
                 catch (Exception ex) { MsgErroeLog.WriteLog("异常:" + ex.Message); }
@@ -7279,7 +7304,7 @@ namespace WindowsFormsApplication1
                 {
                     if (myjob3.block.Inputs.Contains("fins"))
                     {
-                        myjob3.block.Inputs["fins"].Value = e.Selection;
+                        SetBlockInputSafe(myjob3, "fins", e.Selection);
                     }
                 }
                 catch (Exception ex) { MsgErroeLog.WriteLog("异常:" + ex.Message); }
@@ -7303,7 +7328,7 @@ namespace WindowsFormsApplication1
                 {
                     if (myjob4.block.Inputs.Contains("fins"))
                     {
-                        myjob4.block.Inputs["fins"].Value = e.Selection;
+                        SetBlockInputSafe(myjob4, "fins", e.Selection);
                     }
                 }
                 catch (Exception ex) { MsgErroeLog.WriteLog("异常:" + ex.Message); }
@@ -7328,7 +7353,7 @@ namespace WindowsFormsApplication1
                 {
                     if (myjob5.block.Inputs.Contains("fins"))
                     {
-                        myjob5.block.Inputs["fins"].Value = e.Selection;
+                        SetBlockInputSafe(myjob5, "fins", e.Selection);
                     }
                 }
                 catch (Exception ex) { MsgErroeLog.WriteLog("异常:" + ex.Message); }
@@ -7353,7 +7378,7 @@ namespace WindowsFormsApplication1
                 {
                     if (myjob6.block.Inputs.Contains("fins"))
                     {
-                        myjob6.block.Inputs["fins"].Value = e.Selection;
+                        SetBlockInputSafe(myjob6, "fins", e.Selection);
                     }
                 }
                 catch (Exception ex) { MsgErroeLog.WriteLog("异常:" + ex.Message); }
@@ -7378,7 +7403,7 @@ namespace WindowsFormsApplication1
                 {
                     if (myjob7.block.Inputs.Contains("fins"))
                     {
-                        myjob7.block.Inputs["fins"].Value = e.Selection;
+                        SetBlockInputSafe(myjob7, "fins", e.Selection);
                     }
                 }
                 catch (Exception ex) { MsgErroeLog.WriteLog("异常:" + ex.Message); }
@@ -7403,7 +7428,7 @@ namespace WindowsFormsApplication1
                 {
                     if (myjob8.block.Inputs.Contains("fins"))
                     {
-                        myjob8.block.Inputs["fins"].Value = e.Selection;
+                        SetBlockInputSafe(myjob8, "fins", e.Selection);
                     }
                 }
                 catch (Exception ex) { MsgErroeLog.WriteLog("异常:" + ex.Message); }
@@ -7430,10 +7455,7 @@ namespace WindowsFormsApplication1
                     {
                         if (!omron.camera_dic[10][1].Contains("无"))
                         {
-                            omron.camera_dic[10][4] = omron.camera_dic[10][1];
-                            omron.camera_dic[10][5] = omron.camera_dic[10][0];
-
-                            omron.fins_xie[9] = true;
+                            omron.SetSwitchPending(10);
                         }
 
                         Task.Run(() =>
@@ -7447,9 +7469,7 @@ namespace WindowsFormsApplication1
                 {
                     if (!omron.camera_dic[10][1].Contains("无"))
                     {
-                        omron.camera_dic[10][4] = omron.camera_dic[10][1];
-                        omron.camera_dic[10][5] = omron.camera_dic[10][0];
-                        omron.fins_xie[9] = true;
+                        omron.SetSwitchPending(10);
                     }
                     omron.qiehuanzhong = 0;
                 }
@@ -7469,7 +7489,7 @@ namespace WindowsFormsApplication1
                     {
                         if (myjob1.block.Inputs.Contains("modbustcp"))
                         {
-                            myjob1.block.Inputs["modbustcp"].Value = e.Selection;
+                            SetBlockInputSafe(myjob1, "modbustcp", e.Selection);
                         }
                     }
                     catch (Exception ex) { MsgErroeLog.WriteLog("异常:" + ex.Message); }
@@ -7494,7 +7514,7 @@ namespace WindowsFormsApplication1
                     {
                         if (myjob2.block.Inputs.Contains("modbustcp"))
                         {
-                            myjob2.block.Inputs["modbustcp"].Value = e.Selection;
+                            SetBlockInputSafe(myjob2, "modbustcp", e.Selection);
                         }
                     }
                     catch (Exception ex) { MsgErroeLog.WriteLog("异常:" + ex.Message); }
@@ -7518,7 +7538,7 @@ namespace WindowsFormsApplication1
                     {
                         if (myjob3.block.Inputs.Contains("modbustcp"))
                         {
-                            myjob3.block.Inputs["modbustcp"].Value = e.Selection;
+                            SetBlockInputSafe(myjob3, "modbustcp", e.Selection);
                         }
                     }
                     catch (Exception ex) { MsgErroeLog.WriteLog("异常:" + ex.Message); }
@@ -7542,7 +7562,7 @@ namespace WindowsFormsApplication1
                     {
                         if (myjob4.block.Inputs.Contains("modbustcp"))
                         {
-                            myjob4.block.Inputs["modbustcp"].Value = e.Selection;
+                            SetBlockInputSafe(myjob4, "modbustcp", e.Selection);
                         }
                     }
                     catch (Exception ex) { MsgErroeLog.WriteLog("异常:" + ex.Message); }
@@ -7567,7 +7587,7 @@ namespace WindowsFormsApplication1
                     {
                         if (myjob5.block.Inputs.Contains("modbustcp"))
                         {
-                            myjob5.block.Inputs["modbustcp"].Value = e.Selection;
+                            SetBlockInputSafe(myjob5, "modbustcp", e.Selection);
                         }
                     }
                     catch (Exception ex) { MsgErroeLog.WriteLog("异常:" + ex.Message); }
@@ -7592,7 +7612,7 @@ namespace WindowsFormsApplication1
                     {
                         if (myjob6.block.Inputs.Contains("modbustcp"))
                         {
-                            myjob6.block.Inputs["modbustcp"].Value = e.Selection;
+                            SetBlockInputSafe(myjob6, "modbustcp", e.Selection);
                         }
                     }
                     catch (Exception ex) { MsgErroeLog.WriteLog("异常:" + ex.Message); }
@@ -7617,7 +7637,7 @@ namespace WindowsFormsApplication1
                     {
                         if (myjob7.block.Inputs.Contains("modbustcp"))
                         {
-                            myjob7.block.Inputs["modbustcp"].Value = e.Selection;
+                            SetBlockInputSafe(myjob7, "modbustcp", e.Selection);
                         }
                     }
                     catch (Exception ex) { MsgErroeLog.WriteLog("异常:" + ex.Message); }
@@ -7642,7 +7662,7 @@ namespace WindowsFormsApplication1
                     {
                         if (myjob8.block.Inputs.Contains("modbustcp"))
                         {
-                            myjob8.block.Inputs["modbustcp"].Value = e.Selection;
+                            SetBlockInputSafe(myjob8, "modbustcp", e.Selection);
                         }
                     }
                     catch (Exception ex) { MsgErroeLog.WriteLog("异常:" + ex.Message); }
@@ -7670,10 +7690,7 @@ namespace WindowsFormsApplication1
                     {
                         if (!modbustcp.camera_dic[10][1].Contains("无"))
                         {
-                            modbustcp.camera_dic[10][4] = modbustcp.camera_dic[10][1];
-                            modbustcp.camera_dic[10][5] = modbustcp.camera_dic[10][0];
-
-                            modbustcp.fins_xie[9] = true;
+                            modbustcp.SetSwitchPending(10);
                         }
 
                         Task.Run(() =>
@@ -7687,9 +7704,7 @@ namespace WindowsFormsApplication1
                 {
                     if (!modbustcp.camera_dic[10][1].Contains("无"))
                     {
-                        modbustcp.camera_dic[10][4] = modbustcp.camera_dic[10][1];
-                        modbustcp.camera_dic[10][5] = modbustcp.camera_dic[10][0];
-                        modbustcp.fins_xie[9] = true;
+                        modbustcp.SetSwitchPending(10);
                     }
                     modbustcp.qiehuanzhong = 0;
                 }
@@ -7709,7 +7724,7 @@ namespace WindowsFormsApplication1
                     {
                         if (myjob1.block.Inputs.Contains("modbusrtu"))
                         {
-                            myjob1.block.Inputs["modbusrtu"].Value = e.Selection;
+                            SetBlockInputSafe(myjob1, "modbusrtu", e.Selection);
                         }
                     }
                     catch (Exception ex) { MsgErroeLog.WriteLog("异常:" + ex.Message); }
@@ -7734,7 +7749,7 @@ namespace WindowsFormsApplication1
                     {
                         if (myjob2.block.Inputs.Contains("modbusrtu"))
                         {
-                            myjob2.block.Inputs["modbusrtu"].Value = e.Selection;
+                            SetBlockInputSafe(myjob2, "modbusrtu", e.Selection);
                         }
                     }
                     catch (Exception ex) { MsgErroeLog.WriteLog("异常:" + ex.Message); }
@@ -7758,7 +7773,7 @@ namespace WindowsFormsApplication1
                     {
                         if (myjob3.block.Inputs.Contains("modbusrtu"))
                         {
-                            myjob3.block.Inputs["modbusrtu"].Value = e.Selection;
+                            SetBlockInputSafe(myjob3, "modbusrtu", e.Selection);
                         }
                     }
                     catch (Exception ex) { MsgErroeLog.WriteLog("异常:" + ex.Message); }
@@ -7782,7 +7797,7 @@ namespace WindowsFormsApplication1
                     {
                         if (myjob4.block.Inputs.Contains("modbusrtu"))
                         {
-                            myjob4.block.Inputs["modbusrtu"].Value = e.Selection;
+                            SetBlockInputSafe(myjob4, "modbusrtu", e.Selection);
                         }
                     }
                     catch (Exception ex) { MsgErroeLog.WriteLog("异常:" + ex.Message); }
@@ -7807,7 +7822,7 @@ namespace WindowsFormsApplication1
                     {
                         if (myjob5.block.Inputs.Contains("modbusrtu"))
                         {
-                            myjob5.block.Inputs["modbusrtu"].Value = e.Selection;
+                            SetBlockInputSafe(myjob5, "modbusrtu", e.Selection);
                         }
                     }
                     catch (Exception ex) { MsgErroeLog.WriteLog("异常:" + ex.Message); }
@@ -7832,7 +7847,7 @@ namespace WindowsFormsApplication1
                     {
                         if (myjob6.block.Inputs.Contains("modbusrtu"))
                         {
-                            myjob6.block.Inputs["modbusrtu"].Value = e.Selection;
+                            SetBlockInputSafe(myjob6, "modbusrtu", e.Selection);
                         }
                     }
                     catch (Exception ex) { MsgErroeLog.WriteLog("异常:" + ex.Message); }
@@ -7857,7 +7872,7 @@ namespace WindowsFormsApplication1
                     {
                         if (myjob7.block.Inputs.Contains("modbusrtu"))
                         {
-                            myjob7.block.Inputs["modbusrtu"].Value = e.Selection;
+                            SetBlockInputSafe(myjob7, "modbusrtu", e.Selection);
                         }
                     }
                     catch (Exception ex) { MsgErroeLog.WriteLog("异常:" + ex.Message); }
@@ -7882,7 +7897,7 @@ namespace WindowsFormsApplication1
                     {
                         if (myjob8.block.Inputs.Contains("modbusrtu"))
                         {
-                            myjob8.block.Inputs["modbusrtu"].Value = e.Selection;
+                            SetBlockInputSafe(myjob8, "modbusrtu", e.Selection);
                         }
                     }
                     catch (Exception ex) { MsgErroeLog.WriteLog("异常:" + ex.Message); }
@@ -7910,10 +7925,7 @@ namespace WindowsFormsApplication1
                     {
                         if (!modbusrtu.camera_dic[10][1].Contains("无"))
                         {
-                            modbusrtu.camera_dic[10][4] = modbusrtu.camera_dic[10][1];
-                            modbusrtu.camera_dic[10][5] = modbusrtu.camera_dic[10][0];
-
-                            modbusrtu.fins_xie[9] = true;
+                            modbusrtu.SetSwitchPending(10);
                         }
 
                         Task.Run(() =>
@@ -7927,9 +7939,7 @@ namespace WindowsFormsApplication1
                 {
                     if (!modbusrtu.camera_dic[10][1].Contains("无"))
                     {
-                        modbusrtu.camera_dic[10][4] = modbusrtu.camera_dic[10][1];
-                        modbusrtu.camera_dic[10][5] = modbusrtu.camera_dic[10][0];
-                        modbusrtu.fins_xie[9] = true;
+                        modbusrtu.SetSwitchPending(10);
                     }
                     modbusrtu.qiehuanzhong = 0;
                 }
@@ -10626,7 +10636,7 @@ namespace WindowsFormsApplication1
                 float baoguang_temp = float.Parse(tbExposure1.Text);
                 if (myjob1.baoguang != 0 && myjob1.block != null && myjob1.block.Inputs.Contains("baoguang"))
                 {
-                    myjob1.block.Inputs["baoguang"].Value = baoguang_temp;
+                    SetBlockInputSafe(myjob1, "baoguang", baoguang_temp);
                 }
                 // ch:读取相机曝光范围并限制，避免配置值超出相机允许范围导致 Set 失败（0x80000102）
                 MyCamera.MVCC_FLOATVALUE fval1 = new MyCamera.MVCC_FLOATVALUE();
@@ -11842,10 +11852,11 @@ namespace WindowsFormsApplication1
             stPixelConvertParam.enSrcPixelType = nPixelType;//源数据的格式
             stPixelConvertParam.nSrcDataLen = (uint)(nWidth * nHeight * ((((uint)nPixelType) >> 16) & 0x00ff) >> 3);
 
-            stPixelConvertParam.nDstBufferSize = (uint)(nWidth * nHeight * ((((uint)MyCamera.MvGvspPixelType.PixelType_Gvsp_RGB8_Packed) >> 16) & 0x00ff) >> 3);
             stPixelConvertParam.pDstBuffer = pOutData;//转换后的数据
             stPixelConvertParam.enDstPixelType = MyCamera.MvGvspPixelType.PixelType_Gvsp_Mono8;
-            stPixelConvertParam.nDstBufferSize = (uint)(nWidth * nHeight * 3);
+            // ch:P0 目标为 Mono8，容量必须按实际 W*H 上报；原实现沿用 RGB8 口径报 W*H*3，
+            //   大于调用方为 Mono8 分配的缓冲（W*H）→ SDK 可能超写，破坏原生堆。
+            stPixelConvertParam.nDstBufferSize = (uint)(nWidth * nHeight);
 
             nRet = device.MV_CC_ConvertPixelType_NET(ref stPixelConvertParam);//格式转换
             if (MyCamera.MV_OK != nRet)
@@ -12765,7 +12776,7 @@ namespace WindowsFormsApplication1
                 float baoguang_temp = float.Parse(tbExposure2.Text);
                 if (myjob2.baoguang != 0 && myjob2.block != null && myjob2.block.Inputs.Contains("baoguang"))
                 {
-                    myjob2.block.Inputs["baoguang"].Value = baoguang_temp;
+                    SetBlockInputSafe(myjob2, "baoguang", baoguang_temp);
                 }
                 // ch:读取相机曝光范围并限制，避免配置值超出相机允许范围导致 Set 失败（0x80000102）
                 MyCamera.MVCC_FLOATVALUE fval2 = new MyCamera.MVCC_FLOATVALUE();
@@ -13267,7 +13278,7 @@ namespace WindowsFormsApplication1
                 float baoguang_temp = float.Parse(tbExposure3.Text);
                 if (myjob3.baoguang != 0 && myjob3.block != null && myjob3.block.Inputs.Contains("baoguang"))
                 {
-                    myjob3.block.Inputs["baoguang"].Value = baoguang_temp;
+                    SetBlockInputSafe(myjob3, "baoguang", baoguang_temp);
                 }
                 // ch:读取相机曝光范围并限制，避免配置值超出相机允许范围导致 Set 失败（0x80000102）
                 MyCamera.MVCC_FLOATVALUE fval3 = new MyCamera.MVCC_FLOATVALUE();
@@ -13321,7 +13332,7 @@ namespace WindowsFormsApplication1
                 float baoguang_temp = float.Parse(tbExposure4.Text);
                 if (myjob4.baoguang != 0 && myjob4.block != null && myjob4.block.Inputs.Contains("baoguang"))
                 {
-                    myjob4.block.Inputs["baoguang"].Value = baoguang_temp;
+                    SetBlockInputSafe(myjob4, "baoguang", baoguang_temp);
                 }
                 // ch:读取相机曝光范围并限制，避免配置值超出相机允许范围导致 Set 失败（0x80000102）
                 MyCamera.MVCC_FLOATVALUE fval4 = new MyCamera.MVCC_FLOATVALUE();
@@ -13715,6 +13726,12 @@ namespace WindowsFormsApplication1
                 frm3.Visible = true;
             else
                 frm3.Visible = false;
+        }
+
+        // ch:P2 「通讯 → 版本」：显示版本信息窗口（原生 WinForms 窗体，可点开查询；版本号 = 推送仓库的 tag，含时间线）
+        private void 版本ToolStripMenuItem_Click(object sender, EventArgs e)
+        {
+            FormVersion.ShowVersion(this);
         }
 
         private void tabPage5_Click(object sender, EventArgs e)
@@ -16305,7 +16322,7 @@ namespace WindowsFormsApplication1
                 float baoguang_temp = float.Parse(tbExposure5.Text);
                 if (myjob5.baoguang != 0 && myjob5.block != null && myjob5.block.Inputs.Contains("baoguang"))
                 {
-                    myjob5.block.Inputs["baoguang"].Value = baoguang_temp;
+                    SetBlockInputSafe(myjob5, "baoguang", baoguang_temp);
                 }
                 // ch:读取相机曝光范围并限制，避免配置值超出相机允许范围导致 Set 失败（0x80000102）
                 MyCamera.MVCC_FLOATVALUE fval5 = new MyCamera.MVCC_FLOATVALUE();
@@ -16359,7 +16376,7 @@ namespace WindowsFormsApplication1
                 float baoguang_temp = float.Parse(tbExposure6.Text);
                 if (myjob6.baoguang != 0 && myjob6.block != null && myjob6.block.Inputs.Contains("baoguang"))
                 {
-                    myjob6.block.Inputs["baoguang"].Value = baoguang_temp;
+                    SetBlockInputSafe(myjob6, "baoguang", baoguang_temp);
                 }
                 // ch:读取相机曝光范围并限制，避免配置值超出相机允许范围导致 Set 失败（0x80000102）
                 MyCamera.MVCC_FLOATVALUE fval6 = new MyCamera.MVCC_FLOATVALUE();
@@ -16413,7 +16430,7 @@ namespace WindowsFormsApplication1
                 float baoguang_temp = float.Parse(tbExposure7.Text);
                 if (myjob7.baoguang != 0 && myjob7.block != null && myjob7.block.Inputs.Contains("baoguang"))
                 {
-                    myjob7.block.Inputs["baoguang"].Value = baoguang_temp;
+                    SetBlockInputSafe(myjob7, "baoguang", baoguang_temp);
                 }
                 // ch:读取相机曝光范围并限制，避免配置值超出相机允许范围导致 Set 失败（0x80000102）
                 MyCamera.MVCC_FLOATVALUE fval7 = new MyCamera.MVCC_FLOATVALUE();
@@ -16467,7 +16484,7 @@ namespace WindowsFormsApplication1
                 float baoguang_temp = float.Parse(tbExposure8.Text);
                 if (myjob8.baoguang != 0 && myjob8.block != null && myjob8.block.Inputs.Contains("baoguang"))
                 {
-                    myjob8.block.Inputs["baoguang"].Value = baoguang_temp;
+                    SetBlockInputSafe(myjob8, "baoguang", baoguang_temp);
                 }
                 // ch:读取相机曝光范围并限制，避免配置值超出相机允许范围导致 Set 失败（0x80000102）
                 MyCamera.MVCC_FLOATVALUE fval8 = new MyCamera.MVCC_FLOATVALUE();
@@ -20578,7 +20595,7 @@ namespace WindowsFormsApplication1
                             {
                                 if (myjob1.block.Inputs[j].Name.Contains("canshu"))
                                 {
-                                    myjob1.block.Inputs["canshu"].Value = canshu;
+                                    SetBlockInputSafe(myjob1, "canshu", canshu);
                                 }
                             }
                             break;
@@ -20587,7 +20604,7 @@ namespace WindowsFormsApplication1
                             {
                                 if (myjob2.block.Inputs[j].Name.Contains("canshu"))
                                 {
-                                    myjob2.block.Inputs["canshu"].Value = canshu;
+                                    SetBlockInputSafe(myjob2, "canshu", canshu);
                                 }
                             }
                             break;
@@ -20596,7 +20613,7 @@ namespace WindowsFormsApplication1
                             {
                                 if (myjob3.block.Inputs[j].Name.Contains("canshu"))
                                 {
-                                    myjob3.block.Inputs["canshu"].Value = canshu;
+                                    SetBlockInputSafe(myjob3, "canshu", canshu);
                                 }
                             }
                             break;
@@ -20605,7 +20622,7 @@ namespace WindowsFormsApplication1
                             {
                                 if (myjob4.block.Inputs[j].Name.Contains("canshu"))
                                 {
-                                    myjob4.block.Inputs["canshu"].Value = canshu;
+                                    SetBlockInputSafe(myjob4, "canshu", canshu);
                                 }
                             }
                             break;
@@ -20614,7 +20631,7 @@ namespace WindowsFormsApplication1
                             {
                                 if (myjob5.block.Inputs[j].Name.Contains("canshu"))
                                 {
-                                    myjob5.block.Inputs["canshu"].Value = canshu;
+                                    SetBlockInputSafe(myjob5, "canshu", canshu);
                                 }
                             }
                             break;
@@ -20623,7 +20640,7 @@ namespace WindowsFormsApplication1
                             {
                                 if (myjob6.block.Inputs[j].Name.Contains("canshu"))
                                 {
-                                    myjob6.block.Inputs["canshu"].Value = canshu;
+                                    SetBlockInputSafe(myjob6, "canshu", canshu);
                                 }
                             }
                             break;
@@ -20632,7 +20649,7 @@ namespace WindowsFormsApplication1
                             {
                                 if (myjob7.block.Inputs[j].Name.Contains("canshu"))
                                 {
-                                    myjob7.block.Inputs["canshu"].Value = canshu;
+                                    SetBlockInputSafe(myjob7, "canshu", canshu);
                                 }
                             }
                             break;
@@ -20641,7 +20658,7 @@ namespace WindowsFormsApplication1
                             {
                                 if (myjob8.block.Inputs[j].Name.Contains("canshu"))
                                 {
-                                    myjob8.block.Inputs["canshu"].Value = canshu;
+                                    SetBlockInputSafe(myjob8, "canshu", canshu);
                                 }
                             }
                             break;

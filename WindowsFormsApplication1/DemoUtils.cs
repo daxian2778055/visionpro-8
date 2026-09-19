@@ -104,6 +104,35 @@ namespace WindowsFormsApplication1
                 err="Data for writting is not corrent: " + ex.Message;
             }
         }
+        /// <summary>
+        /// ch:P2-④ 与 WriteResultRender1 相同，但同时返回是否写入成功。
+        /// 用于多寄存器(string)循环写：逐次调用后按位与聚合真实结果，避免"前次失败、末次成功"被文本判定误清 pending。
+        /// </summary>
+        public static bool WriteResultRenderOk(Func<OperateResult> write, string address, out string err)
+        {
+            bool ok = false;
+            try
+            {
+                OperateResult result = write();
+                if (result.IsSuccess)
+                {
+                    ok = true;
+                    err = DateTime.Now.ToString("[HH:mm:ss] ") + $"[{address}] Write Success";
+                }
+                else
+                {
+                    ok = false;
+                    err = DateTime.Now.ToString("[HH:mm:ss] ") + $"[{address}] Write Failed {Environment.NewLine} Reason：{result.ToMessageShowString()}";
+                }
+            }
+            catch (Exception ex)
+            {
+                // 主要是为了捕获写入的值不正确的情况
+                ok = false;
+                err = "Data for writting is not corrent: " + ex.Message;
+            }
+            return ok;
+        }
         public static void BulkReadRenderResult( HslCommunication.Core.IReadWriteNet readWrite, TextBox addTextBox, TextBox lengthTextBox, TextBox resultTextBox )
         {
             try

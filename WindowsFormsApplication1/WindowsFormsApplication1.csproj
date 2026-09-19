@@ -540,6 +540,12 @@
     <Compile Include="FormOmron.Designer.cs">
       <DependentUpon>FormOmron.cs</DependentUpon>
     </Compile>
+    <Compile Include="FormVersion.cs">
+      <SubType>Form</SubType>
+    </Compile>
+    <Compile Include="FormVersion.Designer.cs">
+      <DependentUpon>FormVersion.cs</DependentUpon>
+    </Compile>
     <Compile Include="ClassIni.cs" />
     <Compile Include="ErrorLog.cs" />
     <Compile Include="Form1.cs">

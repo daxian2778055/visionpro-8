@@ -90,6 +90,7 @@
             this.三菱Fx编程口ToolStripMenuItem = new System.Windows.Forms.ToolStripMenuItem();
             this.toolStripMenuItem1 = new System.Windows.Forms.ToolStripMenuItem();
             this.modbusrtuToolStripMenuItem = new System.Windows.Forms.ToolStripMenuItem();
+            this.版本ToolStripMenuItem = new System.Windows.Forms.ToolStripMenuItem();
             this.textBox3 = new System.Windows.Forms.TextBox();
             this.label5 = new System.Windows.Forms.Label();
             this.button11 = new System.Windows.Forms.Button();
@@ -1216,7 +1217,8 @@
             this.finsToolStripMenuItem,
             this.三菱Fx编程口ToolStripMenuItem,
             this.toolStripMenuItem1,
-            this.modbusrtuToolStripMenuItem});
+            this.modbusrtuToolStripMenuItem,
+            this.版本ToolStripMenuItem});
             resources.ApplyResources(this.查找ToolStripMenuItem, "查找ToolStripMenuItem");
             this.查找ToolStripMenuItem.Name = "查找ToolStripMenuItem";
             // 
@@ -1267,6 +1269,12 @@
             this.modbusrtuToolStripMenuItem.Name = "modbusrtuToolStripMenuItem";
             resources.ApplyResources(this.modbusrtuToolStripMenuItem, "modbusrtuToolStripMenuItem");
             this.modbusrtuToolStripMenuItem.Click += new System.EventHandler(this.modbusrtuToolStripMenuItem_Click);
+            // 
+            // 版本ToolStripMenuItem
+            // 
+            this.版本ToolStripMenuItem.Name = "版本ToolStripMenuItem";
+            resources.ApplyResources(this.版本ToolStripMenuItem, "版本ToolStripMenuItem");
+            this.版本ToolStripMenuItem.Click += new System.EventHandler(this.版本ToolStripMenuItem_Click);
             // 
             // textBox3
             // 
@@ -7134,6 +7142,7 @@
         private System.Windows.Forms.ToolStripMenuItem 打开日志界面ToolStripMenuItem;
         private System.Windows.Forms.ToolStripMenuItem 打开参数调整界面ToolStripMenuItem;
         private System.Windows.Forms.ToolStripMenuItem 通讯界面ToolStripMenuItem;
+        private System.Windows.Forms.ToolStripMenuItem 版本ToolStripMenuItem;
         private System.Windows.Forms.CheckBox checkBox27;
         private System.Windows.Forms.CheckBox checkBox28;
         private System.Windows.Forms.CheckBox checkBox29;

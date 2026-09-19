@@ -1099,9 +1099,12 @@ namespace WindowsFormsApplication1
                                                             }
                                                             else
                                                             {
-                                                                if (!camera_dic[10][1].Contains("无"))
+                                                                lock (_omronIoLock)
                                                                 {
-                                                                    camera_dic[10][4] = camera_dic[10][1];
+                                                                    if (!camera_dic[10][1].Contains("无"))
+                                                                    {
+                                                                        camera_dic[10][4] = camera_dic[10][1];
+                                                                    }
                                                                 }
                                                                 MsgErroeLog.WriteLog("方案路径:" + lujing + ":不存在!");
                                                             }
@@ -1115,6 +1118,7 @@ namespace WindowsFormsApplication1
                                                             {
                                                                 SelectionChangedEventArgs E = new SelectionChangedEventArgs(shuju_temp, pap.Key.ToString());
                                                                 getData(this, E);
+                                                                camera_dic[pap.Key][1] = shuju_temp; // ch:P2-⑥ 记录已处理触发值，防止 PLC 触发字保持期间重复触发采图
                                                             }
                                                         }
 
@@ -1149,6 +1153,19 @@ namespace WindowsFormsApplication1
                 xie(value);
             }
         }
+        // ch:P0 方案切换写回暂存：与 xie 消费共用 _omronIoLock，保证 [4](值)/[5](通道) 原子配对，消除跨线程撕裂
+        public void SetSwitchPending(int camIndex)
+        {
+            lock (_omronIoLock)
+            {
+                if (camera_dic.ContainsKey(camIndex) && !camera_dic[camIndex][1].Contains("无"))
+                {
+                    camera_dic[camIndex][4] = camera_dic[camIndex][1];
+                    camera_dic[camIndex][5] = camera_dic[camIndex][0];
+                    if (camIndex >= 1 && camIndex <= fins_xie.Length) fins_xie[camIndex - 1] = true;
+                }
+            }
+        }
         public void xie(string value)
         {
             lock (_omronIoLock) { // ch:R4 串行化 pending 全表遍历消费
@@ -1163,6 +1180,8 @@ namespace WindowsFormsApplication1
                 {
                     if (pat.Value[5] != "无")
                     {
+                        fins_temp = ""; // ch:P2-② 每轮重置写回渲染结果，避免上一相机失败串入本相机判定
+                        bool anyWriteFailed = false; // ch:P2-④ 聚合本相机所有写回的真实结果（多寄存器循环写逐次与）
                         foreach (var par in fins_dic)
                         {
                             if (pat.Value[5] == par.Value[0])
@@ -1177,7 +1196,7 @@ namespace WindowsFormsApplication1
                                     short[] vals = new short[parts.Length];
                                     for (int i = 0; i < parts.Length; i++)
                                         vals[i] = (short)Math.Round(double.Parse(parts[i].Trim()));
-                                    DemoUtils.WriteResultRender1(() => omronFinsNet.Write("D" + addr_start.ToString(), vals), "D" + addr_start.ToString(), out fins_temp);
+                                    if (!DemoUtils.WriteResultRenderOk(() => omronFinsNet.Write("D" + addr_start.ToString(), vals), "D" + addr_start.ToString(), out fins_temp)) anyWriteFailed = true; // ch:P2-④
                                     for (int j = 0; j < vals.Length; j++)
                                     {
                                         int xuanzhong_temp = addr_start - int.Parse(address_qishi.ToString()) + j;
@@ -1191,7 +1210,7 @@ namespace WindowsFormsApplication1
                                     int[] vals = new int[parts.Length];
                                     for (int i = 0; i < parts.Length; i++)
                                         vals[i] = (int)Math.Round(double.Parse(parts[i].Trim()));
-                                    DemoUtils.WriteResultRender1(() => omronFinsNet.Write("D" + addr_start.ToString(), vals), "D" + addr_start.ToString(), out fins_temp);
+                                    if (!DemoUtils.WriteResultRenderOk(() => omronFinsNet.Write("D" + addr_start.ToString(), vals), "D" + addr_start.ToString(), out fins_temp)) anyWriteFailed = true; // ch:P2-④
                                     for (int j = 0; j < vals.Length * 2; j++)
                                     {
                                         int xuanzhong_temp = addr_start - int.Parse(address_qishi.ToString()) + j;
@@ -1205,7 +1224,7 @@ namespace WindowsFormsApplication1
                                     float[] vals = new float[parts.Length];
                                     for (int i = 0; i < parts.Length; i++)
                                         vals[i] = float.Parse(parts[i].Trim());
-                                    DemoUtils.WriteResultRender1(() => omronFinsNet.Write("D" + addr_start.ToString(), vals), "D" + addr_start.ToString(), out fins_temp);
+                                    if (!DemoUtils.WriteResultRenderOk(() => omronFinsNet.Write("D" + addr_start.ToString(), vals), "D" + addr_start.ToString(), out fins_temp)) anyWriteFailed = true; // ch:P2-④
                                     for (int j = 0; j < vals.Length * 2; j++)
                                     {
                                         int xuanzhong_temp = addr_start - int.Parse(address_qishi.ToString()) + j;
@@ -1219,7 +1238,7 @@ namespace WindowsFormsApplication1
                                     for (int j = 0; j < parts.Length; j++)
                                     {
                                         int xuanzhong_temp = addr_start - int.Parse(address_qishi.ToString()) + j;
-                                        DemoUtils.WriteResultRender1(() => omronFinsNet.Write("D" + (addr_start + j).ToString(), parts[j].Trim()), "D" + (addr_start + j).ToString(), out fins_temp);
+                                        if (!DemoUtils.WriteResultRenderOk(() => omronFinsNet.Write("D" + (addr_start + j).ToString(), parts[j].Trim()), "D" + (addr_start + j).ToString(), out fins_temp)) anyWriteFailed = true; // ch:P2-④ 逐寄存器聚合，避免末次成功掩盖前次失败
                                         if (gridUi)
                                             SetModbusGridValue(fins_data[xuanzhong_temp][0], fins_data[xuanzhong_temp][1], fins_temp);
                                     }
@@ -1227,7 +1246,11 @@ namespace WindowsFormsApplication1
                                 break;
                             }
                         }
-                        pat.Value[5] = "无";
+                        // ch:P2-④ 以逐次写入的真实 bool 结果聚合判定（替代文本判定），避免多寄存器循环写"末次成功掩盖前次失败"
+                        if (!anyWriteFailed)
+                            pat.Value[5] = "无";
+                        else
+                            MsgErroeLog.WriteLog("普通写回失败(保留 pending) cam=" + pat.Key + " ch=" + pat.Value[5] + " val=[" + pat.Value[4] + "] msg=" + fins_temp);
                     }
                 }
             }
