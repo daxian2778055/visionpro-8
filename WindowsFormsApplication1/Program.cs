@@ -263,7 +263,7 @@ namespace WindowsFormsApplication1
             ErrorLog MsgErroeLog = new ErrorLog();
             MsgErroeLog.WriteLog("未处理task异常" + e.Exception.ToString());
             WriteCrashDump(e.Exception);
-            MessageBox.Show("程序后台任务发生异常，详细信息已写入日志文件", "程序异常", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            // ch:P2-15 该事件在终结器线程触发：MessageBox 会永久挂起该线程并随机抢焦点，仅保留日志与转储
         }
 
         private static void CurrentDomain_UnhandleException(object sender, UnhandledExceptionEventArgs e)

@@ -118,6 +118,22 @@ namespace WindowsFormsApplication1
             for (int i = 7; i >= 0; i--)
                 Monitor.Exit(_cameraLocks[i]);
         }
+
+        // ch:P0-1 带超时的全锁获取（升序，符合锁序约定③）：任一锁超时则回滚已取的锁并返回 false，供非阻塞路径跳过本轮
+        private bool TryLockAllCameras(int timeoutMs)
+        {
+            int k = 0;
+            for (; k < 8; k++)
+            {
+                if (!Monitor.TryEnter(_cameraLocks[k], timeoutMs))
+                {
+                    for (int j = k - 1; j >= 0; j--)
+                        Monitor.Exit(_cameraLocks[j]);
+                    return false;
+                }
+            }
+            return true;
+        }
         [System.Runtime.ExceptionServices.HandleProcessCorruptedStateExceptions]
         [DllImport("kernel32.dll", EntryPoint = "CopyMemory", SetLastError = false)]
         public static extern void CopyMemory(IntPtr dest, IntPtr src, uint count);
@@ -1038,11 +1054,19 @@ namespace WindowsFormsApplication1
                 {
                     path_1 = path_1 + "方案已损坏";
                     MsgErroeLog.WriteLog(ex.Message + "方案加载失败!");
-                    MessageBox.Show("方案文件加载失败，请检查方案路径配置：" + ex.Message, "方案加载失败", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                    // ch:P1-13 原实现后台线程弹无 owner 模态框，可被主窗压底导致本线程永久停等；改封送 UI 带 owner
+                    SafeBeginInvoke(new Action(() => MessageBox.Show(this, "方案文件加载失败，请检查方案路径配置：" + ex.Message, "方案加载失败", MessageBoxButtons.OK, MessageBoxIcon.Error)));
                 }
                 int yanshi_ms = 5;
                 int.TryParse(canshuIni.ReadString("camera", "yanshi", "5").Replace("\0", ""), out yanshi_ms);
                 Thread.Sleep(yanshi_ms);
+                // ch:P0-4 以下菜单/标签操作原在 jindu 后台线程直接改 DropDownItems 并挂 Click，与 UI 首帧布局/绘制并发
+                //   （CheckForIllegalCrossThreadCalls=false 掩盖）。整体封送 UI 线程执行；此段仅读小文件，放 UI 无耗时问题。
+                //   本线程启动于构造函数，可能早于窗口句柄建立：先等句柄（上限 10s）再同步 Invoke，保证菜单必定构建。
+                for (int hw = 0; hw < 200 && !IsHandleCreated; hw++)
+                    Thread.Sleep(50);
+                Invoke(new Action(() =>
+                {
                 item_sum = this.设置ToolStripMenuItem.DropDownItems.Count;
                 StreamReader sr = null;
                 try
@@ -1136,6 +1160,7 @@ namespace WindowsFormsApplication1
                 {
                     MsgErroeLog.WriteLog(ex.Message);
                 }
+                })); // ch:P0-4 UI 封送段结束
                 try
                 {
                     if (manager1.JobCount > 0)
@@ -1316,6 +1341,10 @@ namespace WindowsFormsApplication1
         {
             try
             {
+                // ch:P0-3 本方法读 block 的 Inputs/Outputs 并做 calibdrop，ToolBlock 非线程安全，须与该相机检测线程 block.Run 互斥
+                lock (myjob.blockLock)
+                {
+                    if (myjob.block == null) return;
                 myjob.biaotou = "";
                 myjob.zidongbaoguang = false;
                 try
@@ -1366,6 +1395,7 @@ namespace WindowsFormsApplication1
                         myjob.myTable1.Rows[i]["实际Y"] = myjob.calib.Calibration.GetRawCalibratedPointY(i);
                     }
                 }
+                } // ch:P0-3 blockLock 段结束
             }
             catch (Exception ex)
             {
@@ -2312,18 +2342,22 @@ namespace WindowsFormsApplication1
                     checkBox50.CheckState = CheckState.Unchecked;
 
                 decimal.TryParse(canshuIni.ReadString("time", "feng", "100"), out devalue);
+                devalue = ClampToUpDown(numericUpDown22, devalue); // ch:P1-5 先夹取再赋值/派生
                 numericUpDown22.Value = devalue;
                 feng = double.Parse(devalue.ToString());
 
                 decimal.TryParse(canshuIni.ReadString("time", "IOyanshi", "0"), out devalue);
+                devalue = ClampToUpDown(numericUpDown5, devalue); // ch:P1-5
                 numericUpDown5.Value = devalue;
 
                 decimal.TryParse(canshuIni.ReadString("cuntu", "zhangshu", "200"), out devalue);
+                devalue = ClampToUpDown(numericUpDown4, devalue); // ch:P1-5 越界(如 0<Min)曾抛异常吞掉后续启动
                 zhangshu = devalue;
                 numericUpDown4.Value = devalue;
 
                 //this.FormBorderStyle = FormBorderStyle.FixedSingle;
                 decimal.TryParse(canshuIni.ReadString("time", "NG", "1000"), out devalue);
+                devalue = ClampToUpDown(numericUpDown2, devalue); // ch:P1-5
                 jiankongshijian = (double)devalue;
                 numericUpDown2.Value = devalue;
 
@@ -2333,50 +2367,50 @@ namespace WindowsFormsApplication1
                 baoguang_set();
                 Thread.Sleep(100);
                 
-                // 设置各相机参数到硬件
-                if (m_MyCamera[0] != null)
+                // 设置各相机参数到硬件（ch:P2 收紧：仅对使能(en==1)的相机自动下发，屏蔽相机即使物理在线也不写参数）
+                if (m_MyCamera[0] != null && myjob1.en == 1)
                 {
                     bnSetParam_Click(null, null);
                     bnGetParam_Click(null, null);
                     MsgErroeLog.WriteLog("首次启动：相机1参数已设置");
                 }
-                if (m_MyCamera[1] != null && manager1 != null && manager1.JobCount > 1)
+                if (m_MyCamera[1] != null && myjob2.en == 1 && manager1 != null && manager1.JobCount > 1)
                 {
                     bnSetParam2_Click(null, null);
                     bnGetParam2_Click(null, null);
                     MsgErroeLog.WriteLog("首次启动：相机2参数已设置");
                 }
-                if (m_MyCamera[2] != null && manager1 != null && manager1.JobCount > 2)
+                if (m_MyCamera[2] != null && myjob3.en == 1 && manager1 != null && manager1.JobCount > 2)
                 {
                     bnSetParam3_Click(null, null);
                     bnGetParam3_Click(null, null);
                     MsgErroeLog.WriteLog("首次启动：相机3参数已设置");
                 }
-                if (m_MyCamera[3] != null && manager1 != null && manager1.JobCount > 3)
+                if (m_MyCamera[3] != null && myjob4.en == 1 && manager1 != null && manager1.JobCount > 3)
                 {
                     bnSetParam4_Click(null, null);
                     bnGetParam4_Click(null, null);
                     MsgErroeLog.WriteLog("首次启动：相机4参数已设置");
                 }
-                if (m_MyCamera[4] != null && manager1 != null && manager1.JobCount > 4)
+                if (m_MyCamera[4] != null && myjob5.en == 1 && manager1 != null && manager1.JobCount > 4)
                 {
                     bnSetParam5_Click(null, null);
                     bnGetParam5_Click(null, null);
                     MsgErroeLog.WriteLog("首次启动：相机5参数已设置");
                 }
-                if (m_MyCamera[5] != null && manager1 != null && manager1.JobCount > 5)
+                if (m_MyCamera[5] != null && myjob6.en == 1 && manager1 != null && manager1.JobCount > 5)
                 {
                     bnSetParam6_Click(null, null);
                     bnGetParam6_Click(null, null);
                     MsgErroeLog.WriteLog("首次启动：相机6参数已设置");
                 }
-                if (m_MyCamera[6] != null && manager1 != null && manager1.JobCount > 6)
+                if (m_MyCamera[6] != null && myjob7.en == 1 && manager1 != null && manager1.JobCount > 6)
                 {
                     bnSetParam7_Click(null, null);
                     bnGetParam7_Click(null, null);
                     MsgErroeLog.WriteLog("首次启动：相机7参数已设置");
                 }
-                if (m_MyCamera[7] != null && manager1 != null && manager1.JobCount > 7)
+                if (m_MyCamera[7] != null && myjob8.en == 1 && manager1 != null && manager1.JobCount > 7)
                 {
                     bnSetParam8_Click(null, null);
                     bnGetParam8_Click(null, null);
@@ -2821,7 +2855,9 @@ namespace WindowsFormsApplication1
                 button2.Enabled = true;
                 button1.Enabled = true;
                 Frm2.Show();
-                Frm2.start = 0;
+                // ch:P1-6 若启动加载已先完成（门闩已归 0、Frm2 已被关过），此处 start=0 会让进度窗永不被定时器关闭 → 常驻遮挡。
+                //   按当前门闩状态决定：仍在加载才 0，否则直接 1（Frm2 计时器会自行关闭）。
+                Frm2.start = (Volatile.Read(ref qiehuanzhong) == 0) ? 1 : 0;
             }
             this.DesktopLocation = new Point(150, 150);
 
@@ -3785,6 +3821,13 @@ namespace WindowsFormsApplication1
             }
         }
 
+        // ch:P1-5 ini 值越界会抛 ArgumentOutOfRangeException 被外层大 catch 吞掉（后续启动步骤全部丢失），赋值前先夹到控件范围
+        private static decimal ClampToUpDown(NumericUpDown up, decimal v)
+        {
+            if (v < up.Minimum) return up.Minimum;
+            if (v > up.Maximum) return up.Maximum;
+            return v;
+        }
         // ch:P0 工具块输入安全设置：事件线程（通讯/轮询回调）直接写 block.Inputs 会与检测线程 block.Run() 并发。
         //   统一走本方法，按 job 粒度加锁，与 block.Run() 的临界区互斥。
         private void SetBlockInputSafe(Myjob job, string inputName, object value)
@@ -5125,24 +5168,25 @@ namespace WindowsFormsApplication1
                                         {
                                             if (myjob.trrigerEn == true || myjob.triggerMode == "通讯触发")
                                             {
+                                                // ch:P2-19 用本 Task 局部快照替代共享字段 myjob.tianbiao 接力：
+                                                //   同相机两帧 Task 并发时，后写会覆盖前者未处理完的行，导致 N 帧行记成 N+1 帧数据
+                                                string csvLine = jiSnapshot;
                                                 if (tempout1 == "Accept")
                                                 {
                                                     runlog1(1, 0, myjob.path_number);
-                                                    myjob.tianbiao = jiSnapshot; // ch:P2-① 用检测线程锁内快照，Task 不再回读 Outputs（消除 N+1 帧记到 N 帧行）
-                                                    if (myjob.tianbiao.Contains(","))
+                                                    if (csvLine.Contains(","))
                                                     {
-                                                        myjob.tianbiao = myjob.tianbiao.Remove(myjob.tianbiao.Length - 1, 1);
-                                                        runlog2(myjob.tianbiao, myjob.tianbiao, myjob.path_number, 1);
+                                                        csvLine = csvLine.Remove(csvLine.Length - 1, 1);
+                                                        runlog2(csvLine, csvLine, myjob.path_number, 1);
                                                     }
                                                 }
                                                 else
                                                 {
                                                     runlog1(0, 1, myjob.path_number);
-                                                    myjob.tianbiao = jiSnapshot; // ch:P2-① 用检测线程锁内快照，Task 不再回读 Outputs（消除 N+1 帧记到 N 帧行）
-                                                    if (myjob.tianbiao.Contains(","))
+                                                    if (csvLine.Contains(","))
                                                     {
-                                                        myjob.tianbiao = myjob.tianbiao.Remove(myjob.tianbiao.Length - 1, 1);
-                                                        runlog2(myjob.tianbiao, myjob.tianbiao, myjob.path_number, 0);
+                                                        csvLine = csvLine.Remove(csvLine.Length - 1, 1);
+                                                        runlog2(csvLine, csvLine, myjob.path_number, 0);
                                                     }
                                                 }
                                             }
@@ -5157,16 +5201,16 @@ namespace WindowsFormsApplication1
                                                 if (tempout1 == "Accept")
                                                 {
                                                     runlog1(1, 0, myjob.path_number);
-                                                    myjob.tianbiao = jiSnapshot; // ch:P2-① 用检测线程锁内快照，Task 不再回读 Outputs（消除 N+1 帧记到 N 帧行）
-                                                    if (myjob.tianbiao.Contains(","))
-                                                        runlog2(myjob.tianbiao, myjob.tianbiao, myjob.path_number, 1);
+                                                    string csvLine2 = jiSnapshot; // ch:P2-19 同主路径：局部快照替代 myjob.tianbiao 共享字段
+                                                    if (csvLine2.Contains(","))
+                                                        runlog2(csvLine2, csvLine2, myjob.path_number, 1);
                                                 }
                                                 else
                                                 {
                                                     runlog1(0, 1, myjob.path_number);
-                                                    myjob.tianbiao = jiSnapshot; // ch:P2-① 用检测线程锁内快照，Task 不再回读 Outputs（消除 N+1 帧记到 N 帧行）
-                                                    if (myjob.tianbiao.Contains(","))
-                                                        runlog2(myjob.tianbiao, myjob.tianbiao, myjob.path_number, 0);
+                                                    string csvLine2 = jiSnapshot; // ch:P2-19
+                                                    if (csvLine2.Contains(","))
+                                                        runlog2(csvLine2, csvLine2, myjob.path_number, 0);
                                                 }
                                             }
                                             catch (Exception ex2) { MsgErroeLog.WriteLog("异常:" + ex2.Message); }
@@ -5356,15 +5400,13 @@ namespace WindowsFormsApplication1
                                                             };
                                                             break;
                                                         case "2":
-                                                            if (myjob1.ng1 == 0)
+                                                            // ch:P1-12 原实现多包了一层 myjob1.ng1 门（复制粘贴错位）：相机1存图标志会吞掉相机2的 NG 图
+                                                            if (myjob2.ng1 == 0)
                                                             {
-                                                                if (myjob2.ng1 == 0)
-                                                                {
-                                                                    myjob2.ng1 = 1;
+                                                                myjob2.ng1 = 1;
 
-                                                                    cuntu_fangfa(tempfilebmp, DirCount(info2ng), jobnumber, myjob2.pathhead_ng, cuowu1, temptime, tempimage);
-                                                                    myjob2.ng1 = 0;
-                                                                }
+                                                                cuntu_fangfa(tempfilebmp, DirCount(info2ng), jobnumber, myjob2.pathhead_ng, cuowu1, temptime, tempimage);
+                                                                myjob2.ng1 = 0;
                                                             };
                                                             break;
                                                         case "3":
@@ -6557,7 +6599,10 @@ namespace WindowsFormsApplication1
                                 catch (Exception ex) { MsgErroeLog.WriteLog("异常:" + ex.Message); }
                                 nRet = OpenDeviceWithRetry(ref m_MyCamera[0], ref device1[myjob1.index]);
                                 if (MyCamera.MV_OK == nRet)
-                                    m_MyCamera[0].MV_CC_RegisterImageCallBackEx_NET(cbImage, (IntPtr)0);
+                                {
+                                    RegisterImageCallBackLogged(m_MyCamera[0], 0); // ch:P2-16
+                                    ApplyOptimalPacketSizeAfterReconnect(m_MyCamera[0], ref device1[myjob1.index], 1); // ch:P1-9
+                                }
 
                                 if (MyCamera.MV_OK != nRet)
                                 {
@@ -6607,7 +6652,10 @@ namespace WindowsFormsApplication1
                                 catch (Exception ex) { MsgErroeLog.WriteLog("异常:" + ex.Message); }
                                 nRet = OpenDeviceWithRetry(ref m_MyCamera[1], ref device1[myjob2.index]);
                                 if (MyCamera.MV_OK == nRet)
-                                    m_MyCamera[1].MV_CC_RegisterImageCallBackEx_NET(cbImage, (IntPtr)1);
+                                {
+                                    RegisterImageCallBackLogged(m_MyCamera[1], 1); // ch:P2-16
+                                    ApplyOptimalPacketSizeAfterReconnect(m_MyCamera[1], ref device1[myjob2.index], 2); // ch:P1-9
+                                }
 
                                 if (MyCamera.MV_OK != nRet)
                                 {
@@ -6657,7 +6705,10 @@ namespace WindowsFormsApplication1
                                 catch (Exception ex) { MsgErroeLog.WriteLog("异常:" + ex.Message); }
                                 nRet = OpenDeviceWithRetry(ref m_MyCamera[2], ref device1[myjob3.index]);
                                 if (MyCamera.MV_OK == nRet)
-                                    m_MyCamera[2].MV_CC_RegisterImageCallBackEx_NET(cbImage, (IntPtr)2);
+                                {
+                                    RegisterImageCallBackLogged(m_MyCamera[2], 2); // ch:P2-16
+                                    ApplyOptimalPacketSizeAfterReconnect(m_MyCamera[2], ref device1[myjob3.index], 3); // ch:P1-9
+                                }
                                 if (MyCamera.MV_OK != nRet)
                                 {
                                     cameraState = Convert.ToString(nRet, 16) + "相机3断线\r\n";
@@ -6708,7 +6759,10 @@ namespace WindowsFormsApplication1
                                 catch (Exception ex) { MsgErroeLog.WriteLog("异常:" + ex.Message); }
                                 nRet = OpenDeviceWithRetry(ref m_MyCamera[3], ref device1[myjob4.index]);
                                 if (MyCamera.MV_OK == nRet)
-                                    m_MyCamera[3].MV_CC_RegisterImageCallBackEx_NET(cbImage, (IntPtr)3);
+                                {
+                                    RegisterImageCallBackLogged(m_MyCamera[3], 3); // ch:P2-16
+                                    ApplyOptimalPacketSizeAfterReconnect(m_MyCamera[3], ref device1[myjob4.index], 4); // ch:P1-9
+                                }
                                 if (MyCamera.MV_OK != nRet)
                                 {
                                     cameraState = Convert.ToString(nRet, 16) + "相机4断线\r\n";
@@ -6757,7 +6811,10 @@ namespace WindowsFormsApplication1
                                 catch (Exception ex) { MsgErroeLog.WriteLog("异常:" + ex.Message); }
                                 nRet = OpenDeviceWithRetry(ref m_MyCamera[4], ref device1[myjob5.index]);
                                 if (MyCamera.MV_OK == nRet)
-                                    m_MyCamera[4].MV_CC_RegisterImageCallBackEx_NET(cbImage, (IntPtr)4);
+                                {
+                                    RegisterImageCallBackLogged(m_MyCamera[4], 4); // ch:P2-16
+                                    ApplyOptimalPacketSizeAfterReconnect(m_MyCamera[4], ref device1[myjob5.index], 5); // ch:P1-9
+                                }
                                 if (MyCamera.MV_OK != nRet)
                                 {
                                     cameraState = Convert.ToString(nRet, 16) + "相机5断线\r\n";
@@ -6806,7 +6863,10 @@ namespace WindowsFormsApplication1
                                 catch (Exception ex) { MsgErroeLog.WriteLog("异常:" + ex.Message); }
                                 nRet = OpenDeviceWithRetry(ref m_MyCamera[5], ref device1[myjob6.index]);
                                 if (MyCamera.MV_OK == nRet)
-                                    m_MyCamera[5].MV_CC_RegisterImageCallBackEx_NET(cbImage, (IntPtr)5);
+                                {
+                                    RegisterImageCallBackLogged(m_MyCamera[5], 5); // ch:P2-16
+                                    ApplyOptimalPacketSizeAfterReconnect(m_MyCamera[5], ref device1[myjob6.index], 6); // ch:P1-9
+                                }
                                 if (MyCamera.MV_OK != nRet)
                                 {
                                     cameraState = Convert.ToString(nRet, 16) + "相机6断线\r\n";
@@ -6855,7 +6915,10 @@ namespace WindowsFormsApplication1
                                 catch (Exception ex) { MsgErroeLog.WriteLog("异常:" + ex.Message); }
                                 nRet = OpenDeviceWithRetry(ref m_MyCamera[6], ref device1[myjob7.index]);
                                 if (MyCamera.MV_OK == nRet)
-                                    m_MyCamera[6].MV_CC_RegisterImageCallBackEx_NET(cbImage, (IntPtr)6);
+                                {
+                                    RegisterImageCallBackLogged(m_MyCamera[6], 6); // ch:P2-16
+                                    ApplyOptimalPacketSizeAfterReconnect(m_MyCamera[6], ref device1[myjob7.index], 7); // ch:P1-9
+                                }
                                 if (MyCamera.MV_OK != nRet)
                                 {
                                     cameraState = Convert.ToString(nRet, 16) + "相机7断线\r\n";
@@ -6904,7 +6967,10 @@ namespace WindowsFormsApplication1
                                 catch (Exception ex) { MsgErroeLog.WriteLog("异常:" + ex.Message); }
                                 nRet = OpenDeviceWithRetry(ref m_MyCamera[7], ref device1[myjob8.index]);
                                 if (MyCamera.MV_OK == nRet)
-                                    m_MyCamera[7].MV_CC_RegisterImageCallBackEx_NET(cbImage, (IntPtr)7);
+                                {
+                                    RegisterImageCallBackLogged(m_MyCamera[7], 7); // ch:P2-16
+                                    ApplyOptimalPacketSizeAfterReconnect(m_MyCamera[7], ref device1[myjob8.index], 8); // ch:P1-9
+                                }
                                 if (MyCamera.MV_OK != nRet)
                                 {
                                     cameraState = Convert.ToString(nRet, 16) + "相机8断线\r\n";
@@ -7049,7 +7115,7 @@ namespace WindowsFormsApplication1
 
         private void comboBox1_SelectedIndexChanged(object sender, EventArgs e)
         {
-            if (frm5.mark == 1 || myjob1.state.Contains("相"))
+            if (frm5.mark == 1 || myjob1.state.Contains("相") || (sender == null && e == null)) // ch:P1-8 sender==null 即重连恢复调用，须绕过登录门（state 仅被赋 ""，原条件恒 false）
             {
                 try
                 {
@@ -7101,66 +7167,28 @@ namespace WindowsFormsApplication1
         {
 
             SafeBeginInvoke(new Action(() => { textBox1.Text = e.Selection; })); // ch:通讯线程触发，UI 写必须封送
-            try
+            // ch:P0-3 每相机独立 try + blockLock：单相机异常/无 block 不再连坐其余相机；Inputs 读与写同锁
+            // ch:P0-3 切换/加载期间（门闩=1）加载器锁外在重写 block 及其终端，本线程让路，避免与其并发
+            if (Volatile.Read(ref qiehuanzhong) != 1)
             {
-                if (manager1.JobCount > 0)
+                Myjob[] djobs = new Myjob[] { myjob1, myjob2, myjob3, myjob4, myjob5, myjob6, myjob7, myjob8 };
+            for (int di = 0; di < 8; di++)
+            {
+                if (manager1.JobCount <= di) break;
+                Myjob dj = djobs[di];
+                try
                 {
-                    if (myjob1.block.Inputs.Contains("jieshou"))
+                    lock (dj.blockLock)
                     {
-                        SetBlockInputSafe(myjob1, "jieshou", e.Selection);
+                        if (dj.block != null && dj.block.Inputs.Contains("jieshou"))
+                        {
+                            SetBlockInputSafe(dj, "jieshou", e.Selection);
+                        }
                     }
                 }
-                if (manager1.JobCount > 1)
-                {
-                    if (myjob2.block.Inputs.Contains("jieshou"))
-                    {
-                        SetBlockInputSafe(myjob2, "jieshou", e.Selection);
-                    }
-                }
-                if (manager1.JobCount > 2)
-                {
-                    if (myjob3.block.Inputs.Contains("jieshou"))
-                    {
-                        SetBlockInputSafe(myjob3, "jieshou", e.Selection);
-                    }
-                }
-                if (manager1.JobCount > 3)
-                {
-                    if (myjob4.block.Inputs.Contains("jieshou"))
-                    {
-                        SetBlockInputSafe(myjob4, "jieshou", e.Selection);
-                    }
-                }
-                if (manager1.JobCount > 4)
-                {
-                    if (myjob5.block.Inputs.Contains("jieshou"))
-                    {
-                        SetBlockInputSafe(myjob5, "jieshou", e.Selection);
-                    }
-                }
-                if (manager1.JobCount > 5)
-                {
-                    if (myjob6.block.Inputs.Contains("jieshou"))
-                    {
-                        SetBlockInputSafe(myjob6, "jieshou", e.Selection);
-                    }
-                }
-                if (manager1.JobCount > 6)
-                {
-                    if (myjob7.block.Inputs.Contains("jieshou"))
-                    {
-                        SetBlockInputSafe(myjob7, "jieshou", e.Selection);
-                    }
-                }
-                if (manager1.JobCount > 7)
-                {
-                    if (myjob8.block.Inputs.Contains("jieshou"))
-                    {
-                        SetBlockInputSafe(myjob8, "jieshou", e.Selection);
-                    }
-                }
+                catch (Exception ex) { MsgErroeLog.WriteLog("DataChange cam" + (di + 1) + " jieshou 异常:" + ex.Message); }
             }
-            catch (Exception ex) { MsgErroeLog.WriteLog("异常:" + ex.Message); }
+            } // ch:P0-3 门闩跳过段结束
             if (e.Selection == myjob1.triggerZifu)
             {
                 myjob1.jieshouZifu = myjob1.triggerZifu;
@@ -9835,58 +9863,83 @@ namespace WindowsFormsApplication1
                         Thread.Sleep(100);
                         bnClose.Enabled = true;
 
-                        bnSetParam_Click(null, null);
-                        bnGetParam_Click(null, null);// ch:获取参数 | en:Get parameters
+                        // ch:P2 收紧：切换方案后的自动参数下发同样只对使能相机执行（取流按钮状态维持原逻辑）
+                        if (myjob1.en == 1)
+                        {
+                            bnSetParam_Click(null, null);
+                            bnGetParam_Click(null, null);// ch:获取参数 | en:Get parameters
+                        }
                         bnStartGrab1.Enabled = false;
                         bnStopGrab1.Enabled = true;
                         if (manager1.JobCount > 1)
                         {
                             bnStartGrab2.Enabled = false;
                             bnStopGrab2.Enabled = true;
-                            bnSetParam2_Click(null, null);
-                            bnGetParam2_Click(null, null);// ch:获取参数 | en:Get parameters
+                            if (myjob2.en == 1)
+                            {
+                                bnSetParam2_Click(null, null);
+                                bnGetParam2_Click(null, null);// ch:获取参数 | en:Get parameters
+                            }
                         }
                         if (manager1.JobCount > 2)
                         {
                             bnStartGrab3.Enabled = false;
                             bnStopGrab3.Enabled = true;
-                            bnSetParam3_Click(null, null);
-                            bnGetParam3_Click(null, null);// ch:获取参数 | en:Get parameters
+                            if (myjob3.en == 1)
+                            {
+                                bnSetParam3_Click(null, null);
+                                bnGetParam3_Click(null, null);// ch:获取参数 | en:Get parameters
+                            }
                         }
                         if (manager1.JobCount > 3)
                         {
                             bnStartGrab4.Enabled = false;
                             bnStopGrab4.Enabled = true;
-                            bnSetParam4_Click(null, null);
-                            bnGetParam4_Click(null, null);// ch:获取参数 | en:Get parameters
+                            if (myjob4.en == 1)
+                            {
+                                bnSetParam4_Click(null, null);
+                                bnGetParam4_Click(null, null);// ch:获取参数 | en:Get parameters
+                            }
                         }
                         if (manager1.JobCount > 4)
                         {
                             bnStartGrab5.Enabled = false;
                             bnStopGrab5.Enabled = true;
-                            bnSetParam5_Click(null, null);
-                            bnGetParam5_Click(null, null);// ch:获取参数 | en:Get parameters
+                            if (myjob5.en == 1)
+                            {
+                                bnSetParam5_Click(null, null);
+                                bnGetParam5_Click(null, null);// ch:获取参数 | en:Get parameters
+                            }
                         }
                         if (manager1.JobCount > 5)
                         {
                             bnStartGrab6.Enabled = false;
                             bnStopGrab6.Enabled = true;
-                            bnSetParam6_Click(null, null);
-                            bnGetParam6_Click(null, null);// ch:获取参数 | en:Get parameters
+                            if (myjob6.en == 1)
+                            {
+                                bnSetParam6_Click(null, null);
+                                bnGetParam6_Click(null, null);// ch:获取参数 | en:Get parameters
+                            }
                         }
                         if (manager1.JobCount > 6)
                         {
                             bnStartGrab7.Enabled = false;
                             bnStopGrab7.Enabled = true;
-                            bnSetParam7_Click(null, null);
-                            bnGetParam7_Click(null, null);// ch:获取参数 | en:Get parameters
+                            if (myjob7.en == 1)
+                            {
+                                bnSetParam7_Click(null, null);
+                                bnGetParam7_Click(null, null);// ch:获取参数 | en:Get parameters
+                            }
                         }
                         if (manager1.JobCount > 7)
                         {
                             bnStartGrab8.Enabled = false;
                             bnStopGrab8.Enabled = true;
-                            bnSetParam8_Click(null, null);
-                            bnGetParam8_Click(null, null);// ch:获取参数 | en:Get parameters
+                            if (myjob8.en == 1)
+                            {
+                                bnSetParam8_Click(null, null);
+                                bnGetParam8_Click(null, null);// ch:获取参数 | en:Get parameters
+                            }
                         }
                         comboBox38_TextChanged(null, null);
 
@@ -10217,6 +10270,31 @@ namespace WindowsFormsApplication1
             return closing;
         }
 
+        // ch:P2-16 回调注册失败=该相机完全不出图，原实现忽略返回值只能事后猜；统一走本方法记日志
+        private void RegisterImageCallBackLogged(MyCamera cam, int camIdx)
+        {
+            if (cam == null) return;
+            int r = cam.MV_CC_RegisterImageCallBackEx_NET(cbImage, (IntPtr)camIdx);
+            if (r != MyCamera.MV_OK)
+                MsgErroeLog.WriteLog("相机" + (camIdx + 1) + "注册图像回调失败:0x" + ((uint)r).ToString("X8"));
+        }
+        // ch:P1-9 重连成功后需与首次打开同样探测/下发 GigE 最佳包大小（原实现只有打开路径做，重连后包大小回 SDK 默认值，帧率骤降）
+        private void ApplyOptimalPacketSizeAfterReconnect(MyCamera cam, ref MyCamera.MV_CC_DEVICE_INFO devInfo, int camNo)
+        {
+            try
+            {
+                if (cam == null || devInfo.nTLayerType != MyCamera.MV_GIGE_DEVICE) return;
+                int nPacketSize = cam.MV_CC_GetOptimalPacketSize_NET();
+                if (nPacketSize > 0)
+                {
+                    int r = cam.MV_CC_SetIntValue_NET("GevSCPSPacketSize", (uint)nPacketSize);
+                    if (r != MyCamera.MV_OK) MsgErroeLog.WriteLog("重连设置相机" + camNo + "包大小失败:0x" + ((uint)r).ToString("X8"));
+                }
+                else
+                    MsgErroeLog.WriteLog("重连探测相机" + camNo + "包大小失败:" + nPacketSize);
+            }
+            catch (Exception ex) { MsgErroeLog.WriteLog("重连包大小异常 cam" + camNo + ":" + ex.Message); }
+        }
         private Int32 OpenDeviceWithRetry(ref MyCamera cam, ref MyCamera.MV_CC_DEVICE_INFO devInfo)
         {
             if (cam == null) cam = new MyCamera();
@@ -10466,7 +10544,7 @@ namespace WindowsFormsApplication1
                                         ShowErrorMsg("Get Packet Size failed!", nPacketSize);
                                     }
                                 }
-                                m_MyCamera[int.Parse(nnn)].MV_CC_RegisterImageCallBackEx_NET(cbImage, (IntPtr)int.Parse(nnn));
+                                RegisterImageCallBackLogged(m_MyCamera[int.Parse(nnn)], int.Parse(nnn)); // ch:P2-16
                                 bOpened = true;
                                 if (m_nCanOpenDeviceNum == nCameraUsingNum)
                                 {
@@ -12149,14 +12227,18 @@ namespace WindowsFormsApplication1
                 // ch:释放图像转换缓冲 | en:Free image convert buffer
                 for (int i = 0; i < 8; ++i)
                 {
-                    if (m_pSaveImageBuf[i] != IntPtr.Zero && System.Threading.Volatile.Read(ref _bmpInFlight[i]) == 0)
+                    // ch:P0-2 必须持 bufLock：回调热路径在同一锁下向该缓冲 CopyMemory，StopGrabbing 返回不保证回调已出栈
+                    lock (m_BufForSaveImageLock[i])
                     {
-                        Marshal.FreeHGlobal(m_pSaveImageBuf[i]);
-                        m_pSaveImageBuf[i] = IntPtr.Zero;
+                        if (m_pSaveImageBuf[i] != IntPtr.Zero && System.Threading.Volatile.Read(ref _bmpInFlight[i]) == 0)
+                        {
+                            Marshal.FreeHGlobal(m_pSaveImageBuf[i]);
+                            m_pSaveImageBuf[i] = IntPtr.Zero;
+                            m_nSaveImageBufSize[i] = 0; // ch:P0-2 仅真正释放时清零尺寸（原实现跳过释放也清零，与仍在途的缓冲失配）
+                        }
+                        else if (m_pSaveImageBuf[i] != IntPtr.Zero)
+                            MsgErroeLog.WriteLog("P1-06 关闭：相机" + (i + 1) + " 仍有在途 Bitmap，跳过 HGlobal 释放以防野指针（重开时 EnsureSaveImageBuf 会重新分配）");
                     }
-                    else if (m_pSaveImageBuf[i] != IntPtr.Zero)
-                        MsgErroeLog.WriteLog("P1-06 关闭：相机" + (i + 1) + " 仍有在途 Bitmap，跳过 HGlobal 释放以防野指针（重开时 EnsureSaveImageBuf 会重新分配）");
-                    m_nSaveImageBufSize[i] = 0; // ch:同步清零尺寸记录，重开后按新分辨率重新分配
                 }
             }
             // ch:清理运行门禁，避免“运行中关设备→重开→无法恢复运行”
@@ -12735,7 +12817,7 @@ namespace WindowsFormsApplication1
 
         private void comboBox4_SelectedIndexChanged_1(object sender, EventArgs e)
         {
-            if (frm5.mark == 1 || myjob2.state.Contains("相"))
+            if (frm5.mark == 1 || myjob2.state.Contains("相") || (sender == null && e == null)) // ch:P1-8 重连恢复（sender==null）绕过登录门
             {
                 try
                 {
@@ -13150,7 +13232,7 @@ namespace WindowsFormsApplication1
 
         private void comboBox5_SelectedIndexChanged(object sender, EventArgs e)
         {
-            if (frm5.mark == 1 || myjob3.state.Contains("相"))
+            if (frm5.mark == 1 || myjob3.state.Contains("相") || (sender == null && e == null)) // ch:P1-8 重连恢复（sender==null）绕过登录门
             {
                 try
                 {
@@ -13197,7 +13279,7 @@ namespace WindowsFormsApplication1
 
         private void comboBox8_SelectedIndexChanged(object sender, EventArgs e)
         {
-            if (frm5.mark == 1 || myjob4.state.Contains("相"))
+            if (frm5.mark == 1 || myjob4.state.Contains("相") || (sender == null && e == null)) // ch:P1-8 重连恢复（sender==null）绕过登录门
             {
                 try
                 {
@@ -14350,8 +14432,8 @@ namespace WindowsFormsApplication1
                 {
                     button18.Text = "1屏蔽中";
                     myjob1.en = 0;
-                //cogRecordDisplay1.Visible = false;
-                camera_sum++;
+                    tableLayoutPanel2.Visible = false; // ch:P2-20 原缺此句（2~8 相机屏蔽分支都有）：ini 配置为屏蔽时相机1渲染面板仍显示
+                    camera_sum++;
                 }
                 if (canshuIni.ReadString("camera2", "en", "2使用中").Contains("使用"))
                 {
@@ -14532,6 +14614,8 @@ namespace WindowsFormsApplication1
                 for (int i = 0; i < 8; i++)
                 {
                     string camSection = "camera" + (i + 1);
+                    // ch:屏蔽(en!=1)的相机不做参数处理：原实现对全部 8 路读 VPP/ini，屏蔽相机 ini 段无配置时产生噪声日志甚至"格式不正确"异常
+                    if (myjobs[i].en != 1) continue;
                     bool fromVpp = false;
                     
                     // ★ 优先从VPP block读取曝光值
@@ -14556,7 +14640,8 @@ namespace WindowsFormsApplication1
                         try
                         {
                             string iniExp = canshuIni.ReadString(camSection, "exposure", "1000");
-                            float expVal = float.Parse(iniExp);
+                            float expVal;
+                            if (!float.TryParse(iniExp, out expVal)) expVal = 1000; // ch:键存在但值为空/畸形时回退默认，不再抛"输入字符串的格式不正确"
                             myjobs[i].baoguang = expVal;
                             tbExposures[i].Text = expVal.ToString();
                             MsgErroeLog.WriteLog("baoguang_set: 相机" + (i + 1) + " 从code.ini读取曝光=" + expVal);
@@ -14590,7 +14675,8 @@ namespace WindowsFormsApplication1
                         try
                         {
                             string iniGain = canshuIni.ReadString(camSection, "gain", "1");
-                            float gainVal = float.Parse(iniGain);
+                            float gainVal;
+                            if (!float.TryParse(iniGain, out gainVal)) gainVal = 1; // ch:空值回退默认（现场 code.ini 存在 gain 键为空的情况）
                             tbGains[i].Text = gainVal.ToString();
                             MsgErroeLog.WriteLog("baoguang_set: 相机" + (i + 1) + " 从code.ini读取增益=" + gainVal);
                         }
@@ -14603,7 +14689,8 @@ namespace WindowsFormsApplication1
                     // ★ 从code.ini读取帧率（确保bnSetParam_Click不会因空值而跳过）
                     try
                     {
-                        string iniRate = canshuIni.ReadString(camSection, "rate", "500");
+                        string iniRate = canshuIni.ReadString(camSection, "rate", "500").Replace("\0", "").Trim();
+                        if (iniRate == "") iniRate = "500"; // ch:空值回退默认，保证 bnSetParam 不因空跳过
                         tbFrameRates[i].Text = iniRate;
                         MsgErroeLog.WriteLog("baoguang_set: 相机" + (i + 1) + " 从code.ini读取帧率=" + iniRate);
                     }
@@ -14808,6 +14895,22 @@ namespace WindowsFormsApplication1
                     }
                 }
             }));
+            // ch:P0-1 原尾段直接调用线程写 UI 控件与相机句柄：调用方含后台线程（jindu/切换 Task.Run），
+            //   与 timer2 重连（持 _cameraLocks 做 Destroy/Create）并发可致句柄 UAF。封送 UI 线程 + 全程持相机锁。
+            Action tail = TrrigerSetTail;
+            try { if (InvokeRequired) Invoke(tail); else tail(); }
+            catch (Exception ex) { MsgErroeLog.WriteLog("trriger_set 尾段封送失败:" + ex.Message); }
+        }
+
+        private void TrrigerSetTail()
+        {
+            if (!TryLockAllCameras(2000))
+            {
+                MsgErroeLog.WriteLog("trriger_set: 相机锁获取超时（打开/重连进行中），本轮触发模式下发跳过");
+                return;
+            }
+            try
+            {
             if (true) // 海康相机：触发模式下发必须执行（原 dahua 恒 true 导致此处为死代码）
             {
                 try
@@ -15155,28 +15258,26 @@ namespace WindowsFormsApplication1
                     MsgErroeLog.WriteLog("无流程5");
                 }
             }
-            try
+            // ch:P0-3 triggerZifu 读取入各 job blockLock（原实现锁外读 Inputs，与检测线程 Run 并发）；每相机独立 try
+            Myjob[] zifuJobs = new Myjob[] { myjob1, myjob2, myjob3, myjob4, myjob5, myjob6, myjob7, myjob8 };
+            for (int t = 0; t < 8; t++)
             {
-                if (myjob1.triggerMode == "通讯触发")
-                    if (myjob1.block != null && myjob1.block.Inputs.Contains("triggerZifu")) myjob1.triggerZifu = myjob1.block.Inputs["triggerZifu"].Value.ToString();
-                if (myjob2.triggerMode == "通讯触发")
-                    if (myjob2.block != null && myjob2.block.Inputs.Contains("triggerZifu")) myjob2.triggerZifu = myjob2.block.Inputs["triggerZifu"].Value.ToString();
-                if (myjob3.triggerMode == "通讯触发")
-                    if (myjob3.block != null && myjob3.block.Inputs.Contains("triggerZifu")) myjob3.triggerZifu = myjob3.block.Inputs["triggerZifu"].Value.ToString();
-                if (myjob4.triggerMode == "通讯触发")
-                    if (myjob4.block != null && myjob4.block.Inputs.Contains("triggerZifu")) myjob4.triggerZifu = myjob4.block.Inputs["triggerZifu"].Value.ToString();
-                if (myjob5.triggerMode == "通讯触发")
-                    if (myjob5.block != null && myjob5.block.Inputs.Contains("triggerZifu")) myjob5.triggerZifu = myjob5.block.Inputs["triggerZifu"].Value.ToString();
-                if (myjob6.triggerMode == "通讯触发")
-                    if (myjob6.block != null && myjob6.block.Inputs.Contains("triggerZifu")) myjob6.triggerZifu = myjob6.block.Inputs["triggerZifu"].Value.ToString();
-                if (myjob7.triggerMode == "通讯触发")
-                    if (myjob7.block != null && myjob7.block.Inputs.Contains("triggerZifu")) myjob7.triggerZifu = myjob7.block.Inputs["triggerZifu"].Value.ToString();
-                if (myjob8.triggerMode == "通讯触发")
-                    if (myjob8.block != null && myjob8.block.Inputs.Contains("triggerZifu")) myjob8.triggerZifu = myjob8.block.Inputs["triggerZifu"].Value.ToString();
+                try
+                {
+                    Myjob j = zifuJobs[t];
+                    if (j.triggerMode == "通讯触发")
+                    {
+                        lock (j.blockLock)
+                        {
+                            if (j.block != null && j.block.Inputs.Contains("triggerZifu"))
+                                j.triggerZifu = j.block.Inputs["triggerZifu"].Value.ToString();
+                        }
+                    }
+                }
+                catch (Exception ex) { MsgErroeLog.WriteLog("异常:" + ex.Message); }
             }
-            catch (Exception ex) { MsgErroeLog.WriteLog("异常:" + ex.Message); }
-
-
+            }
+            finally { UnlockAllCameras(); }
         }
         private void cuntu_fangfa(CogImageFileBMP cogbmp, int FileLength, int JobNumber, string Jobpath, string cuowuma, string temptime, ICogImage cogimage)
         {
@@ -15828,7 +15929,7 @@ namespace WindowsFormsApplication1
 
         private void comboBox25_SelectedIndexChanged(object sender, EventArgs e)
         {
-            if (frm5.mark == 1 || myjob5.state.Contains("相"))
+            if (frm5.mark == 1 || myjob5.state.Contains("相") || (sender == null && e == null)) // ch:P1-8 重连恢复（sender==null）绕过登录门
             {
                 try
                 {
@@ -15875,7 +15976,7 @@ namespace WindowsFormsApplication1
 
         private void comboBox28_SelectedIndexChanged(object sender, EventArgs e)
         {
-            if (frm5.mark == 1 || myjob6.state.Contains("相"))
+            if (frm5.mark == 1 || myjob6.state.Contains("相") || (sender == null && e == null)) // ch:P1-8 重连恢复（sender==null）绕过登录门
             {
                 try
                 {
@@ -15922,7 +16023,7 @@ namespace WindowsFormsApplication1
 
         private void comboBox31_SelectedIndexChanged(object sender, EventArgs e)
         {
-            if (frm5.mark == 1 || myjob7.state.Contains("相"))
+            if (frm5.mark == 1 || myjob7.state.Contains("相") || (sender == null && e == null)) // ch:P1-8 重连恢复（sender==null）绕过登录门
             {
                 try
                 {
@@ -15969,7 +16070,7 @@ namespace WindowsFormsApplication1
 
         private void comboBox34_SelectedIndexChanged(object sender, EventArgs e)
         {
-            if (frm5.mark == 1 || myjob8.state.Contains("相"))
+            if (frm5.mark == 1 || myjob8.state.Contains("相") || (sender == null && e == null)) // ch:P1-8 重连恢复（sender==null）绕过登录门
             {
                 try
                 {
@@ -18277,6 +18378,14 @@ namespace WindowsFormsApplication1
             int youwu = 0;
             this.BeginInvoke(new Action(() =>
             {
+                // ch:P0-3 ToolBlock 非线程安全：本方法遍历 Tools/读 Outputs，须与该相机检测线程的 Run 互斥（blockLock）；
+                //   仅命中一个 case，锁对应 job 即可。
+                Myjob gjob = camere == "1" ? myjob1 : camere == "2" ? myjob2 : camere == "3" ? myjob3 : camere == "4" ? myjob4 :
+                             camere == "5" ? myjob5 : camere == "6" ? myjob6 : camere == "7" ? myjob7 : myjob8;
+                if (gjob == null || gjob.block == null) return;
+                if (Volatile.Read(ref qiehuanzhong) == 1) return; // ch:P0-3 切换/加载期间加载器锁外重写 block，本渲染路径让路
+                lock (gjob.blockLock)
+                {
                 switch (camere)
                 {
                     case "1":
@@ -19675,6 +19784,7 @@ namespace WindowsFormsApplication1
                         }
                         break;
                 }
+                } // ch:P0-3 blockLock 段结束
             }));
         }
         private void combdrop(ComboBox combox, CogToolBlock blk, Dictionary<string, ICogTool> dic)
@@ -20665,6 +20775,7 @@ namespace WindowsFormsApplication1
 
         private void comboBox38_TextChanged(object sender, EventArgs e)
         {
+            if (Volatile.Read(ref qiehuanzhong) == 1) return; // ch:P0-3 切换/加载期间（后台 Task 重写 block）让路，避免与锁外加载器并发
             string canshu = comboBox38.Text.Trim();
             if (canshu.Length > 0)
             {
@@ -20673,75 +20784,107 @@ namespace WindowsFormsApplication1
                     switch (i)
                     {
                         case 0:
-                            for (int j = 0; j < myjob1.block.Inputs.Count; j++)
+                            lock (myjob1.blockLock) // ch:P0-3 Inputs 遍历入锁+判空（SetBlockInputSafe 同锁可重入）
                             {
-                                if (myjob1.block.Inputs[j].Name.Contains("canshu"))
-                                {
-                                    SetBlockInputSafe(myjob1, "canshu", canshu);
-                                }
+                                if (myjob1.block != null)
+                                    for (int j = 0; j < myjob1.block.Inputs.Count; j++)
+                                    {
+                                        if (myjob1.block.Inputs[j].Name.Contains("canshu"))
+                                        {
+                                            SetBlockInputSafe(myjob1, "canshu", canshu);
+                                        }
+                                    }
                             }
                             break;
                         case 1:
-                            for (int j = 0; j < myjob2.block.Inputs.Count; j++)
+                            lock (myjob2.blockLock) // ch:P0-3
                             {
-                                if (myjob2.block.Inputs[j].Name.Contains("canshu"))
-                                {
-                                    SetBlockInputSafe(myjob2, "canshu", canshu);
-                                }
+                                if (myjob2.block != null)
+                                    for (int j = 0; j < myjob2.block.Inputs.Count; j++)
+                                    {
+                                        if (myjob2.block.Inputs[j].Name.Contains("canshu"))
+                                        {
+                                            SetBlockInputSafe(myjob2, "canshu", canshu);
+                                        }
+                                    }
                             }
                             break;
                         case 2:
-                            for (int j = 0; j < myjob3.block.Inputs.Count; j++)
+                            lock (myjob3.blockLock) // ch:P0-3
                             {
-                                if (myjob3.block.Inputs[j].Name.Contains("canshu"))
-                                {
-                                    SetBlockInputSafe(myjob3, "canshu", canshu);
-                                }
+                                if (myjob3.block != null)
+                                    for (int j = 0; j < myjob3.block.Inputs.Count; j++)
+                                    {
+                                        if (myjob3.block.Inputs[j].Name.Contains("canshu"))
+                                        {
+                                            SetBlockInputSafe(myjob3, "canshu", canshu);
+                                        }
+                                    }
                             }
                             break;
                         case 3:
-                            for (int j = 0; j < myjob4.block.Inputs.Count; j++)
+                            lock (myjob4.blockLock) // ch:P0-3
                             {
-                                if (myjob4.block.Inputs[j].Name.Contains("canshu"))
-                                {
-                                    SetBlockInputSafe(myjob4, "canshu", canshu);
-                                }
+                                if (myjob4.block != null)
+                                    for (int j = 0; j < myjob4.block.Inputs.Count; j++)
+                                    {
+                                        if (myjob4.block.Inputs[j].Name.Contains("canshu"))
+                                        {
+                                            SetBlockInputSafe(myjob4, "canshu", canshu);
+                                        }
+                                    }
                             }
                             break;
                         case 4:
-                            for (int j = 0; j < myjob5.block.Inputs.Count; j++)
+                            lock (myjob5.blockLock) // ch:P0-3 Inputs 遍历入锁+判空（SetBlockInputSafe 同锁可重入）
                             {
-                                if (myjob5.block.Inputs[j].Name.Contains("canshu"))
-                                {
-                                    SetBlockInputSafe(myjob5, "canshu", canshu);
-                                }
+                                if (myjob5.block != null)
+                                    for (int j = 0; j < myjob5.block.Inputs.Count; j++)
+                                    {
+                                        if (myjob5.block.Inputs[j].Name.Contains("canshu"))
+                                        {
+                                            SetBlockInputSafe(myjob5, "canshu", canshu);
+                                        }
+                                    }
                             }
                             break;
                         case 5:
-                            for (int j = 0; j < myjob6.block.Inputs.Count; j++)
+                            lock (myjob6.blockLock) // ch:P0-3 Inputs 遍历入锁+判空（SetBlockInputSafe 同锁可重入）
                             {
-                                if (myjob6.block.Inputs[j].Name.Contains("canshu"))
-                                {
-                                    SetBlockInputSafe(myjob6, "canshu", canshu);
-                                }
+                                if (myjob6.block != null)
+                                    for (int j = 0; j < myjob6.block.Inputs.Count; j++)
+                                    {
+                                        if (myjob6.block.Inputs[j].Name.Contains("canshu"))
+                                        {
+                                            SetBlockInputSafe(myjob6, "canshu", canshu);
+                                        }
+                                    }
                             }
                             break;
                         case 6:
-                            for (int j = 0; j < myjob7.block.Inputs.Count; j++)
+                            lock (myjob7.blockLock) // ch:P0-3 Inputs 遍历入锁+判空（SetBlockInputSafe 同锁可重入）
                             {
-                                if (myjob7.block.Inputs[j].Name.Contains("canshu"))
-                                {
-                                    SetBlockInputSafe(myjob7, "canshu", canshu);
-                                }
+                                if (myjob7.block != null)
+                                    for (int j = 0; j < myjob7.block.Inputs.Count; j++)
+                                    {
+                                        if (myjob7.block.Inputs[j].Name.Contains("canshu"))
+                                        {
+                                            SetBlockInputSafe(myjob7, "canshu", canshu);
+                                        }
+                                    }
                             }
                             break;
                         case 7:
-                            for (int j = 0; j < myjob8.block.Inputs.Count; j++)
+                            lock (myjob8.blockLock) // ch:P0-3 Inputs 遍历入锁+判空（SetBlockInputSafe 同锁可重入）
                             {
-                                if (myjob8.block.Inputs[j].Name.Contains("canshu"))
-                                {
-                                    SetBlockInputSafe(myjob8, "canshu", canshu);
-                                }
+                                if (myjob8.block != null)
+                                    for (int j = 0; j < myjob8.block.Inputs.Count; j++)
+                                    {
+                                        if (myjob8.block.Inputs[j].Name.Contains("canshu"))
+                                        {
+                                            SetBlockInputSafe(myjob8, "canshu", canshu);
+                                        }
+                                    }
                             }
                             break;
                     }

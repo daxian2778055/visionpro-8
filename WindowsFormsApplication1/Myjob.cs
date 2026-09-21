@@ -84,7 +84,6 @@ namespace WindowsFormsApplication1
         public int changdu;
         public string address;
         public string biaotou;
-        public string tianbiao;
         public CogCalibNPointToNPointTool calib;
         public  float [] record =new float [] {0.99f,0.99f,0.99f};
         public int records = 0;

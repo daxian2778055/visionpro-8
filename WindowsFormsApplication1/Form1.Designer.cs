@@ -6136,7 +6136,6 @@
             this.pictureBoxCam9.BorderStyle = System.Windows.Forms.BorderStyle.FixedSingle;
             resources.ApplyResources(this.pictureBoxCam9, "pictureBoxCam9");
             this.pictureBoxCam9.Name = "pictureBoxCam9";
-            this.pictureBoxCam9.SizeMode = System.Windows.Forms.PictureBoxSizeMode.Zoom;
             this.pictureBoxCam9.TabStop = false;
             this.pictureBoxCam9.DoubleClick += new System.EventHandler(this.cogRecordDisplay9_DoubleClick);
             // 
@@ -6211,7 +6210,6 @@
             this.pictureBoxCam8.BorderStyle = System.Windows.Forms.BorderStyle.FixedSingle;
             resources.ApplyResources(this.pictureBoxCam8, "pictureBoxCam8");
             this.pictureBoxCam8.Name = "pictureBoxCam8";
-            this.pictureBoxCam8.SizeMode = System.Windows.Forms.PictureBoxSizeMode.Zoom;
             this.pictureBoxCam8.TabStop = false;
             this.pictureBoxCam8.DoubleClick += new System.EventHandler(this.cogRecordDisplay8_DoubleClick);
             // 
@@ -6286,7 +6284,6 @@
             this.pictureBoxCam7.BorderStyle = System.Windows.Forms.BorderStyle.FixedSingle;
             resources.ApplyResources(this.pictureBoxCam7, "pictureBoxCam7");
             this.pictureBoxCam7.Name = "pictureBoxCam7";
-            this.pictureBoxCam7.SizeMode = System.Windows.Forms.PictureBoxSizeMode.Zoom;
             this.pictureBoxCam7.TabStop = false;
             this.pictureBoxCam7.DoubleClick += new System.EventHandler(this.cogRecordDisplay7_DoubleClick);
             // 
@@ -6361,7 +6358,6 @@
             this.pictureBoxCam6.BorderStyle = System.Windows.Forms.BorderStyle.FixedSingle;
             resources.ApplyResources(this.pictureBoxCam6, "pictureBoxCam6");
             this.pictureBoxCam6.Name = "pictureBoxCam6";
-            this.pictureBoxCam6.SizeMode = System.Windows.Forms.PictureBoxSizeMode.Zoom;
             this.pictureBoxCam6.TabStop = false;
             this.pictureBoxCam6.DoubleClick += new System.EventHandler(this.cogRecordDisplay6_DoubleClick);
             // 
@@ -6436,7 +6432,6 @@
             this.pictureBoxCam5.BorderStyle = System.Windows.Forms.BorderStyle.FixedSingle;
             resources.ApplyResources(this.pictureBoxCam5, "pictureBoxCam5");
             this.pictureBoxCam5.Name = "pictureBoxCam5";
-            this.pictureBoxCam5.SizeMode = System.Windows.Forms.PictureBoxSizeMode.Zoom;
             this.pictureBoxCam5.TabStop = false;
             this.pictureBoxCam5.DoubleClick += new System.EventHandler(this.cogRecordDisplay5_DoubleClick);
             // 
@@ -6511,7 +6506,6 @@
             this.pictureBoxCam4.BorderStyle = System.Windows.Forms.BorderStyle.FixedSingle;
             resources.ApplyResources(this.pictureBoxCam4, "pictureBoxCam4");
             this.pictureBoxCam4.Name = "pictureBoxCam4";
-            this.pictureBoxCam4.SizeMode = System.Windows.Forms.PictureBoxSizeMode.Zoom;
             this.pictureBoxCam4.TabStop = false;
             this.pictureBoxCam4.DoubleClick += new System.EventHandler(this.cogRecordDisplay4_DoubleClick);
             // 
@@ -6586,7 +6580,6 @@
             this.pictureBoxCam3.BorderStyle = System.Windows.Forms.BorderStyle.FixedSingle;
             resources.ApplyResources(this.pictureBoxCam3, "pictureBoxCam3");
             this.pictureBoxCam3.Name = "pictureBoxCam3";
-            this.pictureBoxCam3.SizeMode = System.Windows.Forms.PictureBoxSizeMode.Zoom;
             this.pictureBoxCam3.TabStop = false;
             this.pictureBoxCam3.DoubleClick += new System.EventHandler(this.cogRecordDisplay3_DoubleClick);
             // 
@@ -6661,7 +6654,6 @@
             this.pictureBoxCam2.BorderStyle = System.Windows.Forms.BorderStyle.FixedSingle;
             resources.ApplyResources(this.pictureBoxCam2, "pictureBoxCam2");
             this.pictureBoxCam2.Name = "pictureBoxCam2";
-            this.pictureBoxCam2.SizeMode = System.Windows.Forms.PictureBoxSizeMode.Zoom;
             this.pictureBoxCam2.TabStop = false;
             this.pictureBoxCam2.DoubleClick += new System.EventHandler(this.cogRecordDisplay2_DoubleClick);
             // 
@@ -6736,7 +6728,6 @@
             this.pictureBoxCam1.BorderStyle = System.Windows.Forms.BorderStyle.FixedSingle;
             resources.ApplyResources(this.pictureBoxCam1, "pictureBoxCam1");
             this.pictureBoxCam1.Name = "pictureBoxCam1";
-            this.pictureBoxCam1.SizeMode = System.Windows.Forms.PictureBoxSizeMode.Zoom;
             this.pictureBoxCam1.TabStop = false;
             this.pictureBoxCam1.DoubleClick += new System.EventHandler(this.cogRecordDisplay1_DoubleClick);
             // 

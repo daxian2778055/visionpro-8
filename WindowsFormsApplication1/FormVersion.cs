@@ -10,13 +10,14 @@ namespace WindowsFormsApplication1
     public partial class FormVersion : Form
     {
         // 当前版本（与推送仓库的 git tag 一一对应）：语义化版本 + 发布日期
-        public const string AppVersion = "1.3.4";
-        public const string AppVersionDate = "2026-09-19";
+        public const string AppVersion = "1.3.5";
+        public const string AppVersionDate = "2026-09-21";
         public const string AppRepoName = "正泰 VP八相机连续海康（M4 - 加密）";
 
         // 版本时间线：与仓库 git tag 一一对应（新版本在最前）
         private static readonly string[] VersionTimeline = new string[]
         {
+            "v1.3.5  2026-09-21  第9轮审查修复(加载/相机/ToolBlock 并发)+en 使能收紧：P0—trriger_set 尾段回 UI 线程并加 TryLockAllCameras 超时跳过；bnClose 释放存图缓冲持 bufLock、尺寸仅随真正释放清零；ToolBlock 锁外访问族入 blockLock(gongjukuai/triggerZifu/comboBox38/DataChange 每相机独立 try+入锁，三处 block 替换簇由切换门闩让路+sync_job_meta 入锁)；启动菜单构造收进 UI Invoke(等 IsHandleCreated)。P1—ini→NumericUpDown 赋值前夹取防吞启动；Load 期 Frm2 按门闩定 start 防常驻遮挡；ClassIni FileName 前置赋值(原失败残留 null→静默读写 win.ini)；重连恢复触发模式绕过登录门(sender==null)；重连成功后补探测/下发 GigE 最佳包大小；存 NG 图 case2 删除错位的 myjob1.ng1 门。P2—终结器线程去弹窗；回调注册失败记日志(9处)；CSV 改 Task 局部快照并删 Myjob.tianbiao；display() 相机1 屏蔽补隐藏面板；参数自动下发按 en 收紧(baoguang_set/两处 bnSetParam)。",
             "v1.3.4  2026-09-19  Form3 无协议接收加固：TCP 客户端与服务端连接开启 KeepAlive 并压到 30s 探活(SIO_KEEPALIVE_VALS)，PLC 掉电/网线拔出约 30s 内触发重连（原为系统默认 2 小时）；未匹配触发串时增加粘包/拆包限流诊断日志(含整段内容与长度，正常报文不记)。说明：现场协议是 8 条精确匹配触发串、无分隔符与长度前缀，故不改变解析行为，避免猜协议导致系统性失效。",
             "v1.3.3  2026-09-19  写回 pending TTL 加固：失败计数改按“结果身份”([5]+[4])计数，新帧登记即自动重置(不再继承旧失败计数/旧起始时刻被误丢)；客户端为空与写路径异常也计入失败(原 NRE 被 per-camera catch 吞掉→无限重试+刷日志；TCP 普通写回漏判空一并补齐)；TTL 时间支路改 int 差值；Modbus.cs 读响应等待改差值式超时(原绝对比较跨 TickCount 回绕会死等)。",
             "v1.3.2  2026-09-19  方案切换门闩原子化：xinghao_qiehuan 改 Interlocked.CompareExchange 根除双切换 TOCTOU；Form1 闩读改 Volatile.Read(含回调热路径/自旋等待/断线检测门控)、写改 Volatile.Write；三窗体回执闩改 volatile；cam10 内层分支补 else 复位(原内层不成立时无复位路径)。",

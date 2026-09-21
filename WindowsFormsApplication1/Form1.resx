@@ -1177,7 +1177,7 @@
     <value>NoControl</value>
   </data>
   <data name="checkBox2.Location" type="System.Drawing.Point, System.Drawing">
-    <value>188, 309</value>
+    <value>175, 309</value>
   </data>
   <data name="checkBox2.Margin" type="System.Windows.Forms.Padding, System.Windows.Forms">
     <value>2, 2, 2, 2</value>
@@ -1210,7 +1210,7 @@
     <value>NoControl</value>
   </data>
   <data name="checkBox1.Location" type="System.Drawing.Point, System.Drawing">
-    <value>186, 290</value>
+    <value>175, 290</value>
   </data>
   <data name="checkBox1.Margin" type="System.Windows.Forms.Padding, System.Windows.Forms">
     <value>2, 2, 2, 2</value>
@@ -4819,7 +4819,7 @@
     <value>0, 0</value>
   </data>
   <data name="panel1.Size" type="System.Drawing.Size, System.Drawing">
-    <value>577, 117</value>
+    <value>577, 134</value>
   </data>
   <data name="panel1.TabIndex" type="System.Int32, mscorlib">
     <value>0</value>
@@ -4840,7 +4840,7 @@
     <value>4, 22</value>
   </data>
   <data name="tabPage6.Size" type="System.Drawing.Size, System.Drawing">
-    <value>581, 121</value>
+    <value>581, 138</value>
   </data>
   <data name="tabPage6.TabIndex" type="System.Int32, mscorlib">
     <value>3</value>
@@ -6118,7 +6118,7 @@
     <value>2, 2, 2, 2</value>
   </data>
   <data name="tabPage1.Size" type="System.Drawing.Size, System.Drawing">
-    <value>581, 121</value>
+    <value>581, 138</value>
   </data>
   <data name="tabPage1.TabIndex" type="System.Int32, mscorlib">
     <value>0</value>
@@ -7630,7 +7630,7 @@
     <value>2, 2, 2, 2</value>
   </data>
   <data name="tabPage2.Size" type="System.Drawing.Size, System.Drawing">
-    <value>581, 121</value>
+    <value>581, 138</value>
   </data>
   <data name="tabPage2.TabIndex" type="System.Int32, mscorlib">
     <value>1</value>
@@ -9091,7 +9091,7 @@
     <value>2, 2, 2, 2</value>
   </data>
   <data name="tabPage3.Size" type="System.Drawing.Size, System.Drawing">
-    <value>581, 121</value>
+    <value>581, 138</value>
   </data>
   <data name="tabPage3.TabIndex" type="System.Int32, mscorlib">
     <value>0</value>
@@ -10552,7 +10552,7 @@
     <value>2, 2, 2, 2</value>
   </data>
   <data name="tabPage4.Size" type="System.Drawing.Size, System.Drawing">
-    <value>581, 121</value>
+    <value>581, 138</value>
   </data>
   <data name="tabPage4.TabIndex" type="System.Int32, mscorlib">
     <value>0</value>
@@ -12070,7 +12070,7 @@
     <value>4, 22</value>
   </data>
   <data name="tabPage7.Size" type="System.Drawing.Size, System.Drawing">
-    <value>581, 121</value>
+    <value>581, 138</value>
   </data>
   <data name="tabPage7.TabIndex" type="System.Int32, mscorlib">
     <value>4</value>
@@ -13588,7 +13588,7 @@
     <value>4, 22</value>
   </data>
   <data name="tabPage8.Size" type="System.Drawing.Size, System.Drawing">
-    <value>581, 121</value>
+    <value>581, 138</value>
   </data>
   <data name="tabPage8.TabIndex" type="System.Int32, mscorlib">
     <value>5</value>
@@ -15106,7 +15106,7 @@
     <value>4, 22</value>
   </data>
   <data name="tabPage9.Size" type="System.Drawing.Size, System.Drawing">
-    <value>581, 121</value>
+    <value>581, 138</value>
   </data>
   <data name="tabPage9.TabIndex" type="System.Int32, mscorlib">
     <value>6</value>
@@ -16624,7 +16624,7 @@
     <value>4, 22</value>
   </data>
   <data name="tabPage10.Size" type="System.Drawing.Size, System.Drawing">
-    <value>581, 121</value>
+    <value>581, 138</value>
   </data>
   <data name="tabPage10.TabIndex" type="System.Int32, mscorlib">
     <value>7</value>
@@ -17094,6 +17094,9 @@
   <data name="pictureBoxCam9.Size" type="System.Drawing.Size, System.Drawing">
     <value>246, 160</value>
   </data>
+  <data name="pictureBoxCam9.SizeMode" type="System.Windows.Forms.PictureBoxSizeMode, System.Windows.Forms">
+    <value>Zoom</value>
+  </data>
   <data name="pictureBoxCam9.TabIndex" type="System.Int32, mscorlib">
     <value>126</value>
   </data>
@@ -17396,6 +17399,9 @@
   </data>
   <data name="pictureBoxCam8.Size" type="System.Drawing.Size, System.Drawing">
     <value>253, 160</value>
+  </data>
+  <data name="pictureBoxCam8.SizeMode" type="System.Windows.Forms.PictureBoxSizeMode, System.Windows.Forms">
+    <value>Zoom</value>
   </data>
   <data name="pictureBoxCam8.TabIndex" type="System.Int32, mscorlib">
     <value>126</value>
@@ -17700,6 +17706,9 @@
   <data name="pictureBoxCam7.Size" type="System.Drawing.Size, System.Drawing">
     <value>245, 160</value>
   </data>
+  <data name="pictureBoxCam7.SizeMode" type="System.Windows.Forms.PictureBoxSizeMode, System.Windows.Forms">
+    <value>Zoom</value>
+  </data>
   <data name="pictureBoxCam7.TabIndex" type="System.Int32, mscorlib">
     <value>126</value>
   </data>
@@ -18002,6 +18011,9 @@
   </data>
   <data name="pictureBoxCam6.Size" type="System.Drawing.Size, System.Drawing">
     <value>246, 163</value>
+  </data>
+  <data name="pictureBoxCam6.SizeMode" type="System.Windows.Forms.PictureBoxSizeMode, System.Windows.Forms">
+    <value>Zoom</value>
   </data>
   <data name="pictureBoxCam6.TabIndex" type="System.Int32, mscorlib">
     <value>126</value>
@@ -18306,6 +18318,9 @@
   <data name="pictureBoxCam5.Size" type="System.Drawing.Size, System.Drawing">
     <value>253, 163</value>
   </data>
+  <data name="pictureBoxCam5.SizeMode" type="System.Windows.Forms.PictureBoxSizeMode, System.Windows.Forms">
+    <value>Zoom</value>
+  </data>
   <data name="pictureBoxCam5.TabIndex" type="System.Int32, mscorlib">
     <value>126</value>
   </data>
@@ -18608,6 +18623,9 @@
   </data>
   <data name="pictureBoxCam4.Size" type="System.Drawing.Size, System.Drawing">
     <value>245, 163</value>
+  </data>
+  <data name="pictureBoxCam4.SizeMode" type="System.Windows.Forms.PictureBoxSizeMode, System.Windows.Forms">
+    <value>Zoom</value>
   </data>
   <data name="pictureBoxCam4.TabIndex" type="System.Int32, mscorlib">
     <value>126</value>
@@ -18912,6 +18930,9 @@
   <data name="pictureBoxCam3.Size" type="System.Drawing.Size, System.Drawing">
     <value>246, 158</value>
   </data>
+  <data name="pictureBoxCam3.SizeMode" type="System.Windows.Forms.PictureBoxSizeMode, System.Windows.Forms">
+    <value>Zoom</value>
+  </data>
   <data name="pictureBoxCam3.TabIndex" type="System.Int32, mscorlib">
     <value>126</value>
   </data>
@@ -19215,6 +19236,9 @@
   <data name="pictureBoxCam2.Size" type="System.Drawing.Size, System.Drawing">
     <value>253, 158</value>
   </data>
+  <data name="pictureBoxCam2.SizeMode" type="System.Windows.Forms.PictureBoxSizeMode, System.Windows.Forms">
+    <value>Zoom</value>
+  </data>
   <data name="pictureBoxCam2.TabIndex" type="System.Int32, mscorlib">
     <value>126</value>
   </data>
@@ -19517,6 +19541,9 @@
   </data>
   <data name="pictureBoxCam1.Size" type="System.Drawing.Size, System.Drawing">
     <value>245, 158</value>
+  </data>
+  <data name="pictureBoxCam1.SizeMode" type="System.Windows.Forms.PictureBoxSizeMode, System.Windows.Forms">
+    <value>Zoom</value>
   </data>
   <data name="pictureBoxCam1.TabIndex" type="System.Int32, mscorlib">
     <value>126</value>

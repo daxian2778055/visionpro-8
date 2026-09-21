@@ -21,24 +21,25 @@ namespace demo
         {
             // 判断文件是否存在
             FileInfo fileInfo = new FileInfo(AFileName);
-            //Todo:搞清枚举的用法
+            // ch:P1-7 FileName 必须先解析赋值：原实现在方法末尾赋值，创建文件失败先抛异常时 FileName 保持 null，
+            //   调用方吞掉异常后 ReadString 以 null 路径调 GetPrivateProfileString → 实际静默读写 C:\Windows\win.ini
+            FileName = fileInfo.FullName;
             if ((!fileInfo.Exists))
             { //|| (FileAttributes.Directory in fileInfo.Attributes))
-                //文件不存在，建立文件
-                using (System.IO.StreamWriter sw = new System.IO.StreamWriter(AFileName, false, System.Text.Encoding.Default))
+                //文件不存在，建立文件；失败仅记日志不抛（后续按系统默认节键回退读取）
+                try
                 {
-                    try
+                    using (System.IO.StreamWriter sw = new System.IO.StreamWriter(FileName, false, System.Text.Encoding.Default))
                     {
                         sw.Write("#ParamSet");
                     }
-                    catch
-                    {
-                        throw (new ApplicationException("Ini文件不存在"));
-                    }
+                }
+                catch (Exception ex)
+                {
+                    WindowsFormsApplication1.ErrorLog IniErrLog = new WindowsFormsApplication1.ErrorLog();
+                    IniErrLog.WriteLog("ClassIni 创建Ini文件失败(" + FileName + "):" + ex.Message);
                 }
             }
-            //必须是完全路径，不能是相对路径
-            FileName = fileInfo.FullName;
         }
         //写INI文件
         public void WriteString(string Section, string Ident, string Value)
