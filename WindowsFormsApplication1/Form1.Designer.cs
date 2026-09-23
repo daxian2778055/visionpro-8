@@ -100,6 +100,8 @@
             this.textBox4 = new System.Windows.Forms.TextBox();
             this.label111 = new System.Windows.Forms.Label();
             this.numericUpDown22 = new System.Windows.Forms.NumericUpDown();
+            this.labelOutputMode = new System.Windows.Forms.Label();
+            this.cbOutputMode = new System.Windows.Forms.ComboBox();
             this.checkBox2 = new System.Windows.Forms.CheckBox();
             this.checkBox1 = new System.Windows.Forms.CheckBox();
             this.label18 = new System.Windows.Forms.Label();
@@ -1543,10 +1545,41 @@
             this.tabControl1.Name = "tabControl1";
             this.tabControl1.SelectedIndex = 0;
             // 
+            // labelOutputMode（ch:输出方式标注；采用 WinForms 原生控件，布局在代码中显式指定，不写 resx）
+            // 
+            this.labelOutputMode.AutoSize = true;
+            this.labelOutputMode.Location = new System.Drawing.Point(6, 353);
+            this.labelOutputMode.Name = "labelOutputMode";
+            this.labelOutputMode.TabIndex = 1000;
+            this.labelOutputMode.Text = "输出方式";
+            // 
+            // cbOutputMode（ch:全局唯一输出方式；DropDownList 样式保证只能单选，杜绝多路同时输出）
+            //   位置 y=350 在本页既有控件最低点(y=332)之下，tabPage5.AutoScroll=True 可滚动到）
+            // 
+            this.cbOutputMode.DropDownStyle = System.Windows.Forms.ComboBoxStyle.DropDownList;
+            this.cbOutputMode.FormattingEnabled = true;
+            this.cbOutputMode.Items.AddRange(new object[] {
+            "自动(按原配置)",
+            "不输出",
+            "IO输出",
+            "串口输出",
+            "TCP输出",
+            "ModbusTCP输出",
+            "欧姆龙Fins",
+            "ModbusTCP(配置窗)",
+            "ModbusRTU"});
+            this.cbOutputMode.Location = new System.Drawing.Point(77, 350);
+            this.cbOutputMode.Name = "cbOutputMode";
+            this.cbOutputMode.Size = new System.Drawing.Size(160, 20);
+            this.cbOutputMode.TabIndex = 1001;
+            this.cbOutputMode.SelectedIndexChanged += new System.EventHandler(this.cbOutputMode_SelectedIndexChanged);
+            // 
             // tabPage5
             // 
             resources.ApplyResources(this.tabPage5, "tabPage5");
             this.tabPage5.BorderStyle = System.Windows.Forms.BorderStyle.Fixed3D;
+            this.tabPage5.Controls.Add(this.labelOutputMode);
+            this.tabPage5.Controls.Add(this.cbOutputMode);
             this.tabPage5.Controls.Add(this.label48);
             this.tabPage5.Controls.Add(this.numericUpDown5);
             this.tabPage5.Controls.Add(this.label111);
@@ -7164,6 +7197,8 @@
         private System.Windows.Forms.ComboBox comboBox21;
         private System.Windows.Forms.Label label111;
         private System.Windows.Forms.NumericUpDown numericUpDown22;
+        private System.Windows.Forms.Label labelOutputMode;
+        private System.Windows.Forms.ComboBox cbOutputMode;
         private System.Windows.Forms.Button button6;
         private System.Windows.Forms.Button button14;
         private System.Windows.Forms.Button button15;

@@ -224,11 +224,33 @@ namespace WindowsFormsApplication1
             // ch:R11-2 ini 使能/地址/通道数读取族统一 TryParse+回退默认+夹取 NUD 范围：
             //   原裸 bool.Parse/decimal.Parse 任一值被现场改坏即抛异常 → Load 的 catch 只记一行日志，
             //   跳过其后 IP/端口/字节序/通道配置与自动连接，通讯窗体静默不工作。
-            decimal IniDec(string s, decimal dft) { decimal v; return decimal.TryParse(s, out v) ? v : dft; }
+            // ch:R12 在此基础上补两点：
+            //   ①解析失败/取整不再静默——原 TryParse 失败直接换默认值，现场改了 ini 不生效无从排查；
+            //   ②统一取整——qishi/changdu/geshu/lunxun_time 均为整数语义，保留小数会被存成 "10.5"，
+            //     轮询线程 int.Parse(par.Value[1]/[2])、int.Parse(address_qishi.ToString()) 抛 FormatException，
+            //     整轮 foreach 中断、其后通道全部不读；lunxun_time 保留 (0,1) 小数还会被 (int) 截成 0 → Sleep(0) 忙等打满单核。
+            decimal IniDec(string s, decimal dft)
+            {
+                decimal v;
+                if (!decimal.TryParse(s, out v))
+                {
+                    MsgErroeLog.WriteLog("modbustcp ini 解析失败，回退默认值 原值=[" + (s ?? "null") + "] 默认=" + dft);
+                    v = dft;
+                }
+                decimal t = Math.Truncate(v);
+                if (t != v)
+                    MsgErroeLog.WriteLog("modbustcp ini 小数值已取整 [" + v + "]→" + t);
+                return t;
+            }
             decimal ClampNud(NumericUpDown nud, decimal v) { return Math.Max(nud.Minimum, Math.Min(nud.Maximum, v)); }
             bool bl_ini;
-            fins_lunxunen = bool.TryParse(wdini.ReadString("modbustcp", "modbus_lunxunen", "false"), out bl_ini) && bl_ini;
-            fins_en = bool.TryParse(wdini.ReadString("modbustcp", "modbus_en", "false"), out bl_ini) && bl_ini;
+            // ch:R12 TryParse 失败时 out 被置 false，语义与原写法一致；补日志，避免 "1"/"是" 等历史写法静默变 false
+            if (!bool.TryParse(wdini.ReadString("modbustcp", "modbus_lunxunen", "false"), out bl_ini))
+                MsgErroeLog.WriteLog("modbustcp ini modbus_lunxunen 非布尔值，按 false 处理");
+            fins_lunxunen = bl_ini;
+            if (!bool.TryParse(wdini.ReadString("modbustcp", "modbus_en", "false"), out bl_ini))
+                MsgErroeLog.WriteLog("modbustcp ini modbus_en 非布尔值，按 false 处理");
+            fins_en = bl_ini;
             address_qishi = ClampNud(numericUpDown1, IniDec(wdini.ReadString("modbustcp", "qishi", "0"), 0));
             address_length = ClampNud(numericUpDown2, IniDec(wdini.ReadString("modbustcp", "zongchang", "1"), 1));
             lunxun_time = ClampNud(numericUpDown3, IniDec(wdini.ReadString("modbustcp", "lunxun_time", "20"), 20));
@@ -268,9 +290,21 @@ namespace WindowsFormsApplication1
             {
                 for (int i = 0; i < geshu; i++)
                 {
-                    fins_mingcheng = wdini.ReadString((i + 1).ToString()+ "_modbustcp", "name", "").Replace("\0", "");
+                    fins_mingcheng = wdini.ReadString((i + 1).ToString()+ "_modbustcp", "name", "").Replace("\0", "").Trim();
+                    // ch:R12 name 缺省为 ""，geshu>=2 且部分通道未填名时两次 Add("") → Dictionary 重复键抛 ArgumentException，
+                    //   落到 Load 的 catch 只记一行日志，其后 IP/串口/通道配置/自动连接全部跳过（正是本轮要消灭的"改坏 ini 后通讯窗体静默不工作"）
+                    if (fins_mingcheng.Length == 0)
+                    {
+                        fins_mingcheng = "通道" + (i + 1);
+                        MsgErroeLog.WriteLog("modbustcp 第" + (i + 1) + "段 name 为空，改用默认名[" + fins_mingcheng + "]");
+                    }
+                    else if (fins_dic.ContainsKey(fins_mingcheng))
+                    {
+                        MsgErroeLog.WriteLog("modbustcp 第" + (i + 1) + "段 name 与既有通道重名[" + fins_mingcheng + "]，降级为唯一名");
+                        fins_mingcheng = fins_mingcheng + "_" + (i + 1);
+                    }
                     fins_qishi = IniDec(wdini.ReadString((i + 1).ToString() + "_modbustcp", "qishi", "0"), 0);
-                    fins_length = Math.Max(0, Math.Min(1000, IniDec(wdini.ReadString((i + 1).ToString() + "_modbustcp", "changdu", "0"), 0))); // ch:R11-2 内层循环上界，夹 [0,1000]
+                    fins_length = Math.Max(0, Math.Min(1000, IniDec(wdini.ReadString((i + 1).ToString() + "_modbustcp", "changdu", "0"), 0))); // ch:R11-2 内层循环上界，夹 [0,1000]（IniDec 已取整）
                     ABCD = wdini.ReadString((i + 1).ToString() + "_modbustcp", "gaodiwei", "触发").Replace("\0", "");
                     fins_style = wdini.ReadString((i + 1).ToString() + "_modbustcp", "geshi", "int").Replace("\0", "");
                     fins_dic.Add(fins_mingcheng, new string[] { fins_mingcheng, fins_qishi.ToString(), fins_length.ToString(), ABCD, fins_style });
@@ -279,7 +313,8 @@ namespace WindowsFormsApplication1
                         xuanzhong_temp = fins_qishi - address_qishi + j;
                         int t = (int)xuanzhong_temp; // ch:R11-2 原 int.Parse(decimal.ToString()) 遇小数值抛 FormatException
                         // ch:地址越界（负值/超出预填范围）时跳过，防止 KeyNotFoundException
-                        if (t >= 0 && t < 50 && fins_name.ContainsKey(t) && fins_data.ContainsKey(t))
+                        // ch:R12 起始条件用原始 decimal——(int)(-0.5)==0 会误判通过，把上色打到 0 号格
+                        if (xuanzhong_temp >= 0 && xuanzhong_temp < 50 && t >= 0 && t < 50 && fins_name.ContainsKey(t) && fins_data.ContainsKey(t))
                         {
                             dataGridView1[fins_name[t][0], fins_name[t][1]].Style.BackColor = Color.Green;
                             dataGridView1[fins_data[t][0], fins_data[t][1]].Style.BackColor = Color.Green;
@@ -1121,8 +1156,8 @@ namespace WindowsFormsApplication1
         {
             if (chushihua)
             {
-                address_qishi = numericUpDown1.Value;
-                wdini.WriteString("modbustcp", "qishi", numericUpDown1.Value.ToString());
+                address_qishi = Math.Truncate(numericUpDown1.Value); // ch:R12 取整，轮询线程 int.Parse(address_qishi.ToString()) 需整数串
+                wdini.WriteString("modbustcp", "qishi", address_qishi.ToString());
                 RefreshFinsTable(); // ch:起始地址变化后立即刷新表格（清空并按新起点重绘）
             }
         }
@@ -1140,7 +1175,7 @@ namespace WindowsFormsApplication1
         {
             if (chushihua)
             {
-                lunxun_time = numericUpDown3.Value;
+                lunxun_time = Math.Truncate(numericUpDown3.Value); // ch:R12 取整，(0,1) 小数会让 Sleep((int)v)=Sleep(0) 忙等
                 wdini.WriteString("modbustcp", "lunxun_time", lunxun_time.ToString());
 
             }
@@ -1281,26 +1316,38 @@ namespace WindowsFormsApplication1
                                             }
                                         }
                                     }
-                                    if (chongdie)
+                                    // ch:R12 手动新增通道与 Load 路径同款加固：
+                                    //   ①重名 → Dictionary.Add 重复键抛异常（原只靠 catch 弹窗，fins_dic 已增而 ini 未写，状态不一致）；
+                                    //   ②地址/长度取整后入 fins_dic 与 ini，否则轮询线程 int.Parse(par.Value[1]/[2]) 抛 FormatException；
+                                    //   ③上色索引改 (int) 强转 + 越界守卫（原 int.Parse(decimal.ToString()) 遇小数抛 FormatException，
+                                    //     且只挡住了 Value 写入、没挡 BackColor 两行 → 越界时 fins_name[...] 会 KeyNotFound）
+                                    string nmAdd = textBox16.Text.Trim();
+                                    if (nmAdd.Length == 0) nmAdd = "通道" + (fins_dic.Count + 1);
+                                    decimal qAdd = Math.Truncate(numericUpDown5.Value);
+                                    decimal lenAdd = Math.Truncate(numericUpDown4.Value);
+                                    bool chongming = fins_dic.ContainsKey(nmAdd);
+                                    if (chongdie || chongming)
                                     {
-                                        MessageBox.Show("数据有重叠");
+                                        MessageBox.Show(chongdie ? "数据有重叠" : "通道名已存在：" + nmAdd);
                                     }
                                     else
                                     {
-                                        fins_dic.Add(textBox16.Text, new string[] { textBox16.Text, numericUpDown5.Value.ToString(), numericUpDown4.Value.ToString(), comboBox2.Text, comboBox3.Text });
-                                        for (int i = 0; i < numericUpDown4.Value; i++)
+                                        fins_dic.Add(nmAdd, new string[] { nmAdd, qAdd.ToString(), lenAdd.ToString(), comboBox2.Text, comboBox3.Text });
+                                        for (int i = 0; i < lenAdd; i++)
                                         {
-                                            xuanzhong_temp = numericUpDown5.Value - numericUpDown1.Value + i;
-                                            dataGridView1[fins_name[int.Parse(xuanzhong_temp.ToString())][0], fins_name[int.Parse(xuanzhong_temp.ToString())][1]].Style.BackColor = Color.Green;
-                                            dataGridView1[fins_data[int.Parse(xuanzhong_temp.ToString())][0], fins_data[int.Parse(xuanzhong_temp.ToString())][1]].Style.BackColor = Color.Green;
-                                            if (xuanzhong_temp >= 0 && xuanzhong_temp < 50)
-                                            dataGridView1[fins_name[int.Parse(xuanzhong_temp.ToString())][0], fins_name[int.Parse(xuanzhong_temp.ToString())][1]].Value = textBox16.Text;
+                                            xuanzhong_temp = qAdd - Math.Truncate(numericUpDown1.Value) + i;
+                                            int tAdd = (int)xuanzhong_temp;
+                                            if (xuanzhong_temp < 0 || xuanzhong_temp >= 50 || !fins_name.ContainsKey(tAdd) || !fins_data.ContainsKey(tAdd))
+                                                continue;
+                                            dataGridView1[fins_name[tAdd][0], fins_name[tAdd][1]].Style.BackColor = Color.Green;
+                                            dataGridView1[fins_data[tAdd][0], fins_data[tAdd][1]].Style.BackColor = Color.Green;
+                                            dataGridView1[fins_name[tAdd][0], fins_name[tAdd][1]].Value = nmAdd;
                                         }
                                         geshu = fins_dic.Count;
                                         wdini.WriteString("modbustcp", "geshu", fins_dic.Count.ToString());
-                                        wdini.WriteString(geshu.ToString() + "_modbustcp", "name", textBox16.Text);
-                                        wdini.WriteString(geshu.ToString() + "_modbustcp", "qishi", numericUpDown5.Value.ToString());
-                                        wdini.WriteString(geshu.ToString() + "_modbustcp", "changdu", numericUpDown4.Value.ToString());
+                                        wdini.WriteString(geshu.ToString() + "_modbustcp", "name", nmAdd);
+                                        wdini.WriteString(geshu.ToString() + "_modbustcp", "qishi", qAdd.ToString());
+                                        wdini.WriteString(geshu.ToString() + "_modbustcp", "changdu", lenAdd.ToString());
                                         wdini.WriteString(geshu.ToString() + "_modbustcp", "gaodiwei", comboBox2.Text);
                                         wdini.WriteString(geshu.ToString() + "_modbustcp", "geshi", comboBox3.Text);
                                     }
@@ -1354,8 +1401,11 @@ namespace WindowsFormsApplication1
             {
                 // ch:R10-3 原 int.Parse(decimal.ToString()) 在区域小数点/ini 带小数时抛 FormatException，且在 try 外直接杀死轮询线程；
                 // 另：lunxun_time<=0 时补 50ms 小睡，避免 while(true) 全速空转吃满一核
-                Thread.Sleep(lunxun_time > 0 ? (int)lunxun_time : 50);
-                if (lunxun_time > 0)
+                // ch:R12 判据由 >0 改为 >=1：原 0<lunxun_time<1 时 (int) 截成 0 → Sleep(0) 忙等，
+                //   且 if 仍为真 → 全速轮询 + 单核打满 + Modbus 请求风暴（NUD3 最小值为 0，ini 手改 0.5 即触发）
+                bool pollOn = lunxun_time >= 1;
+                Thread.Sleep(pollOn ? (int)lunxun_time : 50);
+                if (pollOn)
                 {
                     try
                     {
@@ -1505,7 +1555,8 @@ namespace WindowsFormsApplication1
                 }
                 else
                 {
-                    Thread.Sleep(50);
+                    // ch:R12 轮询关闭期的空闲小睡；顶部三元在 pollOn=false 时已 Sleep(50)，此处再睡一次是冗余的，
+                    //   但仅让关闭期循环从 50ms 变 100ms（更省 CPU），无功能影响，故保留不动原结构
                 }
             }
         }

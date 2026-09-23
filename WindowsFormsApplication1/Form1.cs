@@ -297,6 +297,81 @@ namespace WindowsFormsApplication1
             ApplyCameraDisplayMode();
         }
 
+        // ================= 输出方式互斥（ch:R13 合理化） =================
+        // ch:现场每次只用一种输出，但原实现是「每相机 4 个 CheckBox + 3 个配置窗使能」共 7 路平行 if，
+        //    彼此互不约束：勾错两路就会同时下发（数据重复到 PLC，是现场事故而非性能问题）。
+        //    配置窗(tabPage5)上一个原生 ComboBox 统一选择，getrecord 里只放行选中的那一路。
+        //    _outputMode = -1 表示「自动(按原配置)」：完全不加锁，行为与改造前一致——这是升级后的默认值，保证零回归。
+        private const int OutAuto = -1;            // 自动：按各开关原配置，不加互斥
+        private const int OutOff = 0;              // 不输出
+        private const int OutIO = 1;               // IO 脉冲
+        private const int OutSerial = 2;           // 串口（frm3）
+        private const int OutTcp = 3;              // TCP（frm3）
+        private const int OutModbusTcp = 4;        // ModbusTCP（frm3）
+        private const int OutOmron = 5;            // 欧姆龙 Fins（FormOmron 配置窗）
+        private const int OutModbusTcpWin = 6;     // ModbusTCP（FormModbus 配置窗）
+        private const int OutModbusRtu = 7;        // ModbusRTU（FormModbusRtu 配置窗）
+        private volatile int _outputMode = OutAuto;
+        private bool _outputModeSyncing;           // 防止程序赋值 SelectedIndex 与 SelectedIndexChanged 互相触发
+
+        // ch:把选中的输出方式落到 8 个 job 的对应标志位，并同步旧的 4 组 CheckBox（单一数据源，避免两处各写一份）。
+        //   mode<0(自动)时一律不动任何标志位，保持各开关原状。
+        private void ApplyOutputMode(int mode, bool persist)
+        {
+            if (mode < OutAuto || mode > OutModbusRtu)
+                mode = OutAuto;
+            _outputMode = mode;
+            try
+            {
+                _outputModeSyncing = true;
+                if (cbOutputMode != null && cbOutputMode.SelectedIndex != mode + 1)
+                    cbOutputMode.SelectedIndex = mode + 1; // -1 → 0(自动)
+            }
+            catch (Exception ex) { MsgErroeLog.WriteLog("输出方式下拉同步失败:" + ex.Message); }
+            finally { _outputModeSyncing = false; }
+
+            if (mode >= 0)
+            {
+                bool io = (mode == OutIO);
+                bool ser = (mode == OutSerial);
+                bool tcp = (mode == OutTcp);
+                bool mtcp = (mode == OutModbusTcp);
+                Myjob[] jobs = { myjob1, myjob2, myjob3, myjob4, myjob5, myjob6, myjob7, myjob8 };
+                // 旧界面开关的相机顺序映射（与既有 CheckedChanged 处理器一一对应）
+                CheckBox[] cbSer = { checkBox27, checkBox28, checkBox29, checkBox30, checkBox31, checkBox37, checkBox43, checkBox49 };
+                CheckBox[] cbTcp = { checkBox5, checkBox9, checkBox15, checkBox19, checkBox33, checkBox39, checkBox45, checkBox51 };
+                CheckBox[] cbMtcp = { checkBox24, checkBox23, checkBox21, checkBox17, checkBox32, checkBox38, checkBox44, checkBox50 };
+                try
+                {
+                    for (int i = 0; i < 8; i++)
+                    {
+                        jobs[i].IO = io;
+                        jobs[i].serial = ser;
+                        jobs[i].tcp = tcp;
+                        jobs[i].modbustcp = mtcp;
+                        // 状态相同则不赋值，避免无谓触发既有 CheckedChanged
+                        if (cbSer[i].Checked != ser) cbSer[i].Checked = ser;
+                        if (cbTcp[i].Checked != tcp) cbTcp[i].Checked = tcp;
+                        if (cbMtcp[i].Checked != mtcp) cbMtcp[i].Checked = mtcp;
+                    }
+                }
+                catch (Exception ex) { MsgErroeLog.WriteLog("输出方式同步旧开关失败:" + ex.Message); }
+            }
+            if (persist)
+            {
+                // 立即落盘（与 checkBoxDisplayRaw 同款做法），崩溃也不丢选择
+                try { canshuIni.WriteString("camera", "output_mode", mode.ToString()); }
+                catch (Exception ex) { MsgErroeLog.WriteLog("输出方式保存失败:" + ex.Message); }
+            }
+        }
+
+        private void cbOutputMode_SelectedIndexChanged(object sender, EventArgs e)
+        {
+            if (_outputModeSyncing) return; // 程序赋值 SelectedIndex 引发的回调，ApplyOutputMode 已把状态设好
+            try { ApplyOutputMode(cbOutputMode.SelectedIndex - 1, true); }
+            catch (Exception ex) { MsgErroeLog.WriteLog("输出方式选择失败:" + ex.Message); }
+        }
+
         // ch:递归设置菜单项颜色：一级白字（深色顶栏），下拉子项黑字（浅色面板）
         private void StyleMenuItem(ToolStripMenuItem item, bool white)
         {
@@ -419,6 +494,47 @@ namespace WindowsFormsApplication1
         Dictionary<string, int> d6 = new Dictionary<string, int>();
         Dictionary<string, int> d7 = new Dictionary<string, int>();
         Dictionary<string, int> d8 = new Dictionary<string, int>();
+
+        // ch:R13 缺陷统计表增量更新（d1..d8 的 8 段重复逻辑收敛到这里）。
+        //   原实现每帧：dataGridViewN.Visible=false → Rows.Clear() → 按字典全量重加 → Visible=true，
+        //   每帧两次强制重绘(闪烁来源) + O(键数) 行重建；且 Clear/重加发生在 UI 线程 BeginInvoke 里，
+        //   高频 NG 时反复触发 DataGridView 整表刷新。
+        //   改为「表里已有该行就原地改计数、没有就末尾追加」，行序保持首次出现顺序，
+        //   只写 DataTable —— 由 DataSource 绑定的 ListChanged 增量刷新，不再手动开关 Visible。
+        //   首行空行：初始化时 Rows.Add(NewRow()) 发生在 Columns.Add 之前，表首恒有一行 DBNull，
+        //   原实现靠 Rows.Clear() 顺带清掉；增量更新必须显式剔除，否则表格永远多一行空白。
+        //   注：dataGridView1/2 另有切到 myTable1 的 DataSource 分支，这里与原实现一致只写 myTable，不动绑定。
+        private void UpdateDefectTable(Dictionary<string, int> d, DataTable tbl, string key)
+        {
+            try
+            {
+                if (tbl.Columns.Count > 0 && tbl.Rows.Count > 0)
+                {
+                    object head = tbl.Rows[0][0];
+                    if (head == null || Convert.IsDBNull(head))
+                        tbl.Rows.RemoveAt(0); // ch:剔除初始化残留的空行（只可能是那一行，正常数据行 key 不会是 DBNull）
+                }
+                if (d.ContainsKey(key))
+                {
+                    d[key] = d[key] + 1;
+                    foreach (DataRow r in tbl.Rows)
+                    {
+                        if (string.Equals(r[0].ToString(), key, StringComparison.Ordinal))
+                        {
+                            r[1] = d[key].ToString(); // ch:原地改计数，触发行级变更而非整表重建
+                            return;
+                        }
+                    }
+                    tbl.Rows.Add(key, d[key].ToString()); // ch:字典有、表里没有(被外部清过)：补回一行
+                }
+                else
+                {
+                    d.Add(key, 1);
+                    tbl.Rows.Add(key, "1");
+                }
+            }
+            catch (Exception ex) { MsgErroeLog.WriteLog("异常:" + ex.Message); }
+        }
         List<FileInfo> ls1 = new List<FileInfo>();
         List<FileInfo> ls2 = new List<FileInfo>();
         string day1;
@@ -2346,6 +2462,13 @@ namespace WindowsFormsApplication1
                 numericUpDown22.Value = devalue;
                 feng = double.Parse(devalue.ToString());
 
+                // ch:R13 读取全局输出方式；键缺失/非法 → -1(自动)，与升级前行为完全一致（零回归）
+                int outModeIni;
+                if (!int.TryParse(canshuIni.ReadString("camera", "output_mode", "").Replace("\0", ""), out outModeIni)
+                    || outModeIni < OutAuto || outModeIni > OutModbusRtu)
+                    outModeIni = OutAuto;
+                ApplyOutputMode(outModeIni, false);
+
                 decimal.TryParse(canshuIni.ReadString("time", "IOyanshi", "0"), out devalue);
                 devalue = ClampToUpDown(numericUpDown5, devalue); // ch:P1-5
                 numericUpDown5.Value = devalue;
@@ -4133,6 +4256,8 @@ namespace WindowsFormsApplication1
                                     System.Threading.Interlocked.Add(ref _perfRunTicks[perfRi - 1],
                                         System.Diagnostics.Stopwatch.GetTimestamp() - perfRunT0);
                                     _perfRunCount[perfRi - 1]++;
+                                    // ch:P1 同步尾部计时起点（block.Run 刚结束）；终点在 DetectWorkerLoop 收到 getrecord 返回处
+                                    _perfTailStart[perfRi - 1] = System.Diagnostics.Stopwatch.GetTimestamp();
                                 }
                                 Interlocked.Decrement(ref _detectingCount);
                                 if (offlineBmp != null)
@@ -4319,14 +4444,24 @@ namespace WindowsFormsApplication1
                             }
                             // ch:P1-04 结果快照：检测线程一次性捕获通讯/曝光端子值；Task.Run 后台线程改用这些不可变快照，避免下一帧改写 ToolBlock 后串帧
                             // ch:P2-① 快照读取同样纳入 blockLock：与 block.Run / SetBlockInputSafe 串行，消除锁外读 Outputs
+                            // ch:R13 输出方式互斥闸（配置窗 ComboBox）：outMode<0(自动) 不加锁，行为与改造前一致；
+                            //   否则只有被选中的那一路为 true，其余 6 路在 getrecord 里直接不执行，杜绝多路同时下发。
+                            int outMode = _outputMode;
+                            bool outIO = (outMode < 0 || outMode == OutIO);
+                            bool outSerial = (outMode < 0 || outMode == OutSerial);
+                            bool outTcp = (outMode < 0 || outMode == OutTcp);
+                            bool outMtcp = (outMode < 0 || outMode == OutModbusTcp);
+                            bool outOmron = (outMode < 0 || outMode == OutOmron);
+                            bool outMtcpWin = (outMode < 0 || outMode == OutModbusTcpWin);
+                            bool outMrtu = (outMode < 0 || outMode == OutModbusRtu);
                             string snapTcp, snapSerial, snapMtcp, snapBuchang;
                             // ch:P2-① CSV 用不可变快照：检测线程锁内一次性拼好 "ji*" 输出串，Task 不再回读 block.Outputs，消除把 N+1 帧结果记到 N 帧行
                             string jiSnapshot = "";
                             lock (myjob.blockLock)
                             {
-                            try { snapTcp = faultThisFrame ? "999" : (myjob.block.Outputs.Contains("tcp") && myjob.block.Outputs["tcp"].Value != null ? myjob.block.Outputs["tcp"].Value.ToString() : ""); } catch { snapTcp = ""; }
-                            try { snapSerial = faultThisFrame ? "999" : (myjob.block.Outputs.Contains("serial") && myjob.block.Outputs["serial"].Value != null ? myjob.block.Outputs["serial"].Value.ToString() : ""); } catch { snapSerial = ""; }
-                            try { snapMtcp = faultThisFrame ? "999" : (myjob.block.Outputs.Contains("modbustcp") && myjob.block.Outputs["modbustcp"].Value != null ? myjob.block.Outputs["modbustcp"].Value.ToString() : ""); } catch { snapMtcp = ""; }
+                            try { snapTcp = (outTcp && myjob.tcp) ? (faultThisFrame ? "999" : (myjob.block.Outputs.Contains("tcp") && myjob.block.Outputs["tcp"].Value != null ? myjob.block.Outputs["tcp"].Value.ToString() : "")) : ""; } catch { snapTcp = ""; } // ch:R13 只在本路真的会发时才读 Output（持 blockLock，关键路径上）
+                            try { snapSerial = (outSerial && myjob.serial) ? (faultThisFrame ? "999" : (myjob.block.Outputs.Contains("serial") && myjob.block.Outputs["serial"].Value != null ? myjob.block.Outputs["serial"].Value.ToString() : "")) : ""; } catch { snapSerial = ""; } // ch:R13
+                            try { snapMtcp = (outMtcp && myjob.modbustcp) ? (faultThisFrame ? "999" : (myjob.block.Outputs.Contains("modbustcp") && myjob.block.Outputs["modbustcp"].Value != null ? myjob.block.Outputs["modbustcp"].Value.ToString() : "")) : ""; } catch { snapMtcp = ""; } // ch:R13
                             try { snapBuchang = (myjob.block.Outputs.Contains("buchang") && myjob.block.Outputs["buchang"].Value != null ? myjob.block.Outputs["buchang"].Value.ToString() : "0"); } catch { snapBuchang = "0"; }
                             try
                             {
@@ -4347,7 +4482,7 @@ namespace WindowsFormsApplication1
                             catch { jiSnapshot = ""; }
                             }
 
-                            if (myjob.IO)
+                            if (outIO && myjob.IO) // ch:R13 输出方式互斥闸
                             {
                                 switch (myjob.path_number)
                                 {
@@ -4371,7 +4506,7 @@ namespace WindowsFormsApplication1
                                 }
                             }
                             #endregion // ch:流程封
-                            if (myjob.tcp)
+                            if (outTcp && myjob.tcp) // ch:R13 输出方式互斥闸
                             {
                                 Task.Run(() =>
                                 {
@@ -4388,9 +4523,9 @@ namespace WindowsFormsApplication1
                                     catch (Exception ex) { MsgErroeLog.WriteLog("异常:" + ex.Message); }
                                 });
                             }
-                            Task.Run(() =>
+                            if (outSerial && myjob.serial) // ch:P1 判断提到 Task.Run 外（串口关闭时不再每帧派发空 Task）；ch:R13 加输出方式互斥闸
                             {
-                                if (myjob.serial)
+                                Task.Run(() =>
                                 {
                                     try
                                     {
@@ -4443,9 +4578,9 @@ namespace WindowsFormsApplication1
                                         #endregion
                                     }
                                     catch (Exception ex) { MsgErroeLog.WriteLog("异常:" + ex.Message); }
-                                }
-                            });
-                            if (omron.fins_en && omron.chushihua)
+                                });
+                            }
+                            if (outOmron && omron.fins_en && omron.chushihua) // ch:R13 输出方式互斥闸
                             {
                                 try
                                 {
@@ -4468,7 +4603,7 @@ namespace WindowsFormsApplication1
                                     catch (Exception ex) { MsgErroeLog.WriteLog("异常:" + ex.Message); }
                                 });
                             }
-                            if (modbustcp.fins_en && modbustcp.chushihua)
+                            if (outMtcpWin && modbustcp.fins_en && modbustcp.chushihua) // ch:R13 输出方式互斥闸
                             {
                                 try
                                 {
@@ -4490,7 +4625,7 @@ namespace WindowsFormsApplication1
                                     catch (Exception ex) { MsgErroeLog.WriteLog("异常:" + ex.Message); }
                                 });
                             }
-                            if (modbusrtu.fins_en && modbusrtu.chushihua)
+                            if (outMrtu && modbusrtu.fins_en && modbusrtu.chushihua) // ch:R13 输出方式互斥闸
                             {
                                 try
                                 {
@@ -4562,7 +4697,7 @@ namespace WindowsFormsApplication1
                                     gongjukuai(myjob.path_number, tempout1);
                                 });
                             }
-                            if (myjob.modbustcp && frm3.IsEnable && !(modbustcp.fins_en && modbustcp.chushihua))
+                            if (outMtcp && myjob.modbustcp && frm3.IsEnable && !(modbustcp.fins_en && modbustcp.chushihua)) // ch:R13 输出方式互斥闸
                             {
                                 Task.Run(() =>
 
@@ -4844,36 +4979,7 @@ namespace WindowsFormsApplication1
                                                         {
                                                             this.BeginInvoke(new Action(() =>
                                                             {
-                                                                dataGridView1.Visible = false;
-                                                                if (d1.ContainsKey(cuowu1))
-                                                                {
-                                                                    d1[cuowu1]++;
-                                                                    // myjob1.myTable.SelectAll();
-                                                                    try
-                                                                    {
-                                                                        myjob1.myTable.Rows.Clear();
-                                                                    }
-                                                                    catch (Exception ex) { MsgErroeLog.WriteLog("异常:" + ex.Message); }
-                                                                    //foreach (DataGridViewRow r in dataGridView1.SelectedRows)
-                                                                    //{
-                                                                    //    if (!r.IsNewRow)
-                                                                    //    {
-                                                                    //        dataGridView1.Rows.Remove(r);
-                                                                    //    }
-                                                                    //}
-                                                                    foreach (string aaa1 in d1.Keys)
-                                                                    {
-                                                                        myjob1.myTable.Rows.Add(aaa1, d1[aaa1].ToString());
-                                                                    }
-                                                                }
-                                                                else
-                                                                {
-
-                                                                    d1.Add(cuowu1, 1);
-                                                                    myjob1.myTable.Rows.Add(cuowu1, "1");
-                                                                }
-                                                                dataGridView1.Visible = true;
-
+                                                                UpdateDefectTable(d1, myjob1.myTable, cuowu1); // ch:R13 增量更新：原地改计数/追加，去掉 Visible 开关与 Rows.Clear 全量重建
                                                             }));
                                                         }
                                                         break;
@@ -4882,32 +4988,7 @@ namespace WindowsFormsApplication1
                                                         {
                                                             this.BeginInvoke(new Action(() =>
                                                             {
-                                                                dataGridView2.Visible = false;
-                                                                if (d2.ContainsKey(cuowu1))
-                                                                {
-                                                                    d2[cuowu1]++;
-                                                                    myjob2.myTable.Rows.Clear();
-                                                                    //dataGridView2.SelectAll();
-                                                                    //foreach (DataGridViewRow r in dataGridView2.SelectedRows)
-                                                                    //{
-                                                                    //    if (!r.IsNewRow)
-                                                                    //    {
-                                                                    //        dataGridView2.Rows.Remove(r);
-                                                                    //    }
-                                                                    //}
-                                                                    foreach (string aaa1 in d2.Keys)
-                                                                    {
-                                                                        myjob2.myTable.Rows.Add(aaa1, d2[aaa1].ToString());
-                                                                    }
-                                                                }
-                                                                else
-                                                                {
-
-                                                                    d2.Add(cuowu1, 1);
-                                                                    myjob2.myTable.Rows.Add(cuowu1, "1");
-                                                                }
-                                                                dataGridView2.Visible = true;
-
+                                                                UpdateDefectTable(d2, myjob2.myTable, cuowu1); // ch:R13 增量更新：原地改计数/追加，去掉 Visible 开关与 Rows.Clear 全量重建
                                                             }));
                                                         }
                                                         break;
@@ -4916,32 +4997,7 @@ namespace WindowsFormsApplication1
                                                         {
                                                             this.BeginInvoke(new Action(() =>
                                                             {
-                                                                dataGridView3.Visible = false;
-                                                                if (d3.ContainsKey(cuowu1))
-                                                                {
-                                                                    d3[cuowu1]++;
-                                                                    myjob3.myTable.Rows.Clear();
-                                                                    //dataGridView2.SelectAll();
-                                                                    //foreach (DataGridViewRow r in dataGridView2.SelectedRows)
-                                                                    //{
-                                                                    //    if (!r.IsNewRow)
-                                                                    //    {
-                                                                    //        dataGridView2.Rows.Remove(r);
-                                                                    //    }
-                                                                    //}
-                                                                    foreach (string aaa1 in d3.Keys)
-                                                                    {
-                                                                        myjob3.myTable.Rows.Add(aaa1, d3[aaa1].ToString());
-                                                                    }
-                                                                }
-                                                                else
-                                                                {
-
-                                                                    d3.Add(cuowu1, 1);
-                                                                    myjob3.myTable.Rows.Add(cuowu1, "1");
-                                                                }
-                                                                dataGridView3.Visible = true;
-
+                                                                UpdateDefectTable(d3, myjob3.myTable, cuowu1); // ch:R13 增量更新：原地改计数/追加，去掉 Visible 开关与 Rows.Clear 全量重建
                                                             }));
                                                         }
                                                         break;
@@ -4950,32 +5006,7 @@ namespace WindowsFormsApplication1
                                                         {
                                                             this.BeginInvoke(new Action(() =>
                                                             {
-                                                                dataGridView4.Visible = false;
-                                                                if (d4.ContainsKey(cuowu1))
-                                                                {
-                                                                    d4[cuowu1]++;
-                                                                    myjob4.myTable.Rows.Clear();
-                                                                    //dataGridView2.SelectAll();
-                                                                    //foreach (DataGridViewRow r in dataGridView2.SelectedRows)
-                                                                    //{
-                                                                    //    if (!r.IsNewRow)
-                                                                    //    {
-                                                                    //        dataGridView2.Rows.Remove(r);
-                                                                    //    }
-                                                                    //}
-                                                                    foreach (string aaa1 in d4.Keys)
-                                                                    {
-                                                                        myjob4.myTable.Rows.Add(aaa1, d4[aaa1].ToString());
-                                                                    }
-                                                                }
-                                                                else
-                                                                {
-
-                                                                    d4.Add(cuowu1, 1);
-                                                                    myjob4.myTable.Rows.Add(cuowu1, "1");
-                                                                }
-                                                                dataGridView4.Visible = true;
-
+                                                                UpdateDefectTable(d4, myjob4.myTable, cuowu1); // ch:R13 增量更新：原地改计数/追加，去掉 Visible 开关与 Rows.Clear 全量重建
                                                             }));
                                                         }
                                                         break;
@@ -4984,32 +5015,7 @@ namespace WindowsFormsApplication1
                                                         {
                                                             this.BeginInvoke(new Action(() =>
                                                             {
-                                                                dataGridView5.Visible = false;
-                                                                if (d5.ContainsKey(cuowu1))
-                                                                {
-                                                                    d5[cuowu1]++;
-                                                                    myjob5.myTable.Rows.Clear();
-                                                                    //dataGridView2.SelectAll();
-                                                                    //foreach (DataGridViewRow r in dataGridView2.SelectedRows)
-                                                                    //{
-                                                                    //    if (!r.IsNewRow)
-                                                                    //    {
-                                                                    //        dataGridView2.Rows.Remove(r);
-                                                                    //    }
-                                                                    //}
-                                                                    foreach (string aaa1 in d5.Keys)
-                                                                    {
-                                                                        myjob5.myTable.Rows.Add(aaa1, d5[aaa1].ToString());
-                                                                    }
-                                                                }
-                                                                else
-                                                                {
-
-                                                                    d5.Add(cuowu1, 1);
-                                                                    myjob5.myTable.Rows.Add(cuowu1, "1");
-                                                                }
-                                                                dataGridView5.Visible = true;
-
+                                                                UpdateDefectTable(d5, myjob5.myTable, cuowu1); // ch:R13 增量更新：原地改计数/追加，去掉 Visible 开关与 Rows.Clear 全量重建
                                                             }));
                                                         }
                                                         break;
@@ -5018,32 +5024,7 @@ namespace WindowsFormsApplication1
                                                         {
                                                             this.BeginInvoke(new Action(() =>
                                                             {
-                                                                dataGridView6.Visible = false;
-                                                                if (d6.ContainsKey(cuowu1))
-                                                                {
-                                                                    d6[cuowu1]++;
-                                                                    myjob6.myTable.Rows.Clear();
-                                                                    //dataGridView2.SelectAll();
-                                                                    //foreach (DataGridViewRow r in dataGridView2.SelectedRows)
-                                                                    //{
-                                                                    //    if (!r.IsNewRow)
-                                                                    //    {
-                                                                    //        dataGridView2.Rows.Remove(r);
-                                                                    //    }
-                                                                    //}
-                                                                    foreach (string aaa1 in d6.Keys)
-                                                                    {
-                                                                        myjob6.myTable.Rows.Add(aaa1, d6[aaa1].ToString());
-                                                                    }
-                                                                }
-                                                                else
-                                                                {
-
-                                                                    d6.Add(cuowu1, 1);
-                                                                    myjob6.myTable.Rows.Add(cuowu1, "1");
-                                                                }
-                                                                dataGridView6.Visible = true;
-
+                                                                UpdateDefectTable(d6, myjob6.myTable, cuowu1); // ch:R13 增量更新：原地改计数/追加，去掉 Visible 开关与 Rows.Clear 全量重建
                                                             }));
                                                         }
                                                         break;
@@ -5052,32 +5033,7 @@ namespace WindowsFormsApplication1
                                                         {
                                                             this.BeginInvoke(new Action(() =>
                                                             {
-                                                                dataGridView7.Visible = false;
-                                                                if (d7.ContainsKey(cuowu1))
-                                                                {
-                                                                    d7[cuowu1]++;
-                                                                    myjob7.myTable.Rows.Clear();
-                                                                    //dataGridView2.SelectAll();
-                                                                    //foreach (DataGridViewRow r in dataGridView2.SelectedRows)
-                                                                    //{
-                                                                    //    if (!r.IsNewRow)
-                                                                    //    {
-                                                                    //        dataGridView2.Rows.Remove(r);
-                                                                    //    }
-                                                                    //}
-                                                                    foreach (string aaa1 in d7.Keys)
-                                                                    {
-                                                                        myjob7.myTable.Rows.Add(aaa1, d7[aaa1].ToString());
-                                                                    }
-                                                                }
-                                                                else
-                                                                {
-
-                                                                    d7.Add(cuowu1, 1);
-                                                                    myjob7.myTable.Rows.Add(cuowu1, "1");
-                                                                }
-                                                                dataGridView7.Visible = true;
-
+                                                                UpdateDefectTable(d7, myjob7.myTable, cuowu1); // ch:R13 增量更新：原地改计数/追加，去掉 Visible 开关与 Rows.Clear 全量重建
                                                             }));
                                                         }
                                                         break;
@@ -5086,32 +5042,7 @@ namespace WindowsFormsApplication1
                                                         {
                                                             this.BeginInvoke(new Action(() =>
                                                             {
-                                                                dataGridView8.Visible = false;
-                                                                if (d8.ContainsKey(cuowu1))
-                                                                {
-                                                                    d8[cuowu1]++;
-                                                                    myjob8.myTable.Rows.Clear();
-                                                                    //dataGridView2.SelectAll();
-                                                                    //foreach (DataGridViewRow r in dataGridView2.SelectedRows)
-                                                                    //{
-                                                                    //    if (!r.IsNewRow)
-                                                                    //    {
-                                                                    //        dataGridView2.Rows.Remove(r);
-                                                                    //    }
-                                                                    //}
-                                                                    foreach (string aaa1 in d8.Keys)
-                                                                    {
-                                                                        myjob8.myTable.Rows.Add(aaa1, d8[aaa1].ToString());
-                                                                    }
-                                                                }
-                                                                else
-                                                                {
-
-                                                                    d8.Add(cuowu1, 1);
-                                                                    myjob8.myTable.Rows.Add(cuowu1, "1");
-                                                                }
-                                                                dataGridView8.Visible = true;
-
+                                                                UpdateDefectTable(d8, myjob8.myTable, cuowu1); // ch:R13 增量更新：原地改计数/追加，去掉 Visible 开关与 Rows.Clear 全量重建
                                                             }));
                                                         }
                                                         break;
@@ -6333,6 +6264,9 @@ namespace WindowsFormsApplication1
             {
                 MsgErroeLog.WriteLog("软件关闭");
                 closing = true; // ch:通知后台监控线程退出
+                // ch:R13 ErrorLog 改异步批量落盘后，退出前显式冲刷队列(ProcessExit 还会再兜一次底)，
+                //   否则最后几条错误日志可能随后台线程一起丢
+                try { ErrorLog.FlushPending(3000); } catch { }
                 try
                 {
                     if (_ocxYieldTimer != null)
@@ -6445,7 +6379,8 @@ namespace WindowsFormsApplication1
             if (listBox3.InvokeRequired)
             {
                 ltbox6 l5 = setbox6;
-                listBox3.Invoke(l5, aa, bb);
+                listBox3.BeginInvoke(l5, aa, bb); // ch:P1 改异步：调用方是检测线程同步尾部的"最近5次记录"刷新（每相机每帧 5 次），同步 Invoke 会让检测线程挂起等 UI 线程
+                //   BeginInvoke 仅入队即返回，UI 卡顿不再拖住帧率；提交顺序仍由 UI 消息队列 FIFO 保证（同一相机由单一检测线程顺序提交）
             }
             else
             {
@@ -6458,7 +6393,8 @@ namespace WindowsFormsApplication1
             if (listBox1.InvokeRequired)
             {
                 ltbox5 l5 = setbox5;
-                listBox1.Invoke(l5, aa, bb);
+                listBox1.BeginInvoke(l5, aa, bb); // ch:P1 改异步：调用方是检测线程同步尾部的"最近5次记录"刷新（每相机每帧 5 次），同步 Invoke 会让检测线程挂起等 UI 线程
+                //   BeginInvoke 仅入队即返回，UI 卡顿不再拖住帧率；提交顺序仍由 UI 消息队列 FIFO 保证（同一相机由单一检测线程顺序提交）
             }
             else
             {
@@ -6471,7 +6407,8 @@ namespace WindowsFormsApplication1
             if (listBox7.InvokeRequired)
             {
                 ltbox7 l5 = setbox7;
-                listBox7.Invoke(l5, aa, bb);
+                listBox7.BeginInvoke(l5, aa, bb); // ch:P1 改异步：调用方是检测线程同步尾部的"最近5次记录"刷新（每相机每帧 5 次），同步 Invoke 会让检测线程挂起等 UI 线程
+                //   BeginInvoke 仅入队即返回，UI 卡顿不再拖住帧率；提交顺序仍由 UI 消息队列 FIFO 保证（同一相机由单一检测线程顺序提交）
             }
             else
             {
@@ -6484,7 +6421,8 @@ namespace WindowsFormsApplication1
             if (listBox6.InvokeRequired)
             {
                 ltbox8 l5 = setbox8;
-                listBox6.Invoke(l5, aa, bb);
+                listBox6.BeginInvoke(l5, aa, bb); // ch:P1 改异步：调用方是检测线程同步尾部的"最近5次记录"刷新（每相机每帧 5 次），同步 Invoke 会让检测线程挂起等 UI 线程
+                //   BeginInvoke 仅入队即返回，UI 卡顿不再拖住帧率；提交顺序仍由 UI 消息队列 FIFO 保证（同一相机由单一检测线程顺序提交）
             }
             else
             {
@@ -6497,7 +6435,8 @@ namespace WindowsFormsApplication1
             if (listBox14.InvokeRequired)
             {
                 ltbox10 l5 = setbox10;
-                listBox14.Invoke(l5, aa, bb);
+                listBox14.BeginInvoke(l5, aa, bb); // ch:P1 改异步：调用方是检测线程同步尾部的"最近5次记录"刷新（每相机每帧 5 次），同步 Invoke 会让检测线程挂起等 UI 线程
+                //   BeginInvoke 仅入队即返回，UI 卡顿不再拖住帧率；提交顺序仍由 UI 消息队列 FIFO 保证（同一相机由单一检测线程顺序提交）
             }
             else
             {
@@ -6510,7 +6449,8 @@ namespace WindowsFormsApplication1
             if (listBox15.InvokeRequired)
             {
                 ltbox11 l5 = setbox11;
-                listBox15.Invoke(l5, aa, bb);
+                listBox15.BeginInvoke(l5, aa, bb); // ch:P1 改异步：调用方是检测线程同步尾部的"最近5次记录"刷新（每相机每帧 5 次），同步 Invoke 会让检测线程挂起等 UI 线程
+                //   BeginInvoke 仅入队即返回，UI 卡顿不再拖住帧率；提交顺序仍由 UI 消息队列 FIFO 保证（同一相机由单一检测线程顺序提交）
             }
             else
             {
@@ -6523,7 +6463,8 @@ namespace WindowsFormsApplication1
             if (listBox18.InvokeRequired)
             {
                 ltbox12 l5 = setbox12;
-                listBox18.Invoke(l5, aa, bb);
+                listBox18.BeginInvoke(l5, aa, bb); // ch:P1 改异步：调用方是检测线程同步尾部的"最近5次记录"刷新（每相机每帧 5 次），同步 Invoke 会让检测线程挂起等 UI 线程
+                //   BeginInvoke 仅入队即返回，UI 卡顿不再拖住帧率；提交顺序仍由 UI 消息队列 FIFO 保证（同一相机由单一检测线程顺序提交）
             }
             else
             {
@@ -6536,7 +6477,8 @@ namespace WindowsFormsApplication1
             if (listBox17.InvokeRequired)
             {
                 ltbox13 l5 = setbox13;
-                listBox17.Invoke(l5, aa, bb);
+                listBox17.BeginInvoke(l5, aa, bb); // ch:P1 改异步：调用方是检测线程同步尾部的"最近5次记录"刷新（每相机每帧 5 次），同步 Invoke 会让检测线程挂起等 UI 线程
+                //   BeginInvoke 仅入队即返回，UI 卡顿不再拖住帧率；提交顺序仍由 UI 消息队列 FIFO 保证（同一相机由单一检测线程顺序提交）
             }
             else
             {
@@ -9394,6 +9336,11 @@ namespace WindowsFormsApplication1
         private static readonly int[] _perfDrop = new int[8];         // ch:被背压丢弃的帧数
         private static readonly long[] _perfRunTicks = new long[8];   // ch:block.Run 累计耗时(ticks)
         private static readonly int[] _perfRunCount = new int[8];     // ch:block.Run 次数
+        // ch:P1 同步尾部埋点：block.Run 结束 → getrecord 返回 之间的耗时，即那 12 个 Task.Run 真正为帧率省下的上限。
+        //    feng=0（不限速）时这段直接进入帧周期，是判断"Task.Run 能否内联/能否合并"的唯一依据。
+        private static readonly long[] _perfTailTicks = new long[8];  // ch:同步尾部累计耗时(ticks)
+        private static readonly int[] _perfTailCount = new int[8];    // ch:同步尾部采样次数
+        private static readonly long[] _perfTailStart = new long[8];  // ch:尾部起点 ticks（每相机由单一检测线程串行执行，天然无并发）
         private static long _perfWinStart = 0;                        // ch:统计窗口起点(ms)
         private static int _perfReporting = 0;                        // ch:窗口汇总单线程保护
         private static readonly System.Diagnostics.Stopwatch _perfSw = System.Diagnostics.Stopwatch.StartNew();
@@ -11191,7 +11138,17 @@ namespace WindowsFormsApplication1
                 _liveRecordRenderer.Fit(true);
                 src = _liveRecordRenderer.CreateContentBitmap(CogDisplayContentBitmapConstants.Display, null, 0);
                 if (src != null && src.Width > 1 && src.Height > 1)
-                    return new Bitmap(src);
+                {
+                    // ch:P0 去掉整幅像素的多余拷贝：CreateContentBitmap 每次都返回一张全新位图，
+                    //   直接交出所有权并把 src 置空，让 finally 不再 Dispose（调用方 SetPictureBoxImage 负责释放）。
+                    Bitmap own = src as Bitmap;
+                    if (own != null)
+                    {
+                        src = null;
+                        return own;
+                    }
+                    return new Bitmap(src); // ch:非 Bitmap 的 Image 兜底，仍拷贝一次，由 finally 负责 Dispose
+                }
             }
             catch (Exception ex) { new ErrorLog().WriteLog(ex.ToString()); }
             finally
@@ -11212,7 +11169,9 @@ namespace WindowsFormsApplication1
         {
             Image old = box.Image;
             box.Image = bmpNew;
-            box.Refresh();
+            // ch:P1 Refresh() = Invalidate + 同步 Update（当场重绘）；改 Invalidate 只排一次 WM_PAINT，
+            //   省掉一次同步绘制往返。控件属性赋值本身已触发失效，这里保留 Invalidate 仅作兜底。
+            box.Invalidate();
             if (old != null)
             {
                 try { old.Dispose(); } catch (Exception ex) { new ErrorLog().WriteLog(ex.ToString()); }
@@ -11683,6 +11642,15 @@ namespace WindowsFormsApplication1
                 }
                 finally
                 {
+                    // ch:P1 同步尾部采样终点：block.Run 结束 → getrecord 返回（含流程封、输出分发、统计、渲染入队等同步段）。
+                    //   这段每多 1ms 就是 feng=0 时每帧少 1ms；日志里的「尾部」列即 Task.Run 的真实收益上限。
+                    long tailT0 = System.Threading.Interlocked.Exchange(ref _perfTailStart[idx], 0L);
+                    if (tailT0 != 0L)
+                    {
+                        System.Threading.Interlocked.Add(ref _perfTailTicks[idx],
+                            System.Diagnostics.Stopwatch.GetTimestamp() - tailT0);
+                        System.Threading.Interlocked.Increment(ref _perfTailCount[idx]);
+                    }
                     System.Threading.Volatile.Write(ref _detectBusy[idx], 0);
                 }
             }
@@ -11932,12 +11900,14 @@ namespace WindowsFormsApplication1
                     int cnt = _perfCbCount[i];
                     int drop = _perfDrop[i];
                     int rcnt = _perfRunCount[i];
-                    if (cnt == 0 && drop == 0 && rcnt == 0)
+                    int tcnt = _perfTailCount[i];
+                    if (cnt == 0 && drop == 0 && rcnt == 0 && tcnt == 0)
                         continue;
                     totalGet += cnt;
                     totalDrop += drop;
                     double cbMs = cnt > 0 ? (_perfCbTicks[i] / freq) * 1000.0 / cnt : 0.0;
                     double runMs = rcnt > 0 ? (_perfRunTicks[i] / freq) * 1000.0 / rcnt : 0.0;
+                    double tailMs = tcnt > 0 ? (_perfTailTicks[i] / freq) * 1000.0 / tcnt : 0.0;
                     double busy = (_perfCbTicks[i] / freq) * 1000.0 / span * 100.0;
                     if (busy >= 80.0)
                         anyBusy++;
@@ -11946,12 +11916,15 @@ namespace WindowsFormsApplication1
                       .Append(" 丢").Append(drop)
                       .Append(" 回调").Append(cbMs.ToString("F1")).Append("ms")
                       .Append(" 检测").Append(runMs.ToString("F1")).Append("ms")
+                      .Append(" 尾部").Append(tailMs.ToString("F1")).Append("ms")
                       .Append(" 占用").Append(busy.ToString("F0")).Append("%");
                     _perfCbTicks[i] = 0;
                     _perfCbCount[i] = 0;
                     _perfDrop[i] = 0;
                     _perfRunTicks[i] = 0;
                     _perfRunCount[i] = 0;
+                    _perfTailTicks[i] = 0;
+                    _perfTailCount[i] = 0;
                 }
                 sb.Append(" | 合计收").Append(totalGet).Append(" 丢").Append(totalDrop);
                 if (anyBusy > 0)

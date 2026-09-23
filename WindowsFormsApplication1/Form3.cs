@@ -865,6 +865,9 @@ namespace WindowsFormsApplication1
                         break; // ch:监听套接字为空（已被关闭/释放）时结束监听线程，避免空引用忙循环
                     socketServer = socketWatch.Accept();
                     EnableTcpKeepAlive(socketServer); // ch:P2 半开检测：接入的连接同样 30s 探活
+                    // ch:R12 服务端接入的 socket 同样设发送超时：原只有客户端 sock 设了 SendTimeout，
+                    //   服务端 target.Send(Form3.cs:1049/1837/2003) 在对端不读时会无限阻塞发送线程
+                    try { socketServer.SendTimeout = 3000; } catch (Exception exInner) { new ErrorLog().WriteLog(exInner.ToString()); }
                     string remoteTemp = socketServer.RemoteEndPoint.ToString();
                     // ch:P1-⑥ 同客户端重连：先关旧连接，再用索引器原子替换（ConcurrentDictionary 索引器 = 新增或覆盖，无重复键异常）
                     Socket old = null;
