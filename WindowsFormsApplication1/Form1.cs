@@ -54,8 +54,9 @@ namespace WindowsFormsApplication1
         private int _ocxPaintRr;
         private int _ocxPaintingIdx;
         private int _lastOcxPaintMs;
-        // ch:R15 上屏总节拍封顶(≈15fps)：现场觉得画面顿就调 33(每相机刷新率翻倍)，只改这一个常量
-        private const int OcxMinIntervalMs = 66;
+        // ch:R15 上屏总节拍封顶(默认66ms≈15fps)；ch:R18 改运行时可调：输出方式右侧 numDisplayHz(1..100Hz) 换算 1000/Hz 回写本字段
+        //   (15→66 与原常量逐毫秒一致)并落 ini camera/display_hz，现场调频率不再改码；volatile：回调/检测线程入队路径读取防御
+        private volatile int OcxMinIntervalMs = 66;
         // ch:R15 最近一次真正开拍的时刻：KickOcxPaint 的直接投递/续排/定时器三条入口按它统一限速
         private int _lastOcxKickMs;
         private int _lastUiInputTick;
@@ -374,6 +375,23 @@ namespace WindowsFormsApplication1
             if (_outputModeSyncing) return; // 程序赋值 SelectedIndex 引发的回调，ApplyOutputMode 已把状态设好
             try { ApplyOutputMode(cbOutputMode.SelectedIndex - 1, true); }
             catch (Exception ex) { MsgErroeLog.WriteLog("输出方式选择失败:" + ex.Message); }
+        }
+
+        // ch:R18 显示频率(上屏节拍)：numDisplayHz(输出方式右侧) 1..100Hz → 1000/Hz ms 回写 OcxMinIntervalMs，
+        //   立即生效于 ScheduleOcxPaint 定时器与 KickOcxPaint 收口两处；只动显示刷新率，采集/检测/输出/封程限速(feng) 一律不碰
+        private bool _displayHzSyncing;
+        private void numDisplayHz_ValueChanged(object sender, EventArgs e)
+        {
+            if (_displayHzSyncing) return; // 启动回填 ini 引发的回调：值已在回填处设好，避免重复落盘
+            try
+            {
+                int hz = (int)numDisplayHz.Value;
+                if (hz < 1) hz = 1;
+                OcxMinIntervalMs = 1000 / hz;
+                try { canshuIni.WriteString("camera", "display_hz", hz.ToString()); }
+                catch (Exception ex) { MsgErroeLog.WriteLog("显示频率保存失败:" + ex.Message); }
+            }
+            catch (Exception ex) { MsgErroeLog.WriteLog("显示频率设置失败:" + ex.Message); }
         }
 
         // ch:递归设置菜单项颜色：一级白字（深色顶栏），下拉子项黑字（浅色面板）
@@ -2472,6 +2490,16 @@ namespace WindowsFormsApplication1
                     || outModeIni < OutAuto || outModeIni > OutModbusRtu)
                     outModeIni = OutAuto;
                 ApplyOutputMode(outModeIni, false);
+
+                // ch:R18 读取显示频率；键缺失/非法 → 15Hz(=66ms)，与升级前常量行为完全一致（零回归）
+                int hzIni;
+                if (!int.TryParse(canshuIni.ReadString("camera", "display_hz", "").Replace("\0", ""), out hzIni)
+                    || hzIni < (int)numDisplayHz.Minimum || hzIni > (int)numDisplayHz.Maximum)
+                    hzIni = 15;
+                _displayHzSyncing = true;
+                try { numDisplayHz.Value = hzIni; }
+                finally { _displayHzSyncing = false; }
+                OcxMinIntervalMs = 1000 / hzIni;
 
                 decimal.TryParse(canshuIni.ReadString("time", "IOyanshi", "0"), out devalue);
                 devalue = ClampToUpDown(numericUpDown5, devalue); // ch:P1-5

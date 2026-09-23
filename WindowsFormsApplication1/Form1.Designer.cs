@@ -102,6 +102,8 @@
             this.numericUpDown22 = new System.Windows.Forms.NumericUpDown();
             this.labelOutputMode = new System.Windows.Forms.Label();
             this.cbOutputMode = new System.Windows.Forms.ComboBox();
+            this.labelDisplayHz = new System.Windows.Forms.Label();
+            this.numDisplayHz = new System.Windows.Forms.NumericUpDown();
             this.checkBox2 = new System.Windows.Forms.CheckBox();
             this.checkBox1 = new System.Windows.Forms.CheckBox();
             this.label18 = new System.Windows.Forms.Label();
@@ -1574,12 +1576,47 @@
             this.cbOutputMode.TabIndex = 1001;
             this.cbOutputMode.SelectedIndexChanged += new System.EventHandler(this.cbOutputMode_SelectedIndexChanged);
             // 
+            // labelDisplayHz（ch:R18 显示频率标注；同 labelOutputMode：WinForms 原生控件、代码显式布局、不写 resx）
+            //   y=353 与输出方式同排；该行 y≥350 处 x>237 无其它控件（tabPage5 宽581、AutoScroll 下滚可见）
+            // 
+            this.labelDisplayHz.AutoSize = true;
+            this.labelDisplayHz.Location = new System.Drawing.Point(241, 353);
+            this.labelDisplayHz.Name = "labelDisplayHz";
+            this.labelDisplayHz.TabIndex = 1002;
+            this.labelDisplayHz.Text = "显示频率(Hz)";
+            // 
+            // numDisplayHz（ch:R18 上屏节拍 1..100Hz(默认15≈66ms)，紧邻输出方式右侧）
+            //   ValueChanged → 1000/Hz 回写 OcxMinIntervalMs 并落 ini camera/display_hz，只改显示刷新率
+            // 
+            this.numDisplayHz.Location = new System.Drawing.Point(332, 350);
+            this.numDisplayHz.Maximum = new decimal(new int[] {
+            100,
+            0,
+            0,
+            0});
+            this.numDisplayHz.Minimum = new decimal(new int[] {
+            1,
+            0,
+            0,
+            0});
+            this.numDisplayHz.Name = "numDisplayHz";
+            this.numDisplayHz.Size = new System.Drawing.Size(50, 20);
+            this.numDisplayHz.TabIndex = 1003;
+            this.numDisplayHz.Value = new decimal(new int[] {
+            15,
+            0,
+            0,
+            0});
+            this.numDisplayHz.ValueChanged += new System.EventHandler(this.numDisplayHz_ValueChanged);
+            // 
             // tabPage5
             // 
             resources.ApplyResources(this.tabPage5, "tabPage5");
             this.tabPage5.BorderStyle = System.Windows.Forms.BorderStyle.Fixed3D;
             this.tabPage5.Controls.Add(this.labelOutputMode);
             this.tabPage5.Controls.Add(this.cbOutputMode);
+            this.tabPage5.Controls.Add(this.labelDisplayHz);
+            this.tabPage5.Controls.Add(this.numDisplayHz);
             this.tabPage5.Controls.Add(this.label48);
             this.tabPage5.Controls.Add(this.numericUpDown5);
             this.tabPage5.Controls.Add(this.label111);
@@ -7199,6 +7236,8 @@
         private System.Windows.Forms.NumericUpDown numericUpDown22;
         private System.Windows.Forms.Label labelOutputMode;
         private System.Windows.Forms.ComboBox cbOutputMode;
+        private System.Windows.Forms.Label labelDisplayHz;
+        private System.Windows.Forms.NumericUpDown numDisplayHz;
         private System.Windows.Forms.Button button6;
         private System.Windows.Forms.Button button14;
         private System.Windows.Forms.Button button15;
