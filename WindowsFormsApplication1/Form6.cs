@@ -13,6 +13,7 @@ namespace WindowsFormsApplication1
 {
     public partial class Form6 : Form
     {
+        ErrorLog MsgErroeLog = new ErrorLog(); // ch:R10-8 与 Form8 对齐，异常不再裸奔
         CogToolBlock block1;
         public Form6(CogToolBlock block_11)
         {
@@ -25,19 +26,29 @@ namespace WindowsFormsApplication1
         //cogToolBlockEdit1绑定事件
         public void GetResult1_VisionPro(object sender, EventArgs e)
         {
-            //获取ToolBlock中输出参数内容
-            int OutPutElementsCount = cogToolBlockEdit1.Subject.Outputs.Count;
-            string[] OutPutElements = cogToolBlockEdit1.Subject.Outputs.GetFormattedTerminalStrings();
-            for (int i = 0; i < cogToolBlockEdit1.Subject.Outputs.Count; i++)
+            // ch:R10-8 补 try；行尾 "\n" 说明本意逐条多行显示，原循环内赋值只剩最后一条；Value 改 ToString 取串，避免非 string 强转抛异常
+            try
             {
+                //获取ToolBlock中输出参数内容
+                int OutPutElementsCount = cogToolBlockEdit1.Subject.Outputs.Count;
+                string[] OutPutElements = cogToolBlockEdit1.Subject.Outputs.GetFormattedTerminalStrings();
+                this.Result_label.Text = "";
+                for (int i = 0; i < cogToolBlockEdit1.Subject.Outputs.Count; i++)
+                {
 
-                int StartPosition = OutPutElements[i].IndexOf('|');
-                int EndPosition = OutPutElements[i].LastIndexOf('|');
-                string OutPutElementsName = OutPutElements[i].Substring(StartPosition + 1, EndPosition - StartPosition - 1);
-                string OutPutElementsValue = (string)cogToolBlockEdit1.Subject.Outputs[OutPutElementsName].Value;
-                this.Result_label.Text = OutPutElementsName.ToString() + ":" + OutPutElementsValue + "\n";
+                    int StartPosition = OutPutElements[i].IndexOf('|');
+                    int EndPosition = OutPutElements[i].LastIndexOf('|');
+                    string OutPutElementsName = OutPutElements[i].Substring(StartPosition + 1, EndPosition - StartPosition - 1);
+                    object v = cogToolBlockEdit1.Subject.Outputs[OutPutElementsName].Value;
+                    string OutPutElementsValue = v == null ? "" : v.ToString();
+                    this.Result_label.Text += OutPutElementsName + ":" + OutPutElementsValue + "\n";
 
+                }
             }
+            catch (Exception ex)
+            {
+                MsgErroeLog.WriteLog(ex.Message + "_窗口1");
+            };
 
         }
         private void Form6_Load(object sender, EventArgs e)

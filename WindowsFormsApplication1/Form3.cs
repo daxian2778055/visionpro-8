@@ -115,7 +115,13 @@ namespace WindowsFormsApplication1
                 textBox17.Text = wdini.ReadString("path", "8", "");
                 textBox17.Text = wdini.ReadString("path", "8", "");
                 comboBox2.Text = wdini.ReadString("change", "all", "");
-                numericUpDown2.Value =decimal.Parse( wdini.ReadString("modbustcp", "lunxun","0"));
+                // ch:R10-3 ini 手改非法值时 TryParse 回退，且夹取到控件范围，避免 Parse 异常中断后续 Load
+                decimal ny_ini;
+                if (decimal.TryParse(wdini.ReadString("modbustcp", "lunxun", "0"), out ny_ini))
+                {
+                    ny_ini = Math.Max(numericUpDown2.Minimum, Math.Min(numericUpDown2.Maximum, ny_ini));
+                    numericUpDown2.Value = ny_ini;
+                }
             }
             catch (Exception ex) { MsgErroeLog.WriteLog("异常:" + ex.Message); }
             try
@@ -336,7 +342,7 @@ namespace WindowsFormsApplication1
                         th.IsBackground = true;
                         th.Start();
                     }
-                    catch { monitor = "Tcpclient连接失败"; }
+                    catch (Exception ex) { monitor = "Tcpclient连接失败"; LogThrottled(ref _lastCliConnErrLogMs, "TCP客户端连接失败:" + ex.Message); } // ch:R10-7 补限流日志
                 }
             }
             if(checkBox5.CheckState == CheckState.Checked)
@@ -522,9 +528,10 @@ namespace WindowsFormsApplication1
                             monitor = "";
                         }
                     }
-                    catch
+                    catch (Exception ex)
                     {
                         monitor = "Tcpclient连接失败";
+                        LogThrottled(ref _lastCliConnErrLogMs, "TCP客户端连接失败:" + ex.Message); // ch:R10-7 补限流日志
                         // ch:释放未连接成功的 socket，避免句柄泄漏
                         try { if (socketClient != null) { socketClient.Close(); socketClient = null; } } catch (Exception exInner) { new ErrorLog().WriteLog(exInner.ToString()); }
                     }
@@ -561,7 +568,7 @@ namespace WindowsFormsApplication1
                         else
                             monitor = "请先设置串口!" + "RS232串口通讯";
                     }
-                    catch { monitor = "串口连接失败"; }
+                    catch (Exception ex) { monitor = "串口连接失败"; LogThrottled(ref _lastSerialConnErrLogMs, "串口连接失败:" + ex.Message); } // ch:R10-7 补限流日志
                 }
             }
         }
@@ -582,6 +589,19 @@ namespace WindowsFormsApplication1
         }
         // ch:P1-⑦ 客户端 socket 生命周期互斥：重连/退出/接收线程并发时避免误关新连接
         private readonly object _clientSocketLock = new object();
+
+        // ch:R10-7 限流日志：同一失败点 5 秒内只记一条，避免重连/轮询循环刷屏
+        private int _lastCliConnErrLogMs = 0;
+        private int _lastSerialConnErrLogMs = 0;
+        private void LogThrottled(ref int lastMs, string msg)
+        {
+            int nowMs = Environment.TickCount;
+            if (unchecked(nowMs - lastMs) >= 5000)
+            {
+                lastMs = nowMs;
+                MsgErroeLog.WriteLog(msg);
+            }
+        }
 
         // ch:P1-⑦ 统一创建+连接客户端 socket，并原子替换旧 socket（旧连接随后关闭）。
         //   连接失败时释放本次新建的 socket，避免句柄泄漏；旧 socket 直接 Close，避免覆盖导致泄漏。
@@ -782,7 +802,13 @@ namespace WindowsFormsApplication1
                 list.AddRange(buffer);
                 //将泛型集合转换为数组
                 byte[] newBuffer = list.ToArray();
-                socketClient.Send(newBuffer);
+                // ch:R10-6 Socket.Send 非线程安全：判空+发送同入 _clientSocketLock，避免与重连置空/并发发送交叉
+                lock (_clientSocketLock)
+                {
+                    if (socketClient == null)
+                        throw new Exception("TCP 客户端未连接，发送取消");
+                    socketClient.Send(newBuffer);
+                }
             }
             catch (Exception ex)
             { MsgErroeLog.WriteLog("异常:" + ex.Message); }
@@ -1294,6 +1320,7 @@ namespace WindowsFormsApplication1
                 AcceptData();
             }
         }
+        private int _lastSerialErrLogMs = 0; // ch:R10-7 串口接收异常限流日志（5s 一条），原空 catch 使故障完全不可见
         void AcceptData()
         {
             if (txtReceive.InvokeRequired)
@@ -1320,7 +1347,15 @@ namespace WindowsFormsApplication1
                         }
                     }
                 }
-                catch (Exception ex) { }
+                catch (Exception ex)
+                {
+                    int nowMs = Environment.TickCount;
+                    if (unchecked(nowMs - _lastSerialErrLogMs) >= 5000)
+                    {
+                        _lastSerialErrLogMs = nowMs;
+                        MsgErroeLog.WriteLog("串口接收异常:" + ex.Message);
+                    }
+                }
             }
         }
 
@@ -1734,11 +1769,19 @@ namespace WindowsFormsApplication1
                             list.AddRange(buffer);
                             //将泛型集合转换为数组
                             byte[] newBuffer = list.ToArray();
-                                socketClient.Send(newBuffer);
+                                // ch:R10-6 判空+发送同入 _clientSocketLock，与重连置空串行化
+                                lock (_clientSocketLock)
+                                {
+                                    if (socketClient != null)
+                                        socketClient.Send(newBuffer);
+                                    else
+                                        monitor = "Tcpclient,未连接发送合格取消"; // ch:R10-7 原 NRE 被静默吞掉，现显式置状态
+                                }
                             }
-                            catch
+                            catch(Exception ex)
                             {
-
+                                // ch:R10-7 补日志，发送失败不再只剩状态串无线索
+                                MsgErroeLog.WriteLog("TCP发送合格失败:" + ex.Message);
                                 monitor = "Tcpclient,发送合格失败";
 
 
@@ -1882,10 +1925,19 @@ namespace WindowsFormsApplication1
                                 list.AddRange(buffer);
                                 //将泛型集合转换为数组
                                 byte[] newBuffer = list.ToArray();
-                                socketClient.Send(newBuffer);
+                                // ch:R10-6 判空+发送同入 _clientSocketLock，与重连置空串行化
+                                lock (_clientSocketLock)
+                                {
+                                    if (socketClient != null)
+                                        socketClient.Send(newBuffer);
+                                    else
+                                        monitor = "Tcpclient,未连接发送不合格取消"; // ch:R10-7 原 NRE 被静默吞掉，现显式置状态
+                                }
                             }
-                            catch
+                            catch(Exception ex)
                             {
+                                // ch:R10-7 补日志，发送失败不再只剩状态串无线索
+                                MsgErroeLog.WriteLog("TCP发送不合格失败:" + ex.Message);
                                 monitor = "Tcpclient,发送不合格失败";
 
 
@@ -2063,7 +2115,7 @@ namespace WindowsFormsApplication1
                     monitor = "";
                 }
             }
-            catch { monitor = "Tcpclient连接失败"; }
+            catch (Exception ex) { monitor = "Tcpclient连接失败"; LogThrottled(ref _lastCliConnErrLogMs, "TCP客户端连接失败(重连):" + ex.Message); } // ch:R10-7 补限流日志
         }
 
         private void textBox10_TextChanged(object sender, EventArgs e)

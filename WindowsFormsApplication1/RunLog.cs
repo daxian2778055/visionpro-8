@@ -228,68 +228,50 @@ namespace WindowsFormsApplication1
             string strCsvPath = @"E:\每日统计\" + path22 + "\\" + strYear + "\\" + strMoth + "\\" + str + ".csv";
             // ch:P2-④ 写入前确保目录存在，避免 E: 盘/目录缺失时 FileStream 打开静默失败
             try { Directory.CreateDirectory(Path.GetDirectoryName(strCsvPath)); } catch (Exception ex) { Errorwrite.WriteLog("每日统计目录创建失败:" + ex.Message); }
-            string str1 = null;
-            StringBuilder sb_swrite = new StringBuilder();
-            FileStream fs = new FileStream(strCsvPath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
-            StreamReader reader = new StreamReader(fs, System.Text.Encoding.Default);
-            string[] strs = new string[5];
-            byte[] strbyte = null;
-            processCount = 0;
-            int temp = 0;
-            int iflag = 0;
-
-            while ((str1 = reader.ReadLine()) != null)
-            {
-                strs = str1.Split(',');
-                ASCIIEncoding ascii = new ASCIIEncoding();
-                strbyte = ascii.GetBytes(str1);
-                iflag++;
-
-                for (int i = 0; i < strbyte.Length; i++)
-                {
-                    if ((int)strbyte[i] == 63)
-                    {
-                        processCount += 2;
-                        temp += 2;
-                    }
-                    else
-                    {
-                        processCount++;
-                        temp++;
-                    }
-                }
-
-
-            }
-            iTemp1 = processCount - temp + (iflag - 1) * 2;
-            processCount = 0;
-            reader.Close();      		   		
+            // ch:R10-4 删除整文件逐字节扫描死代码（iTemp1 的消费端 Seek 已注释，processCount-temp 恒 0，原为每条记录 O(N^2)）；
+            //   读取仅为取末行续接序号。FileMode.Open→OpenOrCreate 且纳入 try：原实现文件不存在时在 try 外抛异常，
+            //   落到 Form1 统计 catch 里再次 runlog1，造成月度总量双计（异常被当作流程控制）。
+            string lastLine = null;
             try
             {
-
-                // ch:P2-④ 空文件/仅表头时 strs[0] 可能为 null 或非数字；原实现 int.Parse 抛异常被静默吞掉导致漏记
-                if (string.IsNullOrEmpty(strs[0]) || strs[0] == "次序" || strs[0] == "序号")
-                    strs[0] = "0";
-                if (!int.TryParse(strs[0], out Sumss))
+                using (FileStream fs = new FileStream(strCsvPath, FileMode.OpenOrCreate, FileAccess.Read, FileShare.ReadWrite))
+                using (StreamReader reader = new StreamReader(fs, System.Text.Encoding.Default))
                 {
-                    Errorwrite.WriteLog("每日统计序号解析失败，按 0 续写。原始值：" + (strs[0] ?? "null"));
+                    string line;
+                    while ((line = reader.ReadLine()) != null)
+                    {
+                        lastLine = line;
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                Errorwrite.WriteLog("每日统计读取失败(按新建续号):" + ex.Message);
+            }
+            try
+            {
+                string[] strs = lastLine != null ? lastLine.Split(',') : new string[0];
+                // ch:P2-④ 空文件/仅表头时序号列为 null 或非数字，按 0 续写
+                string seqRaw = strs.Length > 0 ? strs[0] : null;
+                if (string.IsNullOrEmpty(seqRaw) || seqRaw == "次序" || seqRaw == "序号")
+                    seqRaw = "0";
+                if (!int.TryParse(seqRaw, out Sumss))
+                {
+                    Errorwrite.WriteLog("每日统计序号解析失败，按 0 续写。原始值：" + (seqRaw ?? "null"));
                     Sumss = 0;
                 }
                 Sumss = Sumss + 1;
                 string strsecond = DateTime.Now.ToString("s");
-                StreamWriter sw4 = new StreamWriter(strCsvPath, true, Encoding.Default);
                 if (okss == 1)
                     jieguo = "OK";
                 else
                     jieguo = "NG";
                 string s = Sumss + "," + strsecond + "," + jilu + "," + jieguo;
-
-                //sw1.BaseStream.Seek(iTemp1,SeekOrigin.Begin);			
-                sw4.WriteLine(s);
-                sw4.Flush();
-                sw4.Close();
-
-
+                using (StreamWriter sw4 = new StreamWriter(strCsvPath, true, Encoding.Default))
+                {
+                    sw4.WriteLine(s);
+                    sw4.Flush();
+                }
             }
             catch (Exception ex)
             {

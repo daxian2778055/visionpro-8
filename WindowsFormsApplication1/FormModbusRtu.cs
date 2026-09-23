@@ -163,7 +163,11 @@ namespace WindowsFormsApplication1
             fins_en = bool.Parse(wdini.ReadString("modbusrtu", "modbusrtu_en", "false"));
             address_qishi = decimal.Parse(wdini.ReadString("modbusrtu", "qishi", "0"));
             address_length = decimal.Parse(wdini.ReadString("modbusrtu", "zongchang", "1"));
-            lunxun_time = decimal.Parse(wdini.ReadString("modbusrtu", "lunxun_time", "20"));
+            // ch:R10-3 ini 手改成非法值/小数时 TryParse 回退默认，并夹取到控件范围，避免 Load 中断或 NUD 越界抛异常
+            decimal lt_ini;
+            if (!decimal.TryParse(wdini.ReadString("modbusrtu", "lunxun_time", "20"), out lt_ini)) lt_ini = 20;
+            lt_ini = Math.Max(numericUpDown3.Minimum, Math.Min(numericUpDown3.Maximum, lt_ini));
+            lunxun_time = lt_ini;
             numericUpDown1.Value = address_qishi;
             numericUpDown2.Value = address_length;
             numericUpDown3.Value = lunxun_time;
@@ -2174,9 +2178,11 @@ namespace WindowsFormsApplication1
         {
             while (true)
             {
+                // ch:R10-3 原 int.Parse(decimal.ToString()) 在区域小数点/ini 带小数时抛 FormatException，且在 try 外直接杀死轮询线程；
+                // 另：lunxun_time<=0 时补 50ms 小睡，避免 while(true) 全速空转吃满一核
+                Thread.Sleep(lunxun_time > 0 ? (int)lunxun_time : 50);
                 if (lunxun_time > 0)
                 {
-                    Thread.Sleep(int.Parse(lunxun_time.ToString()));
                     try
                     {
                         if (chushihua)

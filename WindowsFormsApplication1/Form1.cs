@@ -2732,7 +2732,11 @@ namespace WindowsFormsApplication1
         {
             this.Invoke(new Action(() =>
             {
+                // ch:R10-12 旧二维码位图被覆盖前未释放，重新授权/重跑 getCode 会累积 GDI 位图句柄泄漏
+                Image oldPic = pictureBox1.Image;
                 pictureBox1.Image = QRCodeHelper.GetQRCodeBmp(identifier("Win32_DiskDrive", "Signature") + "M" + identifier("Win32_DiskDrive", "TotalHeads"));
+                if (oldPic != null && !ReferenceEquals(oldPic, pictureBox1.Image))
+                    oldPic.Dispose();
             }));
         }
         private void Form1_Load(object sender, EventArgs e)
@@ -2955,7 +2959,8 @@ namespace WindowsFormsApplication1
             }
             catch (Exception ex)
             {
-                MessageBox.Show(ex.Message + ":获取");
+                // ch:R10-10 启动/初始化链路上弹窗会卡住线程且无上下文，改记日志
+                new ErrorLog().WriteLog(ex.ToString() + ":获取");
             };
             return result;
         }
@@ -5171,51 +5176,56 @@ namespace WindowsFormsApplication1
                                                 // ch:P2-19 用本 Task 局部快照替代共享字段 myjob.tianbiao 接力：
                                                 //   同相机两帧 Task 并发时，后写会覆盖前者未处理完的行，导致 N 帧行记成 N+1 帧数据
                                                 string csvLine = jiSnapshot;
-                                                if (tempout1 == "Accept")
+                                                bool monthCounted = false; // ch:R10-1 月计数是否已落账，回退路径据此防双计
+                                                try
                                                 {
-                                                    runlog1(1, 0, myjob.path_number);
-                                                    if (csvLine.Contains(","))
+                                                    if (tempout1 == "Accept")
                                                     {
-                                                        csvLine = csvLine.Remove(csvLine.Length - 1, 1);
-                                                        runlog2(csvLine, csvLine, myjob.path_number, 1);
+                                                        runlog1(1, 0, myjob.path_number);
+                                                        monthCounted = true;
+                                                        if (csvLine.Contains(","))
+                                                        {
+                                                            csvLine = csvLine.Remove(csvLine.Length - 1, 1);
+                                                            runlog2(csvLine, csvLine, myjob.path_number, 1);
+                                                        }
+                                                    }
+                                                    else
+                                                    {
+                                                        runlog1(0, 1, myjob.path_number);
+                                                        monthCounted = true;
+                                                        if (csvLine.Contains(","))
+                                                        {
+                                                            csvLine = csvLine.Remove(csvLine.Length - 1, 1);
+                                                            runlog2(csvLine, csvLine, myjob.path_number, 0);
+                                                        }
                                                     }
                                                 }
-                                                else
+                                                catch (Exception ex)
                                                 {
-                                                    runlog1(0, 1, myjob.path_number);
-                                                    if (csvLine.Contains(","))
+                                                    MsgErroeLog.WriteLog(ex.Message + "相机" + myjob.path_number + "-22");
+                                                    try
                                                     {
-                                                        csvLine = csvLine.Remove(csvLine.Length - 1, 1);
-                                                        runlog2(csvLine, csvLine, myjob.path_number, 0);
+                                                        // ch:R10-1 建目录/表头改用本相机 myjob.path_number/biaotou（原硬编码 myjob1，相机2~8 记录失败时数据被建到相机1目录）
+                                                        runLog.CreateDirectoryCsvPath(myjob.path_number);
+                                                        runLog.CreateCsvPath(myjob.path_number, myjob.biaotou);
+                                                        if (tempout1 == "Accept")
+                                                        {
+                                                            if (!monthCounted) runlog1(1, 0, myjob.path_number); // ch:R10-1 主路径已计数则不重复
+                                                            if (csvLine.Contains(","))
+                                                                runlog2(csvLine, csvLine, myjob.path_number, 1);
+                                                        }
+                                                        else
+                                                        {
+                                                            if (!monthCounted) runlog1(0, 1, myjob.path_number);
+                                                            if (csvLine.Contains(","))
+                                                                runlog2(csvLine, csvLine, myjob.path_number, 0);
+                                                        }
                                                     }
-                                                }
+                                                    catch (Exception ex2) { MsgErroeLog.WriteLog("异常:" + ex2.Message); }
+                                                };
                                             }
                                         }
-                                        catch (Exception ex)
-                                        {
-                                            try
-                                            {
-                                                runLog.CreateDirectoryCsvPath(myjob1.path_number);
-                                                //  if (myjob1.biaotou.Contains(","))
-                                                runLog.CreateCsvPath(myjob1.path_number, myjob1.biaotou);
-                                                if (tempout1 == "Accept")
-                                                {
-                                                    runlog1(1, 0, myjob.path_number);
-                                                    string csvLine2 = jiSnapshot; // ch:P2-19 同主路径：局部快照替代 myjob.tianbiao 共享字段
-                                                    if (csvLine2.Contains(","))
-                                                        runlog2(csvLine2, csvLine2, myjob.path_number, 1);
-                                                }
-                                                else
-                                                {
-                                                    runlog1(0, 1, myjob.path_number);
-                                                    string csvLine2 = jiSnapshot; // ch:P2-19
-                                                    if (csvLine2.Contains(","))
-                                                        runlog2(csvLine2, csvLine2, myjob.path_number, 0);
-                                                }
-                                            }
-                                            catch (Exception ex2) { MsgErroeLog.WriteLog("异常:" + ex2.Message); }
-                                            MsgErroeLog.WriteLog(ex.Message + "相机" + myjob.path_number + "-22");
-                                        };
+                                        catch (Exception ex) { MsgErroeLog.WriteLog("统计外层:" + ex.Message + "相机" + myjob.path_number); };
                                     }
                                     #endregion
 
@@ -8026,7 +8036,8 @@ namespace WindowsFormsApplication1
         {
             if (yunxing == false)
             {
-                myjob1.dlg.Dispose();
+                // ch:R10-11 原用前 Dispose 会令复用的对话框实例处于已释放状态，ShowDialog 必抛 ObjectDisposedException；
+                // 唯一 Dispose 保留在设置关闭处（button1_Click 内）
                 if (myjob1.dlg.ShowDialog() == DialogResult.OK)
                 {
                     string dir = myjob1.dlg.SelectedPath;

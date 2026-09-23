@@ -326,14 +326,15 @@ namespace WindowsFormsApplication1
                 }
                 if (Myjob.JobCount == 5)
                 {
+                    // ch:R10-2 原实现 groupBox5 恒 false 却提前打开 groupBox8（复制粘贴错位），5 相机方案第 5 组工具窗不可用
                     groupBox1.Enabled = true;
                     groupBox2.Enabled = true;
                     groupBox3.Enabled = true;
                     groupBox4.Enabled = true;
-                    groupBox5.Enabled = false;
+                    groupBox5.Enabled = true;
                     groupBox6.Enabled = false;
                     groupBox7.Enabled = false;
-                    groupBox8.Enabled = true;
+                    groupBox8.Enabled = false;
                 }
                 if (Myjob.JobCount == 6)
                 {
@@ -341,10 +342,10 @@ namespace WindowsFormsApplication1
                     groupBox2.Enabled = true;
                     groupBox3.Enabled = true;
                     groupBox4.Enabled = true;
-                    groupBox5.Enabled = false;
-                    groupBox6.Enabled = false;
-                    groupBox7.Enabled = true;
-                    groupBox8.Enabled = true;
+                    groupBox5.Enabled = true;
+                    groupBox6.Enabled = true;
+                    groupBox7.Enabled = false;
+                    groupBox8.Enabled = false;
                 }
                 if (Myjob.JobCount == 7)
                 {
@@ -352,10 +353,10 @@ namespace WindowsFormsApplication1
                     groupBox2.Enabled = true;
                     groupBox3.Enabled = true;
                     groupBox4.Enabled = true;
-                    groupBox5.Enabled = false;
+                    groupBox5.Enabled = true;
                     groupBox6.Enabled = true;
                     groupBox7.Enabled = true;
-                    groupBox8.Enabled = true;
+                    groupBox8.Enabled = false;
                 }
                 if (Myjob.JobCount == 8)
                 {
