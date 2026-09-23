@@ -54,6 +54,10 @@ namespace WindowsFormsApplication1
         private int _ocxPaintRr;
         private int _ocxPaintingIdx;
         private int _lastOcxPaintMs;
+        // ch:R15 上屏总节拍封顶(≈15fps)：现场觉得画面顿就调 33(每相机刷新率翻倍)，只改这一个常量
+        private const int OcxMinIntervalMs = 66;
+        // ch:R15 最近一次真正开拍的时刻：KickOcxPaint 的直接投递/续排/定时器三条入口按它统一限速
+        private int _lastOcxKickMs;
         private int _lastUiInputTick;
         private System.Windows.Forms.Timer _ocxYieldTimer;
         private IMessageFilter _uiInputFilter;
@@ -11100,6 +11104,41 @@ namespace WindowsFormsApplication1
             return image.ToBitmap();
         }
 
+        // ch:R15 原图入框前先等比缩到 PictureBox 尺寸(与渲染模式 Fit 语义对齐)：
+        //   旧实现把全分辨率位图直接塞给 PictureBox(SizeMode=Normal，1:1 绘制)——为了在几百像素的框里
+        //   显示，每帧都要常驻一张十几 MB 整图，超出框的部分还被直接裁掉。缩完后常驻位图降到几百 KB、
+        //   整图完整可见、后续任何一次 WM_PAINT 都只处理小图。
+        //   所有权约定：入参 full 是刚分配的独占位图，缩放成功即由本方法 Dispose 并交出 small；
+        //   装得下/异常则原样交回 full，任何路径都不泄漏也不双重释放。
+        private Bitmap DownscaleToBox(Bitmap full, Size boxSize)
+        {
+            if (full == null)
+                return null;
+            try
+            {
+                int bw = boxSize.Width, bh = boxSize.Height;
+                if (bw < 8 || bh < 8 || (full.Width <= bw && full.Height <= bh))
+                    return full; // ch:装得下就不动，避免多余一次缩放
+                double scale = Math.Min(bw / (double)full.Width, bh / (double)full.Height);
+                int w = Math.Max(1, (int)(full.Width * scale));
+                int h = Math.Max(1, (int)(full.Height * scale));
+                Bitmap small = new Bitmap(w, h);
+                using (Graphics g = Graphics.FromImage(small))
+                {
+                    g.Clear(Color.FromArgb(255, 60, 60, 60)); // ch:与渲染模式 CogRecordDisplay 背景一致
+                    g.InterpolationMode = System.Drawing.Drawing2D.InterpolationMode.HighQualityBilinear;
+                    g.DrawImage(full, 0, 0, w, h);
+                }
+                full.Dispose(); // ch:大图刚分配且无人引用，缩放成功立即归还，绝不留十几 MB 常驻
+                return small;
+            }
+            catch (Exception ex)
+            {
+                new ErrorLog().WriteLog(ex.ToString());
+                return full; // ch:缩放失败退回原图——宁可贵也不能黑屏
+            }
+        }
+
         private static ICogImage TryGetRecordImage(ICogRecord rec)
         {
             if (rec == null)
@@ -11389,16 +11428,12 @@ namespace WindowsFormsApplication1
             if (closing || IsDisposed || !IsHandleCreated)
                 return;
             EnsureOcxYieldTimer();
-            int live = CountEnabledRenderCameras();
-            int interval = 8;
-            if (UserRecentlyInteracted())
-                interval = 20;
-            else if (live >= 5)
-                interval = 16;
-            else if (live >= 4)
-                interval = 10;
-            if (_lastOcxPaintMs >= 30 && interval < 16)
-                interval = 16;
+            // ch:R15 节拍与 Kick 入口的 OcxMinIntervalMs 对齐：66ms ≈ 15fps 上屏封顶(只显示最新帧)。
+            //   旧值 8~16ms 意味着 4 相机下约 60~100 次/秒的全分辨率 ToBitmap(分配+整帧转换+Dispose)，
+            //   是客户 4 相机 CPU 90+% 的主要水分。用户正在操作、或单次上屏本身 >30ms 时退半拍(132ms)。
+            int interval = OcxMinIntervalMs;
+            if (UserRecentlyInteracted() || _lastOcxPaintMs >= 30)
+                interval = OcxMinIntervalMs * 2;
             _ocxYieldTimer.Interval = interval;
             _ocxYieldTimer.Stop();
             _ocxYieldTimer.Start();
@@ -11489,6 +11524,15 @@ namespace WindowsFormsApplication1
                 }
                 return;
             }
+            // ch:R15 上屏总节拍收口：直接投递(Queue*Display→Kick)、续排(QueueNextOcxPaint/FinishOcxPaint
+            //   直连)、定时器三条入口都从这里过 —— 旧实现只有定时器路径有节流，直连路径可以绕过，
+            //   把全分辨率 ToBitmap 打到 60~100 次/秒。到点前不开新一拍，改为排定时器(只丢刷新率，
+            //   pending 槽位不动、采集检测不受任何影响)。
+            if (unchecked(Environment.TickCount - _lastOcxKickMs) < OcxMinIntervalMs)
+            {
+                ScheduleOcxPaint();
+                return;
+            }
             if (UserRecentlyInteracted())
             {
                 ScheduleOcxPaint();
@@ -11518,6 +11562,7 @@ namespace WindowsFormsApplication1
                     return;
                 _ocxPaintBusy = 1;
                 _ocxPaintingIdx = _ocxPaintRr;
+                _lastOcxKickMs = Environment.TickCount; // ch:R15 从这一刻起 OcxMinIntervalMs 内不再开新一拍
             }
             PictureBox box = GetCameraPictureBox(job.path_number);
             int t0 = Environment.TickCount;
@@ -11525,13 +11570,15 @@ namespace WindowsFormsApplication1
             {
                 if (box == null || !box.Visible || CameraRoiOn(CameraIndexFromPath(job.path_number)))
                     return;
+                if (WindowState == FormWindowState.Minimized)
+                    return; // ch:R15 最小化时无人看画：跳过 ToBitmap/光栅化，这次上屏成本直接归零(finally 照常复位)
                 if (!box.IsHandleCreated)
                 {
                     try { box.CreateControl(); } catch (Exception ex) { new ErrorLog().WriteLog(ex.ToString()); }
                 }
                 Bitmap bmp = null;
                 if (rawImg != null)
-                    bmp = CopyCogImageToBitmap(rawImg);
+                    bmp = DownscaleToBox(CopyCogImageToBitmap(rawImg), box.ClientSize); // ch:R15 原图先等比缩到框尺寸
                 else
                     bmp = RasterizeRecordToBitmap(rec, box.ClientSize);
                 if (bmp != null)
