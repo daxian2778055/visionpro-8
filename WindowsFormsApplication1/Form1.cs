@@ -4607,7 +4607,7 @@ namespace WindowsFormsApplication1
                                     catch (Exception ex) { MsgErroeLog.WriteLog("异常:" + ex.Message); }
                                 });
                             }
-                            if (outMtcpWin && modbustcp.fins_en && modbustcp.chushihua) // ch:R13 输出方式互斥闸
+                            if ((outMtcpWin || outMtcp) && modbustcp.fins_en && modbustcp.chushihua) // ch:R13 输出方式互斥闸；mode4「ModbusTCP输出」=ModbusTCP 总闸：配置窗实现与 frm3 实现(见下方 outMtcp 分支)由 fins_en&&chushihua 二选一，原只认 outMtcpWin 导致 mode4 遇配置窗活跃时双闸全灭、静默不输出
                             {
                                 try
                                 {
