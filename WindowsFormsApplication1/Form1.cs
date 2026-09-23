@@ -6264,6 +6264,9 @@ namespace WindowsFormsApplication1
             {
                 MsgErroeLog.WriteLog("软件关闭");
                 closing = true; // ch:通知后台监控线程退出
+                // ch:R14 通知配置窗停掉轮询/重连线程(lunxun_monitor、clientmonitor 原为 while(true))，
+                //   否则本窗体进入退出清理时它们还在发请求/重连，与关 socket 竞争
+                try { if (frm3 != null) frm3.RequestExit(); } catch { }
                 // ch:R13 ErrorLog 改异步批量落盘后，退出前显式冲刷队列(ProcessExit 还会再兜一次底)，
                 //   否则最后几条错误日志可能随后台线程一起丢
                 try { ErrorLog.FlushPending(3000); } catch { }

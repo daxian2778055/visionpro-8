@@ -208,37 +208,13 @@ namespace WindowsFormsApplication1
         /// CRC校验，参数data为byte数组
         /// </summary>
         /// <param name="data">校验数据，字节数组</param>
-        /// <returns>字节0是高8位，字节1是低8位</returns>
+        /// <returns>原数据 + 追加的两个校验字节，帧尾顺序为 [低8位, 高8位]</returns>
         public static byte[] GetCRC16(byte[] data)
         {
-            byte[] data1 = new byte[data.Length + 2];
-            //crc计算赋初始值
-            int crc = 0xffff;
-            for (int i = 0; i < data.Length; i++)
-            {
-                crc = crc ^ data[i];
-                for (int j = 0; j < 8; j++)
-                {
-                    int temp;
-                    temp = crc & 1;
-                    crc = crc >> 1;
-                    crc = crc & 0x7fff;
-                    if (temp == 1)
-                    {
-                        crc = crc ^ 0xa001;
-                    }
-                    crc = crc & 0xffff;
-                }
-            }
-            //CRC寄存器的高低位进行互换
-            byte[] crc16 = new byte[2];
-            //CRC寄存器的高8位变成低8位，
-            crc16[1] = (byte)((crc >> 8) & 0xff);
-            //CRC寄存器的低8位变成高8位
-            crc16[0] = (byte)(crc & 0xff);
-            Array.Copy(data, 0, data1, 0, data.Length);
-            Array.Copy(crc16, 0, data1, data.Length, crc16.Length);
-            return data1;
+            // ch:R14 算法本体抽到 Core\ModbusCrc.cs：Tests\ModbusCrcTests 直接链接同一份源文件做回归，
+            //   测的是生产真代码而非"逐行复刻"(复刻版会与生产悄悄分叉)。签名不变，本文件 3 个调用点无需改动。
+            //   注：原 returns 注释写"字节0是高8位，字节1是低8位"，与实现相反(实现追加顺序为 [低, 高])，一并更正。
+            return ModbusCrc.Append(data);
         }
     }
 }

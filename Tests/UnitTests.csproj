@@ -8,6 +8,12 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <!-- ch:R14 直接链接生产源码：CRC 回归测的是 WindowsFormsApplication1 正在跑的那份实现，
+         而不是测试里的复刻副本（复刻版会与生产悄悄分叉，测试形同虚设） -->
+    <Compile Include="..\WindowsFormsApplication1\Core\ModbusCrc.cs" Link="Core\ModbusCrc.cs" />
+  </ItemGroup>
+
+  <ItemGroup>
     <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.9.0" />
     <PackageReference Include="xunit" Version="2.7.0" />
     <PackageReference Include="xunit.runner.visualstudio" Version="2.5.7" />

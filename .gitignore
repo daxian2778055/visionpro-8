@@ -14,9 +14,7 @@ Form1.cs.bak_*
 *.user
 
 # 审计/构建产物、日志、错误转储（体积大，非源码）
-audit-build/
-audit-recheck/
-audit-third/
+audit-*/
 audit-recheck-build.log
 audit-third-build.log
 error/

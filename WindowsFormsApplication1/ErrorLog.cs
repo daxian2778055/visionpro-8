@@ -16,12 +16,14 @@ namespace WindowsFormsApplication1
         //   日志格式与文件路径保持不变(按天分文件)；时间戳在入队时取，更贴近事发时刻。
         private const int MaxQueued = 20000;     // ch:队列封顶：极端刷屏时丢最旧、保最新，内存有界
         private const int FlushIntervalMs = 500; // ch:后台线程最长等待，也即日志最迟可见延迟
+        private const int KeepLogDays = 30;      // ch:R14 历史日志按天分文件保留 30 天，否则只增不减
 
         private static readonly object sync = new object();        // ch:只保护 queue/pending，不做 I/O
         private static readonly Queue<string> queue = new Queue<string>();
         private static readonly AutoResetEvent wake = new AutoResetEvent(false);
         private static readonly object writeLock = new object();   // ch:串行化真正的文件追加(兜底线程可能与后台线程并发)
         private static int pending;                                // ch:已出队但尚未落盘的条数(FlushPending 的完成判据)
+        private static DateTime _lastCleanupUtc = DateTime.MinValue; // ch:R14 日志轮转上次执行时刻(24h 节流)
         // ch:与原 File.AppendText 一致：UTF-8 无 BOM(有 BOM 会给新建文件写头，和历史日志文件不一致)
         private static readonly Encoding logEncoding = new UTF8Encoding(false);
 
@@ -47,6 +49,7 @@ namespace WindowsFormsApplication1
         // ch:取走队列里的全部条目并落盘；pending 在写完(无论成败)后扣减
         private static void FlushPendingCore()
         {
+            CleanupOldLogs(); // ch:R14 顺带做日志轮转(内部 24h 节流)，跑在后台线程、不阻塞任何调用方
             List<string> batch = null;
             lock (sync)
             {
@@ -78,6 +81,36 @@ namespace WindowsFormsApplication1
             }
             catch
             {
+            }
+        }
+
+        // ch:R14 日志轮转：日志按天分文件、只增不减，长期运行会占满磁盘。
+        //   删掉超过 KeepLogDays 的 .txt —— 判据用 LastWriteTime(今天正在写的文件 mtime 必然新鲜，
+        //   不会被误删；顺带覆盖那些被改过名的老文件)，全部 try 吞掉，绝不能让清理把程序带崩。
+        private static void CleanupOldLogs()
+        {
+            try
+            {
+                if ((DateTime.UtcNow - _lastCleanupUtc).TotalHours < 24)
+                    return;
+                _lastCleanupUtc = DateTime.UtcNow;
+                string dir = AppDomain.CurrentDomain.BaseDirectory + "Log";
+                if (!Directory.Exists(dir))
+                    return;
+                DateTime deadline = DateTime.Now.AddDays(-KeepLogDays);
+                foreach (string f in Directory.GetFiles(dir, "*.txt"))
+                {
+                    try
+                    {
+                        if (File.GetLastWriteTime(f) < deadline)
+                            File.Delete(f);
+                    }
+                    catch { } // ch:单个文件被占用/无权限只跳过，不影响其余清理
+                }
+            }
+            catch
+            {
+                // ch:清理失败默认吞掉(与日志自身的失败策略一致)
             }
         }
 

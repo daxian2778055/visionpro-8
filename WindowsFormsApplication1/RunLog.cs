@@ -9,18 +9,12 @@ namespace WindowsFormsApplication1
 {
     class RunLog
     {
-        private int processCount;
-        private int iTemp;
+        ErrorLog Errorwrite = new ErrorLog();
         private string sOrg;
-        private int iflag1;
         private int IOK;
         private int ING;
-        private int sumend;
-        private int sumline;
         private int sumline1;
-        int iTemp1;
         int Sumss;
-        ErrorLog Errorwrite = new ErrorLog();
 
         // ch:R13 CSV 读缓存：WriteDate(月) 与 WriteDate1(日) 在同一条记录里各把文件全量读一遍，
         //   而这些文件几乎只由本程序写。用「路径+长度+mtime」判失效，命中直接用内存副本，
@@ -193,9 +187,6 @@ namespace WindowsFormsApplication1
                         sumline1++;
                 }
                 string[] strs = (lines.Count > 0) ? lines[lines.Count - 1].Split(',') : new string[5];
-                processCount = 0;
-                sumend = 0;
-                sumline = 0;
 
                 try
                 {

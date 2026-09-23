@@ -484,9 +484,23 @@ namespace WindowsFormsApplication1
            // }
            
         }
+        // ch:R14 轮询/重连线程退出标志：lunxun_monitor、clientmonitor 原为 while(true)，
+        //   进程退出阶段(Form1 已 closing=true、正在关 socket/冲刷日志)它们仍在发请求/自动重连，
+        //   会与清理竞争、刷出退出期异常。由 Form1_FormClosing 经 RequestExit() 置位后停手。
+        //   注意只在真正退出时调用：窗体被「隐藏但不销毁」(本窗体 FormClosing 里 e.Cancel=true)不置位，
+        //   否则用户下次再打开配置窗时轮询线程已经停了、功能失效。
+        private volatile bool _exiting = false;
+
+        // ch:R14 进程退出时停掉本窗体的轮询/重连线程(不 Join —— 它们是后台线程，最多再睡完当前一觉)
+        public void RequestExit()
+        {
+            _exiting = true;
+            IsEnable = false; // ch:让 lunxun_monitor 立刻落空转分支，不再发起新的轮询读
+        }
+
         private void lunxun_monitor()
         {
-            while(true)
+            while (!_exiting) // ch:R14 原 while(true) 无退出标志，进程退出期仍会轮询发请求
             {
                 if (IsEnable && lunxun != 0&& tongxunzhong == false)
                 {
@@ -510,7 +524,7 @@ namespace WindowsFormsApplication1
         }
         void clientmonitor()
         {
-            while (true)
+            while (!_exiting) // ch:R14 原 while(true)，退出期仍会按 checkBox3 自动重连 socket
             {
                 Thread.Sleep(500);
                 if (checkBox3.CheckState == CheckState.Checked)
