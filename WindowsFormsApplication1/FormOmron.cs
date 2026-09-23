@@ -115,15 +115,17 @@ namespace WindowsFormsApplication1
                 fins_name.Add(i, new int[] { i % 10, i / 10*2 });
                 fins_value.Add(i, new byte[] { 0x00,0x00 });
             }
-          fins_lunxunen=bool.Parse( wdini.ReadString("fins", "fins_lunxunen", "false"));
-          fins_en = bool.Parse(wdini.ReadString("fins", "fins_en", "false"));
-            address_qishi = decimal.Parse(wdini.ReadString("fins", "qishi", "0"));
-            address_length = decimal.Parse(wdini.ReadString("fins", "zongchang", "1"));
-            // ch:R10-3 ini 手改成非法值/小数时 TryParse 回退默认，并夹取到控件范围，避免 Load 中断或 NUD 越界抛异常
-            decimal lt_ini;
-            if (!decimal.TryParse(wdini.ReadString("fins", "lunxun_time", "20"), out lt_ini)) lt_ini = 20;
-            lt_ini = Math.Max(numericUpDown3.Minimum, Math.Min(numericUpDown3.Maximum, lt_ini));
-            lunxun_time = lt_ini;
+            // ch:R11-2 ini 使能/地址/通道数读取族统一 TryParse+回退默认+夹取 NUD 范围：
+            //   原裸 bool.Parse/decimal.Parse 任一值被现场改坏即抛异常 → Load 的 catch 只记一行日志，
+            //   跳过其后 IP/端口/通道配置与自动连接，通讯窗体静默不工作。
+            decimal IniDec(string s, decimal dft) { decimal v; return decimal.TryParse(s, out v) ? v : dft; }
+            decimal ClampNud(NumericUpDown nud, decimal v) { return Math.Max(nud.Minimum, Math.Min(nud.Maximum, v)); }
+            bool bl_ini;
+            fins_lunxunen = bool.TryParse(wdini.ReadString("fins", "fins_lunxunen", "false"), out bl_ini) && bl_ini;
+            fins_en = bool.TryParse(wdini.ReadString("fins", "fins_en", "false"), out bl_ini) && bl_ini;
+            address_qishi = ClampNud(numericUpDown1, IniDec(wdini.ReadString("fins", "qishi", "0"), 0));
+            address_length = ClampNud(numericUpDown2, IniDec(wdini.ReadString("fins", "zongchang", "1"), 1));
+            lunxun_time = ClampNud(numericUpDown3, IniDec(wdini.ReadString("fins", "lunxun_time", "20"), 20));
             numericUpDown1.Value = address_qishi;
             numericUpDown2.Value = address_length;
             numericUpDown3.Value = lunxun_time;
@@ -142,24 +144,28 @@ namespace WindowsFormsApplication1
                 checkBox2.CheckState = CheckState.Checked;
                 button1_Click(null, null);
             }
-            geshu = int.Parse(wdini.ReadString("fins", "geshu", "0"));
+            geshu = (int)IniDec(wdini.ReadString("fins", "geshu", "0"), 0); // ch:R11-2 TryParse+夹取，循环上界防手改天文数字卡死 Load
+            geshu = Math.Max(0, Math.Min(64, geshu));
             if (geshu > 0)
             {
                 for (int i = 0; i < geshu; i++)
                 {
                     fins_mingcheng= wdini.ReadString((i+1).ToString(), "name", "").Replace("\0", "");
-                    fins_qishi = decimal.Parse(wdini.ReadString((i + 1).ToString(), "qishi", "0"));
-                    fins_length= decimal.Parse(wdini.ReadString((i + 1).ToString(), "changdu", "0"));
+                    fins_qishi = IniDec(wdini.ReadString((i + 1).ToString(), "qishi", "0"), 0);
+                    fins_length = Math.Max(0, Math.Min(1000, IniDec(wdini.ReadString((i + 1).ToString(), "changdu", "0"), 0))); // ch:R11-2 内层循环上界，夹 [0,1000]
                     ABCD= wdini.ReadString((i + 1).ToString(), "gaodiwei", "触发").Replace("\0", "");
                     fins_style = wdini.ReadString((i + 1).ToString(), "geshi", "int").Replace("\0", "");
                     fins_dic.Add(fins_mingcheng, new string[] { fins_mingcheng, fins_qishi.ToString(), fins_length.ToString(), ABCD, fins_style });
                     for (int j = 0; j < fins_length; j++)
                     {
                         xuanzhong_temp = fins_qishi - address_qishi + j;
-                        dataGridView1[fins_name[int.Parse(xuanzhong_temp.ToString())][0], fins_name[int.Parse(xuanzhong_temp.ToString())][1]].Style.BackColor = Color.Green;
-                        dataGridView1[fins_data[int.Parse(xuanzhong_temp.ToString())][0], fins_data[int.Parse(xuanzhong_temp.ToString())][1]].Style.BackColor = Color.Green;
+                        int t = (int)xuanzhong_temp; // ch:R11-2 原 int.Parse(decimal.ToString()) 遇小数抛异常；并补越界守卫(原 fins_name[...] 无守卫会 KeyNotFound)
+                        if (t < 0 || t >= 50 || !fins_name.ContainsKey(t) || !fins_data.ContainsKey(t))
+                            continue;
+                        dataGridView1[fins_name[t][0], fins_name[t][1]].Style.BackColor = Color.Green;
+                        dataGridView1[fins_data[t][0], fins_data[t][1]].Style.BackColor = Color.Green;
                         if (xuanzhong_temp >= 0 && xuanzhong_temp < 50)
-                        dataGridView1[fins_name[int.Parse(xuanzhong_temp.ToString())][0], fins_name[int.Parse(xuanzhong_temp.ToString())][1]].Value = fins_mingcheng;
+                        dataGridView1[fins_name[t][0], fins_name[t][1]].Value = fins_mingcheng;
                     }
                 }
             }

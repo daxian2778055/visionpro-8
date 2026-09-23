@@ -613,6 +613,7 @@ namespace WindowsFormsApplication1
                 IPAddress ip = IPAddress.Parse(textBox6.Text.Trim());
                 IPEndPoint point = new IPEndPoint(ip, Convert.ToInt32(textBox5.Text));
                 sock.Connect(point);
+                sock.SendTimeout = 3000; // ch:R11-3 发送路径持 _clientSocketLock，无超时时长塞满的发送缓冲会长期卡锁(重连/接收线程收尾一起堵)
                 EnableTcpKeepAlive(sock); // ch:P2 半开检测：30s 探活，PLC 掉电可及时触发重连
             }
             catch
@@ -746,7 +747,8 @@ namespace WindowsFormsApplication1
         {
             try { bAccpet = false; } catch (Exception ex) { new ErrorLog().WriteLog(ex.ToString()); }
             try { if (mdcan != null && mdcan.port != null && mdcan.port.IsOpen) mdcan.port.Close(); } catch (Exception ex) { new ErrorLog().WriteLog(ex.ToString()); }
-            try { if (socketClient != null) { socketClient.Close(); socketClient = null; } } catch (Exception exInner) { new ErrorLog().WriteLog(exInner.ToString()); }
+            // ch:R11-3 关闭/置空与 Send/重连同入 _clientSocketLock：原不加锁会在 Send 持锁进行中并发置空，违背本轮"串行化"不变量
+            try { lock (_clientSocketLock) { if (socketClient != null) { socketClient.Close(); socketClient = null; } } } catch (Exception exInner) { new ErrorLog().WriteLog(exInner.ToString()); }
             try { if (socketWatch != null) { socketWatch.Close(); socketWatch = null; } } catch (Exception ex) { new ErrorLog().WriteLog(ex.ToString()); }
             // ch:清理 TCP 服务器已接入的客户端 socket（serverSocket 字典），避免残留句柄
             try

@@ -5186,7 +5186,7 @@ namespace WindowsFormsApplication1
                                                         if (csvLine.Contains(","))
                                                         {
                                                             csvLine = csvLine.Remove(csvLine.Length - 1, 1);
-                                                            runlog2(csvLine, csvLine, myjob.path_number, 1);
+                                                            runlog2(csvLine, csvLine, myjob.path_number, 1, myjob.biaotou);
                                                         }
                                                     }
                                                     else
@@ -5196,7 +5196,7 @@ namespace WindowsFormsApplication1
                                                         if (csvLine.Contains(","))
                                                         {
                                                             csvLine = csvLine.Remove(csvLine.Length - 1, 1);
-                                                            runlog2(csvLine, csvLine, myjob.path_number, 0);
+                                                            runlog2(csvLine, csvLine, myjob.path_number, 0, myjob.biaotou);
                                                         }
                                                     }
                                                 }
@@ -5212,13 +5212,13 @@ namespace WindowsFormsApplication1
                                                         {
                                                             if (!monthCounted) runlog1(1, 0, myjob.path_number); // ch:R10-1 主路径已计数则不重复
                                                             if (csvLine.Contains(","))
-                                                                runlog2(csvLine, csvLine, myjob.path_number, 1);
+                                                                runlog2(csvLine, csvLine, myjob.path_number, 1, myjob.biaotou);
                                                         }
                                                         else
                                                         {
                                                             if (!monthCounted) runlog1(0, 1, myjob.path_number);
                                                             if (csvLine.Contains(","))
-                                                                runlog2(csvLine, csvLine, myjob.path_number, 0);
+                                                                runlog2(csvLine, csvLine, myjob.path_number, 0, myjob.biaotou);
                                                         }
                                                     }
                                                     catch (Exception ex2) { MsgErroeLog.WriteLog("异常:" + ex2.Message); }
@@ -5806,11 +5806,12 @@ namespace WindowsFormsApplication1
             }
         }
 
-        private void runlog2(string a, string b, string path, int c)
+        // ch:R11-1 biaotou 用于跨天/冷启动新建日文件时补写表头（与 CreateCsvPath 同格式）
+        private void runlog2(string a, string b, string path, int c, string biaotou = null)
         {
             lock (lockern)
             {
-                runLog.WriteDate1(b, path, c);
+                runLog.WriteDate1(b, path, c, biaotou);
 
             }
         }

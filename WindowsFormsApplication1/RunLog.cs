@@ -168,6 +168,9 @@ namespace WindowsFormsApplication1
                         // ch:R3 追加新行；原 sumline1>=35 分支为 Seek 后写入空串（等价不改动文件），这里保持不写
                         if (sumline1 < 35)
                         {
+                            // ch:R11-1 跨月/冷启动新建文件时先补表头（与 CreateCsvPath 同格式），原首条即裸数据行
+                            if (lines.Count == 0)
+                                lines.Add("日期,总量,OK,NG,型号,合格率");
                             string s = str + "," + (okss + ng1) + "," + okss + "," + ng1 + "," + sOrg + "," + okss * 1.0f / (okss + ng1);
                             lines.Add(s);
                             WriteAllLinesSafe(strCsvPath, lines);
@@ -219,7 +222,7 @@ namespace WindowsFormsApplication1
                 try { if (File.Exists(tmp)) File.Delete(tmp); } catch (Exception ex3) { Errorwrite.WriteLog("CSV 临时文件清理失败:" + ex3.Message); }
             }
         }
-        public void WriteDate1(string jilu, string path22, int okss)
+        public void WriteDate1(string jilu, string path22, int okss, string biaotou = null)
         {
             string jieguo;
             string strYear = DateTime.Now.Year.ToString();
@@ -269,6 +272,10 @@ namespace WindowsFormsApplication1
                 string s = Sumss + "," + strsecond + "," + jilu + "," + jieguo;
                 using (StreamWriter sw4 = new StreamWriter(strCsvPath, true, Encoding.Default))
                 {
+                    // ch:R11-1 OpenOrCreate 后原靠 FileNotFoundException→CreateCsvPath 写表头的路径不再触发；
+                    //   跨天/冷启动首条数据前先补表头（与 CreateCsvPath 同格式），否则日文件永远缺表头
+                    if (lastLine == null)
+                        sw4.WriteLine("序号,日期," + (biaotou ?? "") + "结果");
                     sw4.WriteLine(s);
                     sw4.Flush();
                 }
