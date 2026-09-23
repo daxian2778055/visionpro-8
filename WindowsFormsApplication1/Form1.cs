@@ -14457,6 +14457,7 @@ namespace WindowsFormsApplication1
         {
             this.Invoke(new Action(() =>
             {
+                camera_sum = 0; // ch:R16 每次进入重算（原靠调用方先清零，若重复调用会累加导致排版分支走错）
                 if (canshuIni.ReadString("camera1", "en", "1使用中").Contains("使用"))
                 {
                     button18.Text = "1使用中";
@@ -14563,8 +14564,7 @@ namespace WindowsFormsApplication1
                 }
                 if (camera_sum >= 7)
                 {
-                    tableLayoutPanel1.SetRowSpan(tableLayoutPanel2, 3);
-                    tableLayoutPanel1.SetColumnSpan(tableLayoutPanel2, 3);
+                    // ch:R16 全跨改由 ApplyMonitorGrid 统一处理（旧固定跨相机1面板，仅相机1单独启用时才碰巧正确）
                     myjob1.record[0] = 1;
                     myjob1.record[1] = 1;
                     myjob1.record[2] = 1;
@@ -14586,10 +14586,9 @@ namespace WindowsFormsApplication1
                 }
                 else if (camera_sum >= 4)
                 {
-                    tableLayoutPanel5.Visible = false;
-                    tableLayoutPanel7.Visible = true;
-                    if (camera_sum == 4)
-                        tableLayoutPanel9.Visible = true;
+                    // ch:R16 原硬编码「藏相机3面板、强显相机4/5面板」凑 2×2，正是4相机错位根源：槽位3显示
+                    // 相机4的图、槽位4是相机5的黑面板、相机3的图无处显示；且17处以 tableLayoutPanel5.Visible
+                    // 为「相机3启用」的判断(结果标签路由/NG详情芯片/双击开块编辑器)全被带偏。排版改交 ApplyMonitorGrid。
                     this.tableLayoutPanel1.ColumnStyles[0] = (new ColumnStyle(SizeType.Percent, 49.5F));
                     this.tableLayoutPanel1.ColumnStyles[1] = (new ColumnStyle(SizeType.Percent, 49.5F));
                     this.tableLayoutPanel1.ColumnStyles[2] = (new ColumnStyle(SizeType.Percent, 1F));
@@ -14634,8 +14633,76 @@ namespace WindowsFormsApplication1
                     myjob2.record[1] = 33f;
                     myjob2.record[2] = 34f;
                 }
+
+                ApplyMonitorGrid(); // ch:R16 按启用相机重排槽位（见下方方法注释：修4相机槽位错位/相机3图不显示）
             }));
         }
+
+        // ch:R16 监控画面排版：tableLayoutPanel1 是 3×3 固定单元格网格（设计格位 cam1(0,0) cam2(1,0)
+        // cam3(2,0) cam4(0,1) cam5(1,1) cam6(2,1) cam7(0,2) cam8(1,2)），旧 display() 只按启用数改
+        // ColumnStyles/RowStyles 并硬凑可见性、从不移动单元格 —— 4相机分支藏 cam3、强显 cam5，2×2 槽位
+        // 实际是 cam1/cam2/cam4/cam5（槽位3=相机4的图、槽位4=相机5黑面板、相机3的图无处显示）。
+        // 现按相机号升序把第 k 个启用相机装入第 k 个槽位：槽表按启用数取行优先前 N 格，与各分支的
+        // 百分比样式一一对应；面板可见性以 myjobN.en 为准（tableLayoutPanel5.Visible 被17处当作
+        // 「相机3启用」标志，必须与 en 对齐）。单相机把唯一启用面板跨满 3×3；双击最大化的
+        // GetCellPosition/还原快照(myjob1/2.record) 取当前格位自动跟随；cam9 备用面板不参与。
+        private void ApplyMonitorGrid()
+        {
+            TableLayoutPanel[] panels = {
+                tableLayoutPanel2, tableLayoutPanel3, tableLayoutPanel5, tableLayoutPanel7,
+                tableLayoutPanel9, tableLayoutPanel12, tableLayoutPanel14, tableLayoutPanel16 };
+            bool[] en = {
+                myjob1.en != 0, myjob2.en != 0, myjob3.en != 0, myjob4.en != 0,
+                myjob5.en != 0, myjob6.en != 0, myjob7.en != 0, myjob8.en != 0 };
+
+            int n = 0;
+            for (int i = 0; i < 8; i++)
+                if (en[i]) n++;
+
+            TableLayoutPanelCellPosition[] slots;
+            if (n <= 1) slots = new TableLayoutPanelCellPosition[] { new TableLayoutPanelCellPosition(0, 0) };
+            else if (n == 2) slots = new TableLayoutPanelCellPosition[] { new TableLayoutPanelCellPosition(0, 0), new TableLayoutPanelCellPosition(1, 0) };
+            else if (n <= 4) slots = new TableLayoutPanelCellPosition[] {
+                new TableLayoutPanelCellPosition(0, 0), new TableLayoutPanelCellPosition(1, 0), new TableLayoutPanelCellPosition(0, 1), new TableLayoutPanelCellPosition(1, 1) };
+            else if (n <= 6) slots = new TableLayoutPanelCellPosition[] {
+                new TableLayoutPanelCellPosition(0, 0), new TableLayoutPanelCellPosition(1, 0), new TableLayoutPanelCellPosition(2, 0),
+                new TableLayoutPanelCellPosition(0, 1), new TableLayoutPanelCellPosition(1, 1), new TableLayoutPanelCellPosition(2, 1) };
+            else slots = new TableLayoutPanelCellPosition[] {
+                new TableLayoutPanelCellPosition(0, 0), new TableLayoutPanelCellPosition(1, 0), new TableLayoutPanelCellPosition(2, 0),
+                new TableLayoutPanelCellPosition(0, 1), new TableLayoutPanelCellPosition(1, 1), new TableLayoutPanelCellPosition(2, 1),
+                new TableLayoutPanelCellPosition(0, 2), new TableLayoutPanelCellPosition(1, 2), new TableLayoutPanelCellPosition(2, 2) };
+
+            tableLayoutPanel1.SuspendLayout();
+            try
+            {
+                for (int i = 0; i < 8; i++) // 复位：清残留全跨、收回 8 块相机面板
+                {
+                    tableLayoutPanel1.SetRowSpan(panels[i], 1);
+                    tableLayoutPanel1.SetColumnSpan(panels[i], 1);
+                    panels[i].Visible = false;
+                }
+                int k = 0;
+                for (int i = 0; i < 8 && k < slots.Length; i++)
+                {
+                    if (!en[i]) continue;
+                    panels[i].Visible = true;
+                    if (n <= 1) // 单相机：唯一启用面板跨满 3×3
+                    {
+                        tableLayoutPanel1.SetCellPosition(panels[i], new TableLayoutPanelCellPosition(0, 0));
+                        tableLayoutPanel1.SetRowSpan(panels[i], 3);
+                        tableLayoutPanel1.SetColumnSpan(panels[i], 3);
+                    }
+                    else
+                        tableLayoutPanel1.SetCellPosition(panels[i], slots[k]);
+                    k++;
+                }
+            }
+            finally
+            {
+                tableLayoutPanel1.ResumeLayout(true);
+            }
+        }
+
         private void baoguang_set()
         {
             // 创建Myjob数组便于循环处理
