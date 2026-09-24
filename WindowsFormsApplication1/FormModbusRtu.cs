@@ -259,6 +259,19 @@ namespace WindowsFormsApplication1
                     fins_zuhe[temp_jian] += (i + 1).ToString();
 
             }
+            // ch:R22 载入期存量重复绑定扫描：ini 里两相机绑同一反馈通道=同地址互相覆盖，仅记日志不弹窗、不改配置（移植 modbustcp R21）
+            Dictionary<string, int> fankuiSeen = new Dictionary<string, int>();
+            for (int ci = 1; ci <= camera_dic.Count; ci++)
+            {
+                string fk = camera_dic[ci][3];
+                if (IsUnboundFankui(fk))
+                    continue;
+                int prevCam;
+                if (fankuiSeen.TryGetValue(fk, out prevCam))
+                    MsgErroeLog.WriteLog("反馈通道存量重复绑定: 通道[" + fk + "] 同时绑定相机" + prevCam + "与相机" + ci + "，请在配置窗改绑");
+                else
+                    fankuiSeen[fk] = ci;
+            }
             int cccc = 0;
             foreach (var f in fins_zuhe.Keys)
             {
@@ -558,16 +571,25 @@ namespace WindowsFormsApplication1
                 busRtuClient.Open( );
 
                 _rtuAutoReconnect = true; // ch:连接成功后才允许断线自动重连
-                button2.Enabled = true;
-                button1.Enabled = false;
-                panel2.Enabled = true;
-
-                userControlCurve1.ReadWriteNet = busRtuClient;
+                SyncConnectedUiState(); // ch:R22 Load 的 Task.Run 在池线程调 button1_Click，UI 状态更新封送到 UI 线程
             }
             catch (Exception ex)
             {
                 MsgErroeLog.WriteLog( ex.Message );
             }
+        }
+
+        // ch:R22 连接成功后的 UI 状态更新：Load 的 Task.Run 在池线程调 button1_Click，
+        // 直写 button/panel/userControlCurve 属跨线程 UI 写，InvokeRequired 时封送到 UI 线程
+        private void SyncConnectedUiState()
+        {
+            if (IsDisposed || !IsHandleCreated) return; // ch:R22 窗口未创建/已销毁不入队
+            if (InvokeRequired) { BeginInvoke(new Action(SyncConnectedUiState)); return; }
+            button2.Enabled = true;
+            button1.Enabled = false;
+            panel2.Enabled = true;
+
+            userControlCurve1.ReadWriteNet = busRtuClient;
         }
 
         private void button2_Click( object sender, EventArgs e )
@@ -1681,76 +1703,81 @@ namespace WindowsFormsApplication1
             }
         }
 
+        // ch:R22 反馈通道绑定唯一性：多相机绑同一反馈通道 = 同地址互相覆盖（移植 modbustcp R21）
+        private bool _fankuiSyncing; // ch:R22 回退赋值时防重入
+
+        private static bool IsUnboundFankui(string v)
+        {
+            return string.IsNullOrEmpty(v) || v == "0" || v == "无"; // ch:R22 未绑定态（ini 默认 "0"）不参与查重
+        }
+
+        private void BindFankui(int cam, ComboBox cb, string iniSection)
+        {
+            if (!chushihua || _fankuiSyncing)
+                return;
+            string newText = cb.Text;
+            string oldText = camera_dic[cam][3];
+            if (newText != oldText && !IsUnboundFankui(newText))
+            {
+                foreach (var kv in camera_dic)
+                {
+                    if (kv.Key != cam && kv.Value[3] == newText)
+                    {
+                        MsgErroeLog.WriteLog("反馈通道重复绑定被拒: 通道[" + newText + "] 已被相机" + kv.Key + "占用，相机" + cam + " 回退为[" + oldText + "]"); // ch:R22 只记日志不写入
+                        _fankuiSyncing = true;
+                        try
+                        {
+                            // ch:R22 DropDownList 下 Text 可能不在 Items（如未绑定 "0"），用 SelectedIndex 回退（-1=清空）
+                            cb.SelectedIndex = cb.Items.IndexOf(oldText);
+                        }
+                        finally { _fankuiSyncing = false; }
+                        MessageBox.Show(this, "反馈通道「" + newText + "」已绑定到相机" + kv.Key + "，两相机绑同一通道会互相覆盖数据，请选择其它通道。", "绑定冲突", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                        return;
+                    }
+                }
+            }
+            camera_dic[cam][3] = newText;
+            wdini.WriteString(iniSection, "fankui", newText);
+        }
+
         private void cb13_SelectedIndexChanged(object sender, EventArgs e)
         {
-            if (chushihua)
-            {
-                camera_dic[1][3] = cb13.Text;
-                wdini.WriteString("c1"+ "modbusrtu", "fankui", cb13.Text);
-            }
+            if (chushihua) BindFankui(1, cb13, "c1modbusrtu");
         }
 
         private void cb14_SelectedIndexChanged(object sender, EventArgs e)
         {
-            if (chushihua)
-            {
-                camera_dic[2][3] = cb14.Text;
-                wdini.WriteString("c2"+ "modbusrtu", "fankui", cb14.Text);
-            }
+            if (chushihua) BindFankui(2, cb14, "c2modbusrtu");
         }
 
         private void cb15_SelectedIndexChanged(object sender, EventArgs e)
         {
-            if (chushihua)
-            {
-                camera_dic[3][3] = cb15.Text;
-                wdini.WriteString("c3"+ "modbusrtu", "fankui", cb15.Text);
-            }
+            if (chushihua) BindFankui(3, cb15, "c3modbusrtu");
         }
 
         private void cb16_SelectedIndexChanged(object sender, EventArgs e)
         {
-            if (chushihua)
-            {
-                camera_dic[4][3] = cb16.Text;
-                wdini.WriteString("c4"+ "modbusrtu", "fankui", cb16.Text);
-            }
+            if (chushihua) BindFankui(4, cb16, "c4modbusrtu");
         }
 
         private void cb17_SelectedIndexChanged(object sender, EventArgs e)
         {
-            if (chushihua)
-            {
-                camera_dic[5][3] = cb17.Text;
-                wdini.WriteString("c5"+ "modbusrtu", "fankui", cb17.Text);
-            }
+            if (chushihua) BindFankui(5, cb17, "c5modbusrtu");
         }
 
         private void cb18_SelectedIndexChanged(object sender, EventArgs e)
         {
-            if (chushihua)
-            {
-                camera_dic[6][3] = cb18.Text;
-                wdini.WriteString("c6"+ "modbusrtu", "fankui", cb18.Text);
-            }
+            if (chushihua) BindFankui(6, cb18, "c6modbusrtu");
         }
 
         private void cb19_SelectedIndexChanged(object sender, EventArgs e)
         {
-            if (chushihua)
-            {
-                camera_dic[7][3] = cb19.Text;
-                wdini.WriteString("c7"+ "modbusrtu", "fankui", cb19.Text);
-            }
+            if (chushihua) BindFankui(7, cb19, "c7modbusrtu");
         }
 
         private void cb20_SelectedIndexChanged(object sender, EventArgs e)
         {
-            if (chushihua)
-            {
-                camera_dic[8][3] = cb20.Text;
-                wdini.WriteString("c8"+ "modbusrtu", "fankui", cb20.Text);
-            }
+            if (chushihua) BindFankui(8, cb20, "c8modbusrtu");
         }
 
         private void cb21_SelectedIndexChanged(object sender, EventArgs e)
@@ -2215,6 +2242,16 @@ namespace WindowsFormsApplication1
                 return;
             try
             {
+                if (IsDisposed || !IsHandleCreated)
+                    return; // ch:R22 窗口未创建/已销毁不入队
+                if (InvokeRequired)
+                {
+                    // ch:R22 移植 FormModbus(R21) 头号嫌疑修复：轮询/写回线程直写 dataGridView1 单元格被
+                    // CheckForIllegalCrossThreadCalls=false 掩盖为控件状态累积损坏(配置窗越开越慢)，
+                    // 改为 BeginInvoke 封送到 UI 线程；调用方已有 Visible+250ms 门控，入队量有界
+                    BeginInvoke(new Action<int, int, object>(SetModbusGridValue), new object[] { col, row, value });
+                    return;
+                }
                 dataGridView1[col, row].Value = value;
             }
             catch (Exception ex) { new ErrorLog().WriteLog(ex.ToString()); }
@@ -2386,58 +2423,73 @@ namespace WindowsFormsApplication1
                                 int addr_start;
                                 if (!int.TryParse(par.Value[1], out addr_start)) { anyWriteFailed = true; MsgErroeLog.WriteLog("写回地址解析失败(保留pending):" + par.Value[1]); break; } // ch:P2 裸 Parse 改 TryParse
                                 string fmt = par.Value[4];
+                                int regLen; // ch:R22 写回长度截断：移植 modbustcp(R21)，值数按通道登记长度 Math.Min 截断，防溢入相邻通道(多相机数据互串)
+                                if (!int.TryParse(par.Value[2], out regLen)) { anyWriteFailed = true; MsgErroeLog.WriteLog("写回通道长度解析失败(保留pending):" + par.Value[2]); break; } // ch:R22 与地址解析同款处理
 
                                 if (fmt == "int")
                                 {
                                     // 逗号分隔 → short数组, FC16批量写
                                     string[] parts = pat.Value[4].Split(new char[] { ',' }, StringSplitOptions.RemoveEmptyEntries);
-                                    short[] vals = new short[parts.Length];
-                                    for (int i = 0; i < parts.Length; i++)
+                                    int writeCount = Math.Min(parts.Length, regLen); // ch:R22 写回截断：值数按通道登记长度截断，与 modbustcp(R21) 对齐
+                                    if (writeCount < parts.Length) MsgErroeLog.WriteLog("写回超长截断 cam=" + pat.Key + " ch=" + par.Value[0] + " 值数=" + parts.Length + ">登记长度" + regLen); // ch:R22 仅截断时记一条
+                                    short[] vals = new short[writeCount];
+                                    for (int i = 0; i < writeCount; i++)
                                         vals[i] = (short)Math.Round(double.Parse(parts[i].Trim()));
                                     if (!DemoUtils.WriteResultRenderOk(() => busRtuClient.Write(addr_start.ToString(), vals), addr_start.ToString(), out fins_temp)) anyWriteFailed = true; // ch:P2-④
                                     for (int j = 0; j < vals.Length; j++)
                                     {
+                                        if (!gridUi) break; // ch:R22 网格回写守卫，移植 modbustcp(R21)
                                         int xuanzhong_temp = addr_start - int.Parse(address_qishi.ToString()) + j;
-                                        if (gridUi)
-                                            SetModbusGridValue(fins_data[xuanzhong_temp][0], fins_data[xuanzhong_temp][1], fins_temp);
+                                        if (xuanzhong_temp < 0 || !fins_data.ContainsKey(xuanzhong_temp)) continue; // ch:R22 网格越界守卫：PLC已写成功，仅跳过UI回写，防 KeyNotFound 被 catch 误判写回失败
+                                        SetModbusGridValue(fins_data[xuanzhong_temp][0], fins_data[xuanzhong_temp][1], fins_temp);
                                     }
                                 }
                                 else if (fmt == "long")
                                 {
                                     string[] parts = pat.Value[4].Split(new char[] { ',' }, StringSplitOptions.RemoveEmptyEntries);
-                                    int[] vals = new int[parts.Length];
-                                    for (int i = 0; i < parts.Length; i++)
+                                    int valLen = Math.Max(1, regLen / 2); // ch:R22 long 占2寄存器
+                                    int writeCount = Math.Min(parts.Length, valLen); // ch:R22 写回截断，与 modbustcp(R21) 对齐
+                                    if (writeCount < parts.Length) MsgErroeLog.WriteLog("写回超长截断 cam=" + pat.Key + " ch=" + par.Value[0] + " 值数=" + parts.Length + ">登记长度" + regLen); // ch:R22 仅截断时记一条
+                                    int[] vals = new int[writeCount];
+                                    for (int i = 0; i < writeCount; i++)
                                         vals[i] = (int)Math.Round(double.Parse(parts[i].Trim()));
                                     if (!DemoUtils.WriteResultRenderOk(() => busRtuClient.Write(addr_start.ToString(), vals), addr_start.ToString(), out fins_temp)) anyWriteFailed = true; // ch:P2-④
                                     for (int j = 0; j < vals.Length * 2; j++)
                                     {
+                                        if (!gridUi) break; // ch:R22 网格回写守卫，移植 modbustcp(R21)
                                         int xuanzhong_temp = addr_start - int.Parse(address_qishi.ToString()) + j;
-                                        if (gridUi)
-                                            SetModbusGridValue(fins_data[xuanzhong_temp][0], fins_data[xuanzhong_temp][1], fins_temp);
+                                        if (xuanzhong_temp < 0 || !fins_data.ContainsKey(xuanzhong_temp)) continue; // ch:R22 网格越界守卫，防 KeyNotFound 误判写回失败
+                                        SetModbusGridValue(fins_data[xuanzhong_temp][0], fins_data[xuanzhong_temp][1], fins_temp);
                                     }
                                 }
                                 else if (fmt == "float")
                                 {
                                     string[] parts = pat.Value[4].Split(new char[] { ',' }, StringSplitOptions.RemoveEmptyEntries);
-                                    float[] vals = new float[parts.Length];
-                                    for (int i = 0; i < parts.Length; i++)
+                                    int valLen = Math.Max(1, regLen / 2); // ch:R22 float 占2寄存器
+                                    int writeCount = Math.Min(parts.Length, valLen); // ch:R22 写回截断，与 modbustcp(R21) 对齐
+                                    if (writeCount < parts.Length) MsgErroeLog.WriteLog("写回超长截断 cam=" + pat.Key + " ch=" + par.Value[0] + " 值数=" + parts.Length + ">登记长度" + regLen); // ch:R22 仅截断时记一条
+                                    float[] vals = new float[writeCount];
+                                    for (int i = 0; i < writeCount; i++)
                                         vals[i] = float.Parse(parts[i].Trim());
                                     if (!DemoUtils.WriteResultRenderOk(() => busRtuClient.Write(addr_start.ToString(), vals), addr_start.ToString(), out fins_temp)) anyWriteFailed = true; // ch:P2-④
                                     for (int j = 0; j < vals.Length * 2; j++)
                                     {
+                                        if (!gridUi) break; // ch:R22 网格回写守卫，移植 modbustcp(R21)
                                         int xuanzhong_temp = addr_start - int.Parse(address_qishi.ToString()) + j;
-                                        if (gridUi)
-                                            SetModbusGridValue(fins_data[xuanzhong_temp][0], fins_data[xuanzhong_temp][1], fins_temp);
+                                        if (xuanzhong_temp < 0 || !fins_data.ContainsKey(xuanzhong_temp)) continue; // ch:R22 网格越界守卫，防 KeyNotFound 误判写回失败
+                                        SetModbusGridValue(fins_data[xuanzhong_temp][0], fins_data[xuanzhong_temp][1], fins_temp);
                                     }
                                 }
                                 else if (fmt == "string")
                                 {
                                     string[] parts = pat.Value[4].Split(new char[] { ',' }, StringSplitOptions.RemoveEmptyEntries);
-                                    for (int j = 0; j < parts.Length; j++)
+                                    int writeCount = Math.Min(parts.Length, regLen); // ch:R22 string 每值占1寄存器，截断与 modbustcp(R21) 语义对齐
+                                    if (writeCount < parts.Length) MsgErroeLog.WriteLog("写回超长截断 cam=" + pat.Key + " ch=" + par.Value[0] + " 值数=" + parts.Length + ">登记长度" + regLen); // ch:R22 仅截断时记一条
+                                    for (int j = 0; j < writeCount; j++)
                                     {
                                         int xuanzhong_temp = addr_start - int.Parse(address_qishi.ToString()) + j;
                                         if (!DemoUtils.WriteResultRenderOk(() => busRtuClient.Write((addr_start + j).ToString(), parts[j].Trim()), (addr_start + j).ToString(), out fins_temp)) anyWriteFailed = true; // ch:P2-④ 逐寄存器聚合，避免末次成功掩盖前次失败
-                                        if (gridUi)
+                                        if (gridUi && xuanzhong_temp >= 0 && fins_data.ContainsKey(xuanzhong_temp)) // ch:R22 网格越界守卫，防 KeyNotFound 误判写回失败
                                             SetModbusGridValue(fins_data[xuanzhong_temp][0], fins_data[xuanzhong_temp][1], fins_temp);
                                     }
                                 }
@@ -2585,12 +2637,16 @@ namespace WindowsFormsApplication1
                                 {
                                     if (!int.TryParse(par.Value[1], out addr_start)) { patWriteOk = false; MsgErroeLog.WriteLog("极速写地址解析失败(保留pending):" + par.Value[1]); break; } // ch:P2 裸 Parse 改 TryParse
                                     fmt = par.Value[4];
+                                    int regLen; // ch:R22 极速写长度截断：与 modbustcp XieWuWriteOne 对齐，值数按通道登记长度截断，防溢入相邻通道(多相机数据互串)
+                                    if (!int.TryParse(par.Value[2], out regLen)) { patWriteOk = false; MsgErroeLog.WriteLog("极速写通道长度解析失败(保留pending):" + par.Value[2]); break; } // ch:R22 与地址解析同款处理
 
                                 if (fmt == "int")
                                 {
                                     string[] parts = pat.Value[4].Split(new char[] { ',' }, StringSplitOptions.RemoveEmptyEntries);
-                                    short[] vals = new short[parts.Length];
-                                    for (int i = 0; i < parts.Length; i++)
+                                    int writeCount = Math.Min(parts.Length, regLen); // ch:R22 极速写截断：值数按通道登记长度截断，与 modbustcp XieWuWriteOne 对齐
+                                    if (writeCount < parts.Length) MsgErroeLog.WriteLog("极速写超长截断 cam=" + pat.Key + " ch=" + par.Value[0] + " 值数=" + parts.Length + ">登记长度" + regLen); // ch:R22 仅截断时记一条
+                                    short[] vals = new short[writeCount];
+                                    for (int i = 0; i < writeCount; i++)
                                         vals[i] = (short)Math.Round(double.Parse(parts[i].Trim()));
                                     OperateResult wr = busRtuClient.Write(addr_start.ToString(), vals); // ch:R7 捕获写结果
                                     bool writeOk = wr != null && wr.IsSuccess; // ch:R7 仅成功才显示"已发送"，失败显示"发送失败"
@@ -2617,8 +2673,11 @@ namespace WindowsFormsApplication1
                                 else if (fmt == "long")
                                 {
                                     string[] parts = pat.Value[4].Split(new char[] { ',' }, StringSplitOptions.RemoveEmptyEntries);
-                                    int[] vals = new int[parts.Length];
-                                    for (int i = 0; i < parts.Length; i++)
+                                    int valLen = Math.Max(1, regLen / 2); // ch:R22 long 占2寄存器
+                                    int writeCount = Math.Min(parts.Length, valLen); // ch:R22 极速写截断，与 modbustcp XieWuWriteOne 对齐
+                                    if (writeCount < parts.Length) MsgErroeLog.WriteLog("极速写超长截断 cam=" + pat.Key + " ch=" + par.Value[0] + " 值数=" + parts.Length + ">登记长度" + regLen); // ch:R22 仅截断时记一条
+                                    int[] vals = new int[writeCount];
+                                    for (int i = 0; i < writeCount; i++)
                                         vals[i] = (int)Math.Round(double.Parse(parts[i].Trim()));
                                     OperateResult wr = busRtuClient.Write(addr_start.ToString(), vals); // ch:R7 捕获写结果
                                     bool writeOk = wr != null && wr.IsSuccess; // ch:R7 仅成功才显示"已发送"，失败显示"发送失败"
@@ -2645,8 +2704,11 @@ namespace WindowsFormsApplication1
                                 else if (fmt == "float")
                                 {
                                     string[] parts = pat.Value[4].Split(new char[] { ',' }, StringSplitOptions.RemoveEmptyEntries);
-                                    float[] vals = new float[parts.Length];
-                                    for (int i = 0; i < parts.Length; i++)
+                                    int valLen = Math.Max(1, regLen / 2); // ch:R22 float 占2寄存器
+                                    int writeCount = Math.Min(parts.Length, valLen); // ch:R22 极速写截断，与 modbustcp XieWuWriteOne 对齐
+                                    if (writeCount < parts.Length) MsgErroeLog.WriteLog("极速写超长截断 cam=" + pat.Key + " ch=" + par.Value[0] + " 值数=" + parts.Length + ">登记长度" + regLen); // ch:R22 仅截断时记一条
+                                    float[] vals = new float[writeCount];
+                                    for (int i = 0; i < writeCount; i++)
                                         vals[i] = float.Parse(parts[i].Trim());
                                     OperateResult wr = busRtuClient.Write(addr_start.ToString(), vals); // ch:R7 捕获写结果
                                     bool writeOk = wr != null && wr.IsSuccess; // ch:R7 仅成功才显示"已发送"，失败显示"发送失败"
@@ -2673,9 +2735,11 @@ namespace WindowsFormsApplication1
                                 else if (fmt == "string")
                                 {
                                     string[] parts = pat.Value[4].Split(new char[] { ',' }, StringSplitOptions.RemoveEmptyEntries);
+                                    int writeCount = Math.Min(parts.Length, regLen); // ch:R22 string 每值占1寄存器，截断与 modbustcp XieWuWriteOne 语义对齐
+                                    if (writeCount < parts.Length) MsgErroeLog.WriteLog("极速写超长截断 cam=" + pat.Key + " ch=" + par.Value[0] + " 值数=" + parts.Length + ">登记长度" + regLen); // ch:R22 仅截断时记一条
                                     bool writeOk = true; // ch:R7 聚合逐寄存器写结果，任一失败即整体失败
                                     patWrote = true;
-                                    for (int j = 0; j < parts.Length; j++)
+                                    for (int j = 0; j < writeCount; j++)
                                     {
                                         OperateResult wr = busRtuClient.Write((addr_start + j).ToString(), parts[j].Trim());
                                         if (wr == null || !wr.IsSuccess)
@@ -2691,7 +2755,7 @@ namespace WindowsFormsApplication1
                                             {
                                                 try
                                                 {
-                                                    for (int j = 0; j < parts.Length; j++)
+                                                    for (int j = 0; j < writeCount; j++) // ch:R22 与写入同长回显，截断后不显示未写寄存器
                                                     {
                                                         int xuanzhong_temp = addr_start - int.Parse(address_qishi.ToString()) + j;
                                                         if (fins_data.ContainsKey(xuanzhong_temp))

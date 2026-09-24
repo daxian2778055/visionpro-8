@@ -651,11 +651,7 @@ namespace WindowsFormsApplication1
                     xieWuDataFmt = comboBox1.SelectedIndex;
 
                     MsgErroeLog.WriteLog( HslCommunication.StringResources.Language.ConnectedSuccess );
-                    button2.Enabled = true;
-                    button1.Enabled = false;
-                    panel2.Enabled = true;
-
-                    userControlCurve1.ReadWriteNet = busTcpClient;
+                    SyncConnectedUiState(); // ch:R22 Load 的 Task.Run 在池线程调 button1_Click，UI 状态更新封送到 UI 线程
                 }
                 else
                 {
@@ -666,6 +662,19 @@ namespace WindowsFormsApplication1
             {
                 MsgErroeLog.WriteLog( ex.Message );
             }
+        }
+
+        // ch:R22 连接成功后的 UI 状态更新：Load 的 Task.Run 在池线程调 button1_Click，
+        // 直写 button/panel/userControlCurve 属跨线程 UI 写，InvokeRequired 时封送到 UI 线程
+        private void SyncConnectedUiState()
+        {
+            if (IsDisposed || !IsHandleCreated) return; // ch:R22 窗口未创建/已销毁不入队
+            if (InvokeRequired) { BeginInvoke(new Action(SyncConnectedUiState)); return; }
+            button2.Enabled = true;
+            button1.Enabled = false;
+            panel2.Enabled = true;
+
+            userControlCurve1.ReadWriteNet = busTcpClient;
         }
 
         private void button2_Click( object sender, EventArgs e )
