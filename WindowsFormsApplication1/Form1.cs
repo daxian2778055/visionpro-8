@@ -4571,7 +4571,7 @@ namespace WindowsFormsApplication1
                             if ((outSerial && myjob.serial) // ch:P1 判断提到 Task.Run 外（串口关闭时不再每帧派发空 Task）；ch:R13 加输出方式互斥闸
                                 || (outMode == OutModbusTcp && myjob.modbustcp && snapSerial != "" // ch:R19 mode4 数据路回退：现场 Modbus 数据在 Outputs["serial"]、自动模式实际经串口分支的寄存器写子路径(frm3.mdcan)出数，mode4 原把它关死致静默
                                 && !(modbustcp.fins_en && modbustcp.chushihua)   //   配置窗活跃 → 让 4638(FormModbus) 独发
-                                && !(frm3.IsEnable && snapMtcp != "")))           //   frm3 标准路(4732)能产出 → 让 4732 独发；三路互斥必居其一。进入时 myjob.modbustcp 必真(4572 子闸)故只走寄存器写、绝不发原始串口文本
+                                && !frm3.IsEnable))                               //   ch:R20 4732 闸开(IsEnable)就不碰——互斥按两组闸门输入裁决、与数据有无无关，杜绝 IsEnable 真但终端空时 4732 写零与本回退真值互覆的理论双写；三路必居其一可证明不双写。进入时 myjob.modbustcp 必真(4572 子闸)故只走寄存器写、绝不发原始串口文本
                             {
                                 if (_logPathSerial) { _logPathSerial = false; MsgErroeLog.WriteLog("Modbus数据路:串口分支寄存器子路径 mode=" + _outputMode + " myjob.modbustcp=" + myjob.modbustcp); } // ch:R19 每次切模式首次触发记一条
                                 Task.Run(() =>
