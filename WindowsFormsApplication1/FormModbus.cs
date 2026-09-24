@@ -348,6 +348,19 @@ namespace WindowsFormsApplication1
                     fins_zuhe[temp_jian] += (i + 1).ToString();
 
             }
+            // ch:R21 载入期存量重复绑定扫描：ini 里两相机绑同一反馈通道=同地址互相覆盖，仅记日志不弹窗、不改配置
+            Dictionary<string, int> fankuiSeen = new Dictionary<string, int>();
+            for (int ci = 1; ci <= camera_dic.Count; ci++)
+            {
+                string fk = camera_dic[ci][3];
+                if (IsUnboundFankui(fk))
+                    continue;
+                int prevCam;
+                if (fankuiSeen.TryGetValue(fk, out prevCam))
+                    MsgErroeLog.WriteLog("反馈通道存量重复绑定: 通道[" + fk + "] 同时绑定相机" + prevCam + "与相机" + ci + "，请在配置窗改绑");
+                else
+                    fankuiSeen[fk] = ci;
+            }
             int cccc = 0;
             foreach (var f in fins_zuhe.Keys)
             {
@@ -1061,6 +1074,16 @@ namespace WindowsFormsApplication1
                 return;
             try
             {
+                if (IsDisposed || !IsHandleCreated)
+                    return; // ch:R21 窗口未创建/已销毁不入队
+                if (InvokeRequired)
+                {
+                    // ch:R21 头号嫌疑修复：轮询/写回线程直写 dataGridView1 单元格被
+                    // CheckForIllegalCrossThreadCalls=false 掩盖为控件状态累积损坏(配置窗越开越慢)，
+                    // 改为 BeginInvoke 封送到 UI 线程；调用方已有 Visible+250ms 门控，入队量有界
+                    BeginInvoke(new Action<int, int, object>(SetModbusGridValue), new object[] { col, row, value });
+                    return;
+                }
                 dataGridView1[col, row].Value = value;
             }
             catch (Exception ex) { new ErrorLog().WriteLog(ex.ToString()); }
@@ -1591,13 +1614,17 @@ namespace WindowsFormsApplication1
                                 int addr_start;
                                 if (!int.TryParse(par.Value[1], out addr_start)) { anyWriteFailed = true; MsgErroeLog.WriteLog("写回地址解析失败(保留pending):" + par.Value[1]); break; } // ch:P2 裸 Parse 改 TryParse
                                 string fmt = par.Value[4];
+                                int regLen; // ch:R21 写回长度截断：与 XieWuWriteOne 对齐，值数按通道登记长度 Math.Min 截断，防溢入相邻通道(多相机数据互串)
+                                if (!int.TryParse(par.Value[2], out regLen)) { anyWriteFailed = true; MsgErroeLog.WriteLog("写回通道长度解析失败(保留pending):" + par.Value[2]); break; } // ch:R21 与地址解析同款处理
 
                                 if (fmt == "int")
                                 {
                                     // 逗号分隔 → short数组, FC16批量写
                                     string[] parts = pat.Value[4].Split(new char[] { ',' }, StringSplitOptions.RemoveEmptyEntries);
-                                    short[] vals = new short[parts.Length];
-                                    for (int i = 0; i < parts.Length; i++)
+                                    int writeCount = Math.Min(parts.Length, regLen); // ch:R21 写回截断：值数按通道登记长度截断，与 XieWuWriteOne 对齐
+                                    if (writeCount < parts.Length) MsgErroeLog.WriteLog("写回超长截断 cam=" + pat.Key + " ch=" + par.Value[0] + " 值数=" + parts.Length + ">登记长度" + regLen); // ch:R21 仅截断时记一条
+                                    short[] vals = new short[writeCount];
+                                    for (int i = 0; i < writeCount; i++)
                                         vals[i] = (short)Math.Round(double.Parse(parts[i].Trim()));
                                     // 先尝试FC16批量写，失败则降级为FC06逐地址写
                                     OperateResult batchResult = busTcpClient.Write(addr_start.ToString(), vals);
@@ -1621,45 +1648,56 @@ namespace WindowsFormsApplication1
                                     {
                                         if (!gridUi) break;
                                         int xuanzhong_temp = addr_start - int.Parse(address_qishi.ToString()) + j;
+                                        if (xuanzhong_temp < 0 || !fins_data.ContainsKey(xuanzhong_temp)) continue; // ch:R21 网格越界守卫：PLC已写成功，仅跳过UI回写，防 KeyNotFound 被 catch 误判写回失败
                                         SetModbusGridValue(fins_data[xuanzhong_temp][0], fins_data[xuanzhong_temp][1], fins_temp);
                                     }
                                 }
                                 else if (fmt == "long")
                                 {
                                     string[] parts = pat.Value[4].Split(new char[] { ',' }, StringSplitOptions.RemoveEmptyEntries);
-                                    int[] vals = new int[parts.Length];
-                                    for (int i = 0; i < parts.Length; i++)
+                                    int valLen = Math.Max(1, regLen / 2); // ch:R21 long 占2寄存器
+                                    int writeCount = Math.Min(parts.Length, valLen); // ch:R21 写回截断，与 XieWuWriteOne 对齐
+                                    if (writeCount < parts.Length) MsgErroeLog.WriteLog("写回超长截断 cam=" + pat.Key + " ch=" + par.Value[0] + " 值数=" + parts.Length + ">登记长度" + regLen); // ch:R21 仅截断时记一条
+                                    int[] vals = new int[writeCount];
+                                    for (int i = 0; i < writeCount; i++)
                                         vals[i] = (int)Math.Round(double.Parse(parts[i].Trim()));
                                     if (!DemoUtils.WriteResultRenderOk(() => busTcpClient.Write(addr_start.ToString(), vals), addr_start.ToString(), out fins_temp)) anyWriteFailed = true; // ch:P2-④
                                     for (int j = 0; j < vals.Length * 2; j++)
                                     {
                                         if (!gridUi) break;
                                         int xuanzhong_temp = addr_start - int.Parse(address_qishi.ToString()) + j;
+                                        if (xuanzhong_temp < 0 || !fins_data.ContainsKey(xuanzhong_temp)) continue; // ch:R21 网格越界守卫，防 KeyNotFound 误判写回失败
                                         SetModbusGridValue(fins_data[xuanzhong_temp][0], fins_data[xuanzhong_temp][1], fins_temp);
                                     }
                                 }
                                 else if (fmt == "float")
                                 {
                                     string[] parts = pat.Value[4].Split(new char[] { ',' }, StringSplitOptions.RemoveEmptyEntries);
-                                    float[] vals = new float[parts.Length];
-                                    for (int i = 0; i < parts.Length; i++)
+                                    int valLen = Math.Max(1, regLen / 2); // ch:R21 float 占2寄存器
+                                    int writeCount = Math.Min(parts.Length, valLen); // ch:R21 写回截断，与 XieWuWriteOne 对齐
+                                    if (writeCount < parts.Length) MsgErroeLog.WriteLog("写回超长截断 cam=" + pat.Key + " ch=" + par.Value[0] + " 值数=" + parts.Length + ">登记长度" + regLen); // ch:R21 仅截断时记一条
+                                    float[] vals = new float[writeCount];
+                                    for (int i = 0; i < writeCount; i++)
                                         vals[i] = float.Parse(parts[i].Trim());
                                     if (!DemoUtils.WriteResultRenderOk(() => busTcpClient.Write(addr_start.ToString(), vals), addr_start.ToString(), out fins_temp)) anyWriteFailed = true; // ch:P2-④
                                     for (int j = 0; j < vals.Length * 2; j++)
                                     {
                                         if (!gridUi) break;
                                         int xuanzhong_temp = addr_start - int.Parse(address_qishi.ToString()) + j;
+                                        if (xuanzhong_temp < 0 || !fins_data.ContainsKey(xuanzhong_temp)) continue; // ch:R21 网格越界守卫，防 KeyNotFound 误判写回失败
                                         SetModbusGridValue(fins_data[xuanzhong_temp][0], fins_data[xuanzhong_temp][1], fins_temp);
                                     }
                                 }
                                 else if (fmt == "string")
                                 {
                                     string[] parts = pat.Value[4].Split(new char[] { ',' }, StringSplitOptions.RemoveEmptyEntries);
-                                    for (int j = 0; j < parts.Length; j++)
+                                    int writeCount = Math.Min(parts.Length, regLen); // ch:R21 string 每值占1寄存器，截断与 XieWuWriteOne 语义对齐
+                                    if (writeCount < parts.Length) MsgErroeLog.WriteLog("写回超长截断 cam=" + pat.Key + " ch=" + par.Value[0] + " 值数=" + parts.Length + ">登记长度" + regLen); // ch:R21 仅截断时记一条
+                                    for (int j = 0; j < writeCount; j++)
                                     {
                                         int xuanzhong_temp = addr_start - int.Parse(address_qishi.ToString()) + j;
                                         if (!DemoUtils.WriteResultRenderOk(() => busTcpClient.Write((addr_start + j).ToString(), parts[j].Trim()), (addr_start + j).ToString(), out fins_temp)) anyWriteFailed = true; // ch:P2-④ 逐寄存器聚合，避免末次成功掩盖前次失败
-                                        if (gridUi)
+                                        if (gridUi && xuanzhong_temp >= 0 && fins_data.ContainsKey(xuanzhong_temp)) // ch:R21 网格越界守卫，防 KeyNotFound 误判写回失败
                                             SetModbusGridValue(fins_data[xuanzhong_temp][0], fins_data[xuanzhong_temp][1], fins_temp);
                                     }
                                 }
@@ -2556,76 +2594,81 @@ namespace WindowsFormsApplication1
             }
         }
 
+        // ch:R21 反馈通道绑定唯一性：多相机绑同一反馈通道 = 同地址互相覆盖（多寄存器数据互串根因之一）
+        private bool _fankuiSyncing; // ch:R21 回退赋值时防重入
+
+        private static bool IsUnboundFankui(string v)
+        {
+            return string.IsNullOrEmpty(v) || v == "0" || v == "无"; // ch:R21 未绑定态（ini 默认 "0"）不参与查重
+        }
+
+        private void BindFankui(int cam, ComboBox cb, string iniSection)
+        {
+            if (!chushihua || _fankuiSyncing)
+                return;
+            string newText = cb.Text;
+            string oldText = camera_dic[cam][3];
+            if (newText != oldText && !IsUnboundFankui(newText))
+            {
+                foreach (var kv in camera_dic)
+                {
+                    if (kv.Key != cam && kv.Value[3] == newText)
+                    {
+                        MsgErroeLog.WriteLog("反馈通道重复绑定被拒: 通道[" + newText + "] 已被相机" + kv.Key + "占用，相机" + cam + " 回退为[" + oldText + "]"); // ch:R21 只记日志不写入
+                        _fankuiSyncing = true;
+                        try
+                        {
+                            // ch:R21 DropDownList 下 Text 可能不在 Items（如未绑定 "0"），用 SelectedIndex 回退（-1=清空）
+                            cb.SelectedIndex = cb.Items.IndexOf(oldText);
+                        }
+                        finally { _fankuiSyncing = false; }
+                        MessageBox.Show(this, "反馈通道「" + newText + "」已绑定到相机" + kv.Key + "，两相机绑同一通道会互相覆盖数据，请选择其它通道。", "绑定冲突", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                        return;
+                    }
+                }
+            }
+            camera_dic[cam][3] = newText;
+            wdini.WriteString(iniSection, "fankui", newText);
+        }
+
         private void comboBox6_SelectedIndexChanged(object sender, EventArgs e)
         {
-            if (chushihua)
-            {
-                camera_dic[1][3] = comboBox6.Text;
-                wdini.WriteString("c1_modbustcp", "fankui", comboBox6.Text);
-            }
+            if (chushihua) BindFankui(1, comboBox6, "c1_modbustcp");
         }
 
         private void comboBox7_SelectedIndexChanged(object sender, EventArgs e)
         {
-            if (chushihua)
-            {
-                camera_dic[2][3] = comboBox7.Text;
-                wdini.WriteString("c2_modbustcp", "fankui", comboBox7.Text);
-            }
+            if (chushihua) BindFankui(2, comboBox7, "c2_modbustcp");
         }
 
         private void comboBox9_SelectedIndexChanged(object sender, EventArgs e)
         {
-            if (chushihua)
-            {
-                camera_dic[3][3] = comboBox9.Text;
-                wdini.WriteString("c3_modbustcp", "fankui", comboBox9.Text);
-            }
+            if (chushihua) BindFankui(3, comboBox9, "c3_modbustcp");
         }
 
         private void comboBox11_SelectedIndexChanged(object sender, EventArgs e)
         {
-            if (chushihua)
-            {
-                camera_dic[4][3] = comboBox11.Text;
-                wdini.WriteString("c4_modbustcp", "fankui", comboBox11.Text);
-            }
+            if (chushihua) BindFankui(4, comboBox11, "c4_modbustcp");
         }
 
         private void comboBox13_SelectedIndexChanged(object sender, EventArgs e)
         {
-            if (chushihua)
-            {
-                camera_dic[5][3] = comboBox13.Text;
-                wdini.WriteString("c5_modbustcp", "fankui", comboBox13.Text);
-            }
+            if (chushihua) BindFankui(5, comboBox13, "c5_modbustcp");
         }
 
         private void comboBox15_SelectedIndexChanged(object sender, EventArgs e)
         {
-            if (chushihua)
-            {
-                camera_dic[6][3] = comboBox15.Text;
-                wdini.WriteString("c6_modbustcp", "fankui", comboBox15.Text);
-            }
+            if (chushihua) BindFankui(6, comboBox15, "c6_modbustcp");
         }
 
         private void comboBox17_SelectedIndexChanged(object sender, EventArgs e)
         {
-            if (chushihua)
-            {
-                camera_dic[7][3] = comboBox17.Text;
-                wdini.WriteString("c7_modbustcp", "fankui", comboBox17.Text);
-            }
+            if (chushihua) BindFankui(7, comboBox17, "c7_modbustcp");
         }
 
         private void comboBox19_SelectedIndexChanged(object sender, EventArgs e)
         {
-            if (chushihua)
-            {
-                camera_dic[8][3] = comboBox19.Text;
-                wdini.WriteString("c8_modbustcp", "fankui", comboBox19.Text);
-            }
+            if (chushihua) BindFankui(8, comboBox19, "c8_modbustcp");
         }
 
         private void textBox42_TextChanged(object sender, EventArgs e)
