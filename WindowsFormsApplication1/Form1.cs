@@ -318,6 +318,8 @@ namespace WindowsFormsApplication1
         private const int OutModbusRtu = 7;        // ModbusRTU（FormModbusRtu 配置窗）
         private volatile int _outputMode = OutAuto;
         private bool _outputModeSyncing;           // 防止程序赋值 SelectedIndex 与 SelectedIndexChanged 互相触发
+        // ch:R19 各 Modbus 数据路「首次触发」日志标志：切输出方式时复位(ApplyOutputMode 尾部)，触发一次记一条，定位 mode4 实际走哪条路
+        private volatile bool _logPathSerial, _logPathFrm3, _logPathMtcpWin;
 
         // ch:把选中的输出方式落到 8 个 job 的对应标志位，并同步旧的 4 组 CheckBox（单一数据源，避免两处各写一份）。
         //   mode<0(自动)时一律不动任何标志位，保持各开关原状。
@@ -368,6 +370,17 @@ namespace WindowsFormsApplication1
                 try { canshuIni.WriteString("camera", "output_mode", mode.ToString()); }
                 catch (Exception ex) { MsgErroeLog.WriteLog("输出方式保存失败:" + ex.Message); }
             }
+            _logPathSerial = _logPathFrm3 = _logPathMtcpWin = true; // ch:R19 切模式后各 Modbus 数据路首次触发各记一条，现场日志直接看出走了哪条路
+            try // ch:R19 记录三路决策状态与数据终端存在性：mode4 再遇无输出时，一行日志即可定位卡在哪一闸
+            {
+                string term;
+                try { lock (myjob1.blockLock) { term = " Outputs(serial=" + myjob1.block.Outputs.Contains("serial") + ",modbustcp=" + myjob1.block.Outputs.Contains("modbustcp") + ")"; } }
+                catch { term = " Outputs(未就绪)"; }
+                MsgErroeLog.WriteLog("输出方式=" + mode + " 状态: cfgWin(fins_en=" + modbustcp.fins_en + ",chushihua=" + modbustcp.chushihua
+                    + ") frm3(IsEnable=" + frm3.IsEnable + ",style=" + frm3.modbus_style + ",fn=" + frm3.gongnengma + ",xie=" + frm3.xie
+                    + ") job1(serial=" + myjob1.serial + ",modbustcp=" + myjob1.modbustcp + ")" + term);
+            }
+            catch (Exception ex) { MsgErroeLog.WriteLog("输出方式状态记录失败:" + ex.Message); }
         }
 
         private void cbOutputMode_SelectedIndexChanged(object sender, EventArgs e)
@@ -4492,7 +4505,7 @@ namespace WindowsFormsApplication1
                             lock (myjob.blockLock)
                             {
                             try { snapTcp = (outTcp && myjob.tcp) ? (faultThisFrame ? "999" : (myjob.block.Outputs.Contains("tcp") && myjob.block.Outputs["tcp"].Value != null ? myjob.block.Outputs["tcp"].Value.ToString() : "")) : ""; } catch { snapTcp = ""; } // ch:R13 只在本路真的会发时才读 Output（持 blockLock，关键路径上）
-                            try { snapSerial = (outSerial && myjob.serial) ? (faultThisFrame ? "999" : (myjob.block.Outputs.Contains("serial") && myjob.block.Outputs["serial"].Value != null ? myjob.block.Outputs["serial"].Value.ToString() : "")) : ""; } catch { snapSerial = ""; } // ch:R13
+                            try { snapSerial = ((outSerial && myjob.serial) || (outMode == OutModbusTcp && myjob.modbustcp)) ? (faultThisFrame ? "999" : (myjob.block.Outputs.Contains("serial") && myjob.block.Outputs["serial"].Value != null ? myjob.block.Outputs["serial"].Value.ToString() : "")) : ""; } catch { snapSerial = ""; } // ch:R13 + ch:R19 mode4 下数据若在 serial 终端也读出（见串口分支的 mode4 回退子句）
                             try { snapMtcp = (outMtcp && myjob.modbustcp) ? (faultThisFrame ? "999" : (myjob.block.Outputs.Contains("modbustcp") && myjob.block.Outputs["modbustcp"].Value != null ? myjob.block.Outputs["modbustcp"].Value.ToString() : "")) : ""; } catch { snapMtcp = ""; } // ch:R13
                             try { snapBuchang = (myjob.block.Outputs.Contains("buchang") && myjob.block.Outputs["buchang"].Value != null ? myjob.block.Outputs["buchang"].Value.ToString() : "0"); } catch { snapBuchang = "0"; }
                             try
@@ -4555,8 +4568,12 @@ namespace WindowsFormsApplication1
                                     catch (Exception ex) { MsgErroeLog.WriteLog("异常:" + ex.Message); }
                                 });
                             }
-                            if (outSerial && myjob.serial) // ch:P1 判断提到 Task.Run 外（串口关闭时不再每帧派发空 Task）；ch:R13 加输出方式互斥闸
+                            if ((outSerial && myjob.serial) // ch:P1 判断提到 Task.Run 外（串口关闭时不再每帧派发空 Task）；ch:R13 加输出方式互斥闸
+                                || (outMode == OutModbusTcp && myjob.modbustcp && snapSerial != "" // ch:R19 mode4 数据路回退：现场 Modbus 数据在 Outputs["serial"]、自动模式实际经串口分支的寄存器写子路径(frm3.mdcan)出数，mode4 原把它关死致静默
+                                && !(modbustcp.fins_en && modbustcp.chushihua)   //   配置窗活跃 → 让 4638(FormModbus) 独发
+                                && !(frm3.IsEnable && snapMtcp != "")))           //   frm3 标准路(4732)能产出 → 让 4732 独发；三路互斥必居其一。进入时 myjob.modbustcp 必真(4572 子闸)故只走寄存器写、绝不发原始串口文本
                             {
+                                if (_logPathSerial) { _logPathSerial = false; MsgErroeLog.WriteLog("Modbus数据路:串口分支寄存器子路径 mode=" + _outputMode + " myjob.modbustcp=" + myjob.modbustcp); } // ch:R19 每次切模式首次触发记一条
                                 Task.Run(() =>
                                 {
                                     try
@@ -4637,6 +4654,7 @@ namespace WindowsFormsApplication1
                             }
                             if ((outMtcpWin || outMtcp) && modbustcp.fins_en && modbustcp.chushihua) // ch:R13 输出方式互斥闸；mode4「ModbusTCP输出」=ModbusTCP 总闸：配置窗实现与 frm3 实现(见下方 outMtcp 分支)由 fins_en&&chushihua 二选一，原只认 outMtcpWin 导致 mode4 遇配置窗活跃时双闸全灭、静默不输出
                             {
+                                if (_logPathMtcpWin) { _logPathMtcpWin = false; MsgErroeLog.WriteLog("Modbus数据路:配置窗FormModbus mode=" + _outputMode); } // ch:R19 每次切模式首次触发记一条
                                 try
                                 {
                                     lock (myjob.blockLock) // ch:P2-① 检测线程读 Outputs 与 Run 互斥，避免并发访问非线程安全对象
@@ -4731,6 +4749,7 @@ namespace WindowsFormsApplication1
                             }
                             if (outMtcp && myjob.modbustcp && frm3.IsEnable && !(modbustcp.fins_en && modbustcp.chushihua)) // ch:R13 输出方式互斥闸
                             {
+                                if (_logPathFrm3) { _logPathFrm3 = false; MsgErroeLog.WriteLog("Modbus数据路:frm3标准路(4732) mode=" + _outputMode + " snapMtcp=" + (snapMtcp == "" ? "空" : "有")); } // ch:R19 每次切模式首次触发记一条
                                 Task.Run(() =>
 
                                {
@@ -4799,9 +4818,10 @@ namespace WindowsFormsApplication1
                                        }
                                        #endregion
                                    }
-                                   catch
+                                   catch (Exception ex)
                                    {
                                        myjob.modbustemp = false;
+                                       MsgErroeLog.WriteLog("ModbusTCP frm3分支(4732)写回异常 cam=" + myjob.path_number + ":" + ex.Message); // ch:R19 原静默吞异常，mode4 无输出时现场无法定位
                                    }
                                });
                             }
