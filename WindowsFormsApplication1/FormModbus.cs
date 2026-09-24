@@ -200,6 +200,8 @@ namespace WindowsFormsApplication1
 
             Language( Program.Language );
 
+            _fankuiDiag = wdini.ReadString("camera", "fankui_diag", "1").Replace("\0", "") != "0"; // ch:R23 反馈诊断日志开关(默认开，现场取证后可 ini 置0 关闭)
+
             fins_duxie = new Thread(new ThreadStart(Fins_duxie));
             fins_duxie.IsBackground = true;
             fins_duxie.Start(); // ch:恢复原版时序：轮询线程尽早启动（Load 后续异常不影响轮询）
@@ -1635,6 +1637,7 @@ namespace WindowsFormsApplication1
                                     short[] vals = new short[writeCount];
                                     for (int i = 0; i < writeCount; i++)
                                         vals[i] = (short)Math.Round(double.Parse(parts[i].Trim()));
+                                    FankuiDiagLog(pat.Key, "普通写解析", "addr=" + addr_start + " vals=" + string.Join("/", Array.ConvertAll(vals, v => v.ToString()))); // ch:R23 环② 真正写入 FC16 的寄存器值
                                     // 先尝试FC16批量写，失败则降级为FC06逐地址写
                                     OperateResult batchResult = busTcpClient.Write(addr_start.ToString(), vals);
                                     if (!batchResult.IsSuccess && vals.Length > 1)
@@ -1872,6 +1875,32 @@ namespace WindowsFormsApplication1
             }
         }
 
+        // ch:R23 反馈发送诊断：三环裁决「相机1第2位 实际0/PLC收-32768、相机2第2,3位恒0」——
+        //   ①原始串(视觉 ToolBlock 输出) → ②解析后(我们真正写入 FC16 的寄存器值) → ③PLC 读回，
+        //   逐环对齐即可定位问题在视觉输出、解析换算、还是 PLC 侧/第二写入者。
+        //   变化触发 + 每相机每类 10 秒节流防刷屏；ini camera/fankui_diag=0 关闭(默认开)。
+        private bool _fankuiDiag = true;
+        private readonly object _fankuiDiagLock = new object();
+        private readonly System.Collections.Generic.Dictionary<string, string> _fankuiDiagLast = new System.Collections.Generic.Dictionary<string, string>();
+        private readonly System.Collections.Generic.Dictionary<string, int> _fankuiDiagTick = new System.Collections.Generic.Dictionary<string, int>();
+
+        private void FankuiDiagLog(int cam, string tag, string text)
+        {
+            if (!_fankuiDiag) return;
+            string key = cam + "|" + tag;
+            lock (_fankuiDiagLock)
+            {
+                string prev;
+                int lastTick;
+                bool changed = !_fankuiDiagLast.TryGetValue(key, out prev) || prev != text;
+                bool due = !_fankuiDiagTick.TryGetValue(key, out lastTick) || unchecked(Environment.TickCount - lastTick) >= 10000;
+                if (!(changed && due)) return;
+                _fankuiDiagLast[key] = text;
+                _fankuiDiagTick[key] = Environment.TickCount;
+            }
+            MsgErroeLog.WriteLog("反馈诊断 cam=" + cam + " " + tag + "=" + text);
+        }
+
         public void WriteCameraResult(int camIndex, string value)
         {
             try
@@ -1886,6 +1915,7 @@ namespace WindowsFormsApplication1
                     if (!camera_dic.ContainsKey(camIndex)) return;
                     camera_dic[camIndex][4] = value;
                     camera_dic[camIndex][5] = camera_dic[camIndex][3];
+                    FankuiDiagLog(camIndex, "原始串", value); // ch:R23 环① 视觉 ToolBlock 输出的原样值串
                     if (camIndex >= 1 && camIndex <= fins_xie.Length)
                         fins_xie[camIndex - 1] = true;
                     if (useXieWu)
@@ -2062,7 +2092,11 @@ namespace WindowsFormsApplication1
                         if (!double.TryParse(parts[i].Trim(), out d)) { wr = new OperateResult { Message = "数值解析失败:" + parts[i] }; break; }
                         vals[i] = (short)Math.Round(d);
                     }
-                    if (wr == null) wr = busTcpClient.Write(addrText, vals);
+                    if (wr == null)
+                    {
+                        FankuiDiagLog(camIndex, "极速写解析", "addr=" + addrText + " vals=" + string.Join("/", Array.ConvertAll(vals, v => v.ToString()))); // ch:R23 环② 真正写入 FC16 的寄存器值(仅实际发起写时)
+                        wr = busTcpClient.Write(addrText, vals);
+                    }
                 }
                 else if (fmt == "long")
                 {
