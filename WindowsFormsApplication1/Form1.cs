@@ -11118,6 +11118,50 @@ namespace WindowsFormsApplication1
             this.Controls.Add(_liveRecordRenderer);
         }
 
+        private int _renderHandleFailLastLogMs;
+
+        // ch:R29 强制创建隐藏栅格器窗口句柄：WinForms 对 Visible=false 的控件 CreateControl() 是空操作(句柄永不创建)，
+        //   而 CogRecordDisplay 是 AxHost 宿主——无句柄时任何属性置位必抛 InvalidActiveXStateException
+        //   (现场原文「此时无法调用“DrawingEnabled”的属性 set」)，短等/重试永远无效。本机 VisionPro 复现实验：
+        //   无句柄阶段 60/60 置位全失败、400ms 扩展等待零恢复(=生产 v1.3.22/23 现象)；反射 CreateHandle 强制建句柄后
+        //   50/50 首拍零异常、125 次抓图全部干净(无混帧/黑条)、record 图 184 拍全稳定。句柄建后隐藏不销毁，
+        //   后续置位/渲染/抓图全程正常。反射不可用时退回「短暂可见→隐藏」切换(同实验验证句柄创建后隐藏保留)；
+        //   仍失败按 10 秒节流记日志，供现场 grep「句柄创建失败(R29)」与忙异常分型。
+        private void EnsureLiveRecordHandle()
+        {
+            if (_liveRecordRenderer == null)
+                return;
+            if (_liveRecordRenderer.IsHandleCreated)
+                return;
+            try
+            {
+                System.Reflection.MethodInfo mi = typeof(Control).GetMethod(
+                    "CreateHandle",
+                    System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic);
+                if (mi != null)
+                    mi.Invoke(_liveRecordRenderer, null);
+            }
+            catch (Exception) { /* ch:句柄已存在/控件状态异常等，走下方可见性切换兜底 */ }
+            if (_liveRecordRenderer.IsHandleCreated == false)
+            {
+                try
+                {
+                    _liveRecordRenderer.Visible = true;
+                    _liveRecordRenderer.Visible = false;
+                }
+                catch (Exception) { }
+            }
+            if (_liveRecordRenderer.IsHandleCreated == false)
+            {
+                int now = Environment.TickCount;
+                if (unchecked(now - _renderHandleFailLastLogMs) >= 10000)
+                {
+                    _renderHandleFailLastLogMs = now;
+                    new ErrorLog().WriteLog("隐藏栅格器句柄创建失败(R29)，栅格化将全量转直读兜底");
+                }
+            }
+        }
+
         private void InitRecordRenderer()
         {
             InitLiveRecordRenderer();
@@ -11235,10 +11279,10 @@ namespace WindowsFormsApplication1
             if (rec == null)
                 return null;
             InitLiveRecordRenderer();
-            if (_liveRecordRenderer.IsHandleCreated == false)
-            {
-                try { _liveRecordRenderer.CreateControl(); } catch (Exception ex) { new ErrorLog().WriteLog(ex.ToString()); }
-            }
+            // ch:R29 句柄强制创建(替换上面旧的 CreateControl 空操作)：Visible=false 控件上 CreateControl 不建句柄，
+            //   无句柄的 AxHost 宿主置位必抛「此时无法调用“DrawingEnabled”的属性 set」且等待永远无效——
+            //   现场栅格化 100% 失败、每拍落直读兜底、「渲染置位连续忙」刷屏皆源于此(本机复现实验已实锤)
+            EnsureLiveRecordHandle();
             int w = viewSize.Width > 8 ? viewSize.Width : 64;
             int h = viewSize.Height > 8 ? viewSize.Height : 64;
             _liveRecordRenderer.Width = w;
