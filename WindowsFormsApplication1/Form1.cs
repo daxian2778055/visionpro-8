@@ -407,6 +407,23 @@ namespace WindowsFormsApplication1
             catch (Exception ex) { MsgErroeLog.WriteLog("显示频率设置失败:" + ex.Message); }
         }
 
+        // ch:R25 性能统计打印开关：chkPerfPrint(输出方式行右侧) —— 开=异常才打(丢帧率≥1%/占用≥50%/检测≥35ms)+10分钟心跳，
+        //   关=完全不打；ini camera/perf_print 默认1。只控制日志落不落盘，埋点计数与窗口复位照常，采集/检测/输出一律不碰
+        private bool _perfPrintSyncing;
+        private volatile bool _perfPrintOn = true;
+        private long _perfLastPrintMs = 0; // ch:R25 上次落日志时刻(_perfSw 毫秒)，心跳判定用；仅在汇总单线程(_perfReporting 闩内)读写
+        private void chkPerfPrint_CheckedChanged(object sender, EventArgs e)
+        {
+            try
+            {
+                _perfPrintOn = chkPerfPrint.Checked;
+                if (_perfPrintSyncing) return; // ch:启动回填 ini 引发的回调：值已在回填处设好，避免重复落盘(同 _displayHzSyncing 手法)
+                try { canshuIni.WriteString("camera", "perf_print", chkPerfPrint.Checked ? "1" : "0"); }
+                catch (Exception ex) { MsgErroeLog.WriteLog("性能打印开关保存失败:" + ex.Message); }
+            }
+            catch (Exception ex) { MsgErroeLog.WriteLog("性能打印开关设置失败:" + ex.Message); }
+        }
+
         // ch:递归设置菜单项颜色：一级白字（深色顶栏），下拉子项黑字（浅色面板）
         private void StyleMenuItem(ToolStripMenuItem item, bool white)
         {
@@ -2513,6 +2530,14 @@ namespace WindowsFormsApplication1
                 try { numDisplayHz.Value = hzIni; }
                 finally { _displayHzSyncing = false; }
                 OcxMinIntervalMs = 1000 / hzIni;
+
+                // ch:R25 读取性能统计打印开关；键缺失/非法 → 默认开(1)，与升级前(恒打印)行为衔接
+                string perfPrintIni = canshuIni.ReadString("camera", "perf_print", "1").Replace("\0", "");
+                bool perfPrintOnIni = perfPrintIni != "0";
+                _perfPrintSyncing = true;
+                try { chkPerfPrint.Checked = perfPrintOnIni; }
+                finally { _perfPrintSyncing = false; }
+                _perfPrintOn = perfPrintOnIni;
 
                 decimal.TryParse(canshuIni.ReadString("time", "IOyanshi", "0"), out devalue);
                 devalue = ClampToUpDown(numericUpDown5, devalue); // ch:P1-5
@@ -11993,6 +12018,7 @@ namespace WindowsFormsApplication1
                 System.Text.StringBuilder sb = new System.Text.StringBuilder();
                 sb.Append("[性能统计] 窗口").Append((span / 1000.0).ToString("F1")).Append("秒");
                 int totalGet = 0, totalDrop = 0, anyBusy = 0;
+                bool anySaturate50 = false, anySlow35 = false; // ch:R25 异常判定：任一路占用≥50% / 任一路检测均耗时≥35ms(帧预算40ms)
                 for (int i = 0; i < 8; i++)
                 {
                     int cnt = _perfCbCount[i];
@@ -12009,6 +12035,8 @@ namespace WindowsFormsApplication1
                     double busy = (_perfCbTicks[i] / freq) * 1000.0 / span * 100.0;
                     if (busy >= 80.0)
                         anyBusy++;
+                    if (busy >= 50.0) anySaturate50 = true; // ch:R25
+                    if (runMs >= 35.0) anySlow35 = true;    // ch:R25
                     sb.Append(" | 相机").Append(i + 1)
                       .Append(" 收").Append(cnt)
                       .Append(" 丢").Append(drop)
@@ -12027,7 +12055,21 @@ namespace WindowsFormsApplication1
                 sb.Append(" | 合计收").Append(totalGet).Append(" 丢").Append(totalDrop);
                 if (anyBusy > 0)
                     sb.Append(" [警告:").Append(anyBusy).Append("路取流线程占用>=80%，已达采集瓶颈]");
-                MsgErroeLog.WriteLog(sb.ToString());
+                // ch:R25 打印规则：开关开=异常才打(丢帧率≥1%/占用≥50%/检测≥35ms)+10分钟心跳；开关关=完全不打。
+                //   计数器复位在上面循环里无条件执行、窗口起点照常复位——开关只决定落不落日志，不影响统计本身与告警字段
+                string whyR25 = "";
+                if (totalGet > 0 && totalDrop * 100 >= totalGet)
+                    whyR25 = "丢帧率" + ((double)totalDrop * 100.0 / totalGet).ToString("F1") + "%";
+                if (anySaturate50) whyR25 += (whyR25.Length > 0 ? "|" : "") + "占用>=50%";
+                if (anySlow35) whyR25 += (whyR25.Length > 0 ? "|" : "") + "检测>=35ms";
+                bool anomalyR25 = whyR25.Length > 0;
+                bool heartbeatR25 = !anomalyR25 && now - _perfLastPrintMs >= 600000;
+                if (_perfPrintOn && (anomalyR25 || heartbeatR25))
+                {
+                    sb.Append(anomalyR25 ? " [异常:" + whyR25 + "]" : " [心跳]");
+                    MsgErroeLog.WriteLog(sb.ToString());
+                    _perfLastPrintMs = now;
+                }
                 System.Threading.Interlocked.Exchange(ref _perfWinStart, now);
             }
             catch (Exception ex) { new ErrorLog().WriteLog(ex.ToString()); }

@@ -103,6 +103,7 @@
             this.labelOutputMode = new System.Windows.Forms.Label();
             this.cbOutputMode = new System.Windows.Forms.ComboBox();
             this.labelDisplayHz = new System.Windows.Forms.Label();
+            this.chkPerfPrint = new System.Windows.Forms.CheckBox();
             this.numDisplayHz = new System.Windows.Forms.NumericUpDown();
             this.checkBox2 = new System.Windows.Forms.CheckBox();
             this.checkBox1 = new System.Windows.Forms.CheckBox();
@@ -1609,6 +1610,18 @@
             0});
             this.numDisplayHz.ValueChanged += new System.EventHandler(this.numDisplayHz_ValueChanged);
             // 
+            // chkPerfPrint（ch:R25 性能统计打印开关：开=异常才打+10分钟心跳，关=完全不打）
+            //   同 labelDisplayHz/numDisplayHz 手法：WinForms 原生控件、代码显式布局、不写 resx，设计器可直接拖改；
+            //   y=351 行 x=390 起（numDisplayHz 止于382，右侧至页宽581 无占用，AutoScroll 下滚可见）
+            // 
+            this.chkPerfPrint.AutoSize = true;
+            this.chkPerfPrint.Location = new System.Drawing.Point(390, 351);
+            this.chkPerfPrint.Name = "chkPerfPrint";
+            this.chkPerfPrint.TabIndex = 1004;
+            this.chkPerfPrint.Text = "性能统计打印";
+            this.chkPerfPrint.UseVisualStyleBackColor = true;
+            this.chkPerfPrint.CheckedChanged += new System.EventHandler(this.chkPerfPrint_CheckedChanged);
+            // 
             // tabPage5
             // 
             resources.ApplyResources(this.tabPage5, "tabPage5");
@@ -1617,6 +1630,7 @@
             this.tabPage5.Controls.Add(this.cbOutputMode);
             this.tabPage5.Controls.Add(this.labelDisplayHz);
             this.tabPage5.Controls.Add(this.numDisplayHz);
+            this.tabPage5.Controls.Add(this.chkPerfPrint);
             this.tabPage5.Controls.Add(this.label48);
             this.tabPage5.Controls.Add(this.numericUpDown5);
             this.tabPage5.Controls.Add(this.label111);
@@ -7238,6 +7252,7 @@
         private System.Windows.Forms.ComboBox cbOutputMode;
         private System.Windows.Forms.Label labelDisplayHz;
         private System.Windows.Forms.NumericUpDown numDisplayHz;
+        private System.Windows.Forms.CheckBox chkPerfPrint;
         private System.Windows.Forms.Button button6;
         private System.Windows.Forms.Button button14;
         private System.Windows.Forms.Button button15;
