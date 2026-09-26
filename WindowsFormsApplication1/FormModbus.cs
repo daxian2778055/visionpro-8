@@ -200,7 +200,10 @@ namespace WindowsFormsApplication1
 
             Language( Program.Language );
 
-            _fankuiDiag = wdini.ReadString("camera", "fankui_diag", "1").Replace("\0", "") != "0"; // ch:R23 反馈诊断日志开关(默认开，现场取证后可 ini 置0 关闭)
+            // ch:R23 反馈诊断日志开关 → R26 默认关闭：现场已测试定案(-32768/恒0 属客户侧改写，非我方问题)，取证完成。
+            //   判定由「非0即开」收紧为「仅显式=1才开」——键缺失/非法一律静默，现场 test.ini 无需改动即生效；
+            //   需再取证时在 test.ini [camera] fankui_diag=1 重开(若现场已显式存在 =1 需改为0或删该行)。
+            _fankuiDiag = wdini.ReadString("camera", "fankui_diag", "0").Replace("\0", "") == "1";
 
             fins_duxie = new Thread(new ThreadStart(Fins_duxie));
             fins_duxie.IsBackground = true;
@@ -1884,8 +1887,9 @@ namespace WindowsFormsApplication1
         // ch:R23 反馈发送诊断：三环裁决「相机1第2位 实际0/PLC收-32768、相机2第2,3位恒0」——
         //   ①原始串(视觉 ToolBlock 输出) → ②解析后(我们真正写入 FC16 的寄存器值) → ③PLC 读回，
         //   逐环对齐即可定位问题在视觉输出、解析换算、还是 PLC 侧/第二写入者。
-        //   变化触发 + 每相机每类 10 秒节流防刷屏；ini camera/fankui_diag=0 关闭(默认开)。
-        private bool _fankuiDiag = true;
+        //   变化触发 + 每相机每类 10 秒节流防刷屏；ini camera/fankui_diag=1 打开。
+        //   ch:R26 默认关闭(现场取证完成，坏值定案为客户侧改写)：关闭态 FankuiDiagLogByKey 首行早返回，零锁零写开销。
+        private bool _fankuiDiag = false;
         private readonly object _fankuiDiagLock = new object();
         private readonly System.Collections.Generic.Dictionary<string, string> _fankuiDiagLast = new System.Collections.Generic.Dictionary<string, string>();
         private readonly System.Collections.Generic.Dictionary<string, int> _fankuiDiagTick = new System.Collections.Generic.Dictionary<string, int>();
