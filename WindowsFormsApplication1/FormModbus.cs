@@ -1480,7 +1480,10 @@ namespace WindowsFormsApplication1
 
                                                 xuanzhong_temp = int.Parse(par.Value[1]) - int.Parse(address_qishi.ToString()) + j;
                                                 // 读取short变量
-                                                DemoUtils.ReadResultRender1(busTcpClient.ReadInt16((int.Parse(par.Value[1]) + j).ToString()), (int.Parse(par.Value[1]) + j).ToString(), out fins_temp);
+                                                string addrRd = (int.Parse(par.Value[1]) + j).ToString(); // ch:R24 地址只算一次
+                                                OperateResult<short> rdR24 = busTcpClient.ReadInt16(addrRd);
+                                                DemoUtils.ReadResultRender1(rdR24, addrRd, out fins_temp);
+                                                FankuiDiagLogByKey("读回|" + addrRd, "反馈诊断 读回 addr=" + addrRd + " val=" + (rdR24.IsSuccess ? rdR24.Content.ToString() : "读失败")); // ch:R24 环④ 线上寄存器原值，与环②发出值同日志时间轴夹击改写时刻
                                                 if (gridUi && xuanzhong_temp >= 0 && xuanzhong_temp < 50)
                                                     SetModbusGridValue(fins_data[int.Parse(xuanzhong_temp.ToString())][0], fins_data[int.Parse(xuanzhong_temp.ToString())][1], fins_temp);
                                                 shuju_temp += GetMiddleValue(fins_temp, " ", "\r");
@@ -1673,6 +1676,7 @@ namespace WindowsFormsApplication1
                                     int[] vals = new int[writeCount];
                                     for (int i = 0; i < writeCount; i++)
                                         vals[i] = (int)Math.Round(double.Parse(parts[i].Trim()));
+                                    FankuiDiagLog(pat.Key, "普通写解析", "addr=" + addr_start + " vals=" + JoinHex32(vals)); // ch:R24 环② long 分支补记(带位HEX，重叠通道覆盖可当场识别)
                                     if (!DemoUtils.WriteResultRenderOk(() => busTcpClient.Write(addr_start.ToString(), vals), addr_start.ToString(), out fins_temp)) anyWriteFailed = true; // ch:P2-④
                                     for (int j = 0; j < vals.Length * 2; j++)
                                     {
@@ -1691,6 +1695,7 @@ namespace WindowsFormsApplication1
                                     float[] vals = new float[writeCount];
                                     for (int i = 0; i < writeCount; i++)
                                         vals[i] = float.Parse(parts[i].Trim());
+                                    FankuiDiagLog(pat.Key, "普通写解析", "addr=" + addr_start + " vals=" + JoinHexF(vals)); // ch:R24 环② float 分支补记(带位HEX，float位模式可含0x80)
                                     if (!DemoUtils.WriteResultRenderOk(() => busTcpClient.Write(addr_start.ToString(), vals), addr_start.ToString(), out fins_temp)) anyWriteFailed = true; // ch:P2-④
                                     for (int j = 0; j < vals.Length * 2; j++)
                                     {
@@ -1705,6 +1710,7 @@ namespace WindowsFormsApplication1
                                     string[] parts = pat.Value[4].Split(new char[] { ',' }, StringSplitOptions.RemoveEmptyEntries);
                                     int writeCount = Math.Min(parts.Length, regLen); // ch:R21 string 每值占1寄存器，截断与 XieWuWriteOne 语义对齐
                                     if (writeCount < parts.Length) MsgErroeLog.WriteLog("写回超长截断 cam=" + pat.Key + " ch=" + par.Value[0] + " 值数=" + parts.Length + ">登记长度" + regLen); // ch:R21 仅截断时记一条
+                                    FankuiDiagLog(pat.Key, "普通写解析", "addr=" + addr_start + " vals=" + string.Join("/", parts, 0, Math.Min(writeCount, parts.Length))); // ch:R24 环② string 分支补记(截断后真正写入部分)
                                     for (int j = 0; j < writeCount; j++)
                                     {
                                         int xuanzhong_temp = addr_start - int.Parse(address_qishi.ToString()) + j;
@@ -1886,19 +1892,40 @@ namespace WindowsFormsApplication1
 
         private void FankuiDiagLog(int cam, string tag, string text)
         {
+            FankuiDiagLogByKey(cam + "|" + tag, "反馈诊断 cam=" + cam + " " + tag + "=" + text);
+        }
+
+        // ch:R24 任意 key(如「读回|1101」)登记的同款限频日志：变化触发 + 每键 10 秒节流，供环④轮询读回复用
+        private void FankuiDiagLogByKey(string key, string message)
+        {
             if (!_fankuiDiag) return;
-            string key = cam + "|" + tag;
             lock (_fankuiDiagLock)
             {
                 string prev;
                 int lastTick;
-                bool changed = !_fankuiDiagLast.TryGetValue(key, out prev) || prev != text;
+                bool changed = !_fankuiDiagLast.TryGetValue(key, out prev) || prev != message;
                 bool due = !_fankuiDiagTick.TryGetValue(key, out lastTick) || unchecked(Environment.TickCount - lastTick) >= 10000;
                 if (!(changed && due)) return;
-                _fankuiDiagLast[key] = text;
+                _fankuiDiagLast[key] = message;
                 _fankuiDiagTick[key] = Environment.TickCount;
             }
-            MsgErroeLog.WriteLog("反馈诊断 cam=" + cam + " " + tag + "=" + text);
+            MsgErroeLog.WriteLog(message);
+        }
+
+        // ch:R24 long 写出值格式化：十进制(32位HEX)，位型可直接判有无 0x80
+        private static string JoinHex32(int[] vs)
+        {
+            string s = "";
+            for (int i = 0; i < vs.Length; i++) s += (i > 0 ? "/" : "") + vs[i] + "(0x" + vs[i].ToString("X8") + ")";
+            return s;
+        }
+
+        // ch:R24 float 写出值格式化：十进制(原始位HEX)，float 位模式可能含 0x80 字节
+        private static string JoinHexF(float[] vs)
+        {
+            string s = "";
+            for (int i = 0; i < vs.Length; i++) s += (i > 0 ? "/" : "") + vs[i] + "(0x" + BitConverter.ToInt32(BitConverter.GetBytes(vs[i]), 0).ToString("X8") + ")";
+            return s;
         }
 
         public void WriteCameraResult(int camIndex, string value)
@@ -2109,7 +2136,11 @@ namespace WindowsFormsApplication1
                         if (!double.TryParse(parts[i].Trim(), out d)) { wr = new OperateResult { Message = "数值解析失败:" + parts[i] }; break; }
                         vals[i] = (int)Math.Round(d);
                     }
-                    if (wr == null) wr = busTcpClient.Write(addrText, vals);
+                    if (wr == null)
+                    {
+                        FankuiDiagLog(camIndex, "极速写解析", "addr=" + addrText + " vals=" + JoinHex32(vals)); // ch:R24 环② 极速写 long 分支补记(带位HEX)
+                        wr = busTcpClient.Write(addrText, vals);
+                    }
                 }
                 else if (fmt == "float")
                 {
@@ -2122,7 +2153,11 @@ namespace WindowsFormsApplication1
                         if (!float.TryParse(parts[i].Trim(), out f)) { wr = new OperateResult { Message = "数值解析失败:" + parts[i] }; break; }
                         vals[i] = f;
                     }
-                    if (wr == null) wr = busTcpClient.Write(addrText, vals);
+                    if (wr == null)
+                    {
+                        FankuiDiagLog(camIndex, "极速写解析", "addr=" + addrText + " vals=" + JoinHexF(vals)); // ch:R24 环② 极速写 float 分支补记(位模式可含0x80)
+                        wr = busTcpClient.Write(addrText, vals);
+                    }
                 }
                 else
                 {
