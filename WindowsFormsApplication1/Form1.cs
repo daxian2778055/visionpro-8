@@ -11120,6 +11120,40 @@ namespace WindowsFormsApplication1
 
         private int _renderHandleFailLastLogMs;
 
+        // ch:R30 帧来源取证计数(全部 UI 线程读写)：现场反馈仍偶发撕裂+黑图，需先分型再动刀——
+        //   每个上屏位图的来源就地累计，LogFrameSourceHeartbeat 按节流打印，与撕裂截图时间对齐即知该帧从哪条路来：
+        //   栅格快路径/校验后 在涨=栅格化已生效(残余竞态方向)；直读兜底/置位忙 在涨=栅格失败方向；
+        //   句柄失败 在涨=建句柄在客户机失败(grep R29)；原图 在涨=当前为原图模式；无帧=没更新(画面是旧帧)。
+        private int _fbRasterFast;     // 栅格化·快路径(1 抓即净、未经历忙)
+        private int _fbRasterVerified; // 栅格化·校验/一致干净对后采用
+        private int _fbFallback;       // 直读兜底(record 主图)上屏
+        private int _fbApplyFail;      // 置位忙重试 5 轮耗尽(转兜底)
+        private int _fbHandleFail;     // 隐藏栅格器句柄创建失败
+        private int _fbNoFrame;        // 无位图产出(画面未更新)
+        private int _fbRaw;            // 原图模式上屏
+        private int _fbLastPrintMs;
+        private int _fbPrevBadSum;
+
+        // ch:R30 帧来源心跳：有异常(兜底/置位忙/句柄失败/无帧 有新增)按 10 秒节流打印、否则 5 分钟一条基线；
+        //   计数为累计值，连续两条相减即得各路径速率。挂 KickOcxPaint UI 入口，显示空闲时自然静默。
+        private void LogFrameSourceHeartbeat()
+        {
+            int now = Environment.TickCount;
+            int bad = _fbFallback + _fbApplyFail + _fbHandleFail + _fbNoFrame;
+            int interval = bad != _fbPrevBadSum ? 10000 : 300000;
+            if (unchecked(now - _fbLastPrintMs) < interval)
+                return;
+            _fbLastPrintMs = now;
+            _fbPrevBadSum = bad;
+            new ErrorLog().WriteLog("帧来源心跳(R30,累计): 栅格快路径=" + _fbRasterFast
+                + " 校验后=" + _fbRasterVerified
+                + " 直读兜底=" + _fbFallback
+                + " 置位忙=" + _fbApplyFail
+                + " 句柄失败=" + _fbHandleFail
+                + " 无帧=" + _fbNoFrame
+                + " 原图=" + _fbRaw);
+        }
+
         // ch:R29 强制创建隐藏栅格器窗口句柄：WinForms 对 Visible=false 的控件 CreateControl() 是空操作(句柄永不创建)，
         //   而 CogRecordDisplay 是 AxHost 宿主——无句柄时任何属性置位必抛 InvalidActiveXStateException
         //   (现场原文「此时无法调用“DrawingEnabled”的属性 set」)，短等/重试永远无效。本机 VisionPro 复现实验：
@@ -11153,6 +11187,7 @@ namespace WindowsFormsApplication1
             }
             if (_liveRecordRenderer.IsHandleCreated == false)
             {
+                _fbHandleFail++; // ch:R30 计数
                 int now = Environment.TickCount;
                 if (unchecked(now - _renderHandleFailLastLogMs) >= 10000)
                 {
@@ -11301,6 +11336,7 @@ namespace WindowsFormsApplication1
                     if (stable != null)
                         return stable;
                 }
+                else _fbApplyFail++; // ch:R30 置位忙 5 轮耗尽计数(随后落直读兜底)
             }
             catch (Exception ex) { new ErrorLog().WriteLog(ex.ToString()); }
             finally
@@ -11319,7 +11355,11 @@ namespace WindowsFormsApplication1
             LogRenderFallbackThrottled();
             ICogImage img = TryGetRecordImage(rec);
             if (img == null)
+            {
+                _fbNoFrame++; // ch:R30 无帧计数(画面未更新，屏上是旧帧)
                 return null;
+            }
+            _fbFallback++; // ch:R30 直读兜底上屏计数
             return DownscaleToBox(CopyCogImageToBitmap(img), viewSize);
         }
 
@@ -11430,7 +11470,10 @@ namespace WindowsFormsApplication1
                 return null;
             bool prevSuspect = DiagnoseIsSuspect(prev);
             if (!prevSuspect && !confirmStale)
+            {
+                _fbRasterFast++; // ch:R30 快路径上屏计数
                 return prev; // ch:常规快路径(未经历渲染忙+诊断干净)，与旧实现同成本
+            }
             for (int attempt = 0; attempt < 3; attempt++)
             {
                 Bitmap next = CaptureLiveRecord(true);
@@ -11444,6 +11487,7 @@ namespace WindowsFormsApplication1
                         if (BitmapBytesEqual(prev, next))
                         {
                             prev.Dispose();
+                            _fbRasterVerified++; // ch:R30 校验后上屏计数
                             return next; // ch:一致的干净对 ✓ 完成度确认达成
                         }
                         prev.Dispose();
@@ -11453,6 +11497,7 @@ namespace WindowsFormsApplication1
                     if (!confirmStale)
                     {
                         prev.Dispose();
+                        _fbRasterVerified++; // ch:R30 校验后上屏计数
                         return next; // ch:常规拍：可疑帧等到干净帧即采用
                     }
                     prev.Dispose();
@@ -11926,6 +11971,7 @@ namespace WindowsFormsApplication1
                 }
                 return;
             }
+            LogFrameSourceHeartbeat(); // ch:R30 帧来源心跳(节流打印，挂在每次 UI 入口)
             // ch:R15 上屏总节拍收口：直接投递(Queue*Display→Kick)、续排(QueueNextOcxPaint/FinishOcxPaint
             //   直连)、定时器三条入口都从这里过 —— 旧实现只有定时器路径有节流，直连路径可以绕过，
             //   把全分辨率 ToBitmap 打到 60~100 次/秒。到点前不开新一拍，改为排定时器(只丢刷新率，
@@ -11980,7 +12026,10 @@ namespace WindowsFormsApplication1
                 }
                 Bitmap bmp = null;
                 if (rawImg != null)
+                {
                     bmp = DownscaleToBox(CopyCogImageToBitmap(rawImg), box.ClientSize); // ch:R15 原图先等比缩到框尺寸
+                    if (bmp != null) _fbRaw++; // ch:R30 原图上屏计数
+                }
                 else
                     bmp = RasterizeRecordToBitmap(rec, box.ClientSize);
                 if (bmp != null)
