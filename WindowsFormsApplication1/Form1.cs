@@ -11243,7 +11243,6 @@ namespace WindowsFormsApplication1
             int h = viewSize.Height > 8 ? viewSize.Height : 64;
             _liveRecordRenderer.Width = w;
             _liveRecordRenderer.Height = h;
-            Image src = null;
             try
             {
                 _liveRecordRenderer.DrawingEnabled = false;
@@ -11251,33 +11250,227 @@ namespace WindowsFormsApplication1
                 _liveRecordRenderer.BackColor = Color.FromArgb(255, 60, 60, 60);
                 _liveRecordRenderer.DrawingEnabled = true;
                 _liveRecordRenderer.Fit(true);
-                src = _liveRecordRenderer.CreateContentBitmap(CogDisplayContentBitmapConstants.Display, null, 0);
-                if (src != null && src.Width > 1 && src.Height > 1)
-                {
-                    // ch:P0 去掉整幅像素的多余拷贝：CreateContentBitmap 每次都返回一张全新位图，
-                    //   直接交出所有权并把 src 置空，让 finally 不再 Dispose（调用方 SetPictureBoxImage 负责释放）。
-                    Bitmap own = src as Bitmap;
-                    if (own != null)
-                    {
-                        src = null;
-                        return own;
-                    }
-                    return new Bitmap(src); // ch:非 Bitmap 的 Image 兜底，仍拷贝一次，由 finally 负责 Dispose
-                }
+                // ch:R27 抓图 + 完成度校验（详见 CaptureStableRecordBitmap）：正常帧 1 次抓图即交出所有权
+                Bitmap stable = CaptureStableRecordBitmap();
+                if (stable != null)
+                    return stable;
             }
             catch (Exception ex) { new ErrorLog().WriteLog(ex.ToString()); }
             finally
             {
                 try { _liveRecordRenderer.Record = null; } catch (Exception ex) { new ErrorLog().WriteLog(ex.ToString()); }
+            }
+            // ch:R27 终端兜底：栅格产出不可信（近黑/3 次仍不稳/抓图失败/异常）→ 直读 record 主图像素——
+            //   与原图模式同一像素来源（image.ToBitmap() 独立位图，现场实证从不黑），宁可丢叠加图形也不黑屏
+            //   （与 DownscaleToBox 同哲学）；缩放对齐 R15 语义，避免全分辨率图塞小框被裁。
+            LogRenderFallbackThrottled();
+            ICogImage img = TryGetRecordImage(rec);
+            if (img == null)
+                return null;
+            return DownscaleToBox(CopyCogImageToBitmap(img), viewSize);
+        }
+
+        // ch:R27 单次抓图：refresh=true 时先 Refresh() 促使隐藏栅格器完成重绘；
+        //   返回全新位图（所有权交调用方）或 null（失败/尺寸非法）。CreateContentBitmap 每次返回全新位图，无共享。
+        private Bitmap CaptureLiveRecord(bool refresh)
+        {
+            if (refresh)
+            {
+                try { _liveRecordRenderer.Refresh(); } catch { }
+            }
+            Image src = null;
+            try
+            {
+                src = _liveRecordRenderer.CreateContentBitmap(CogDisplayContentBitmapConstants.Display, null, 0);
+                if (src == null || src.Width <= 1 || src.Height <= 1)
+                {
+                    if (src != null)
+                    {
+                        try { src.Dispose(); } catch { }
+                    }
+                    return null;
+                }
+                Bitmap own = src as Bitmap;
+                if (own != null)
+                {
+                    src = null; // ch:所有权交出，finally 不再 Dispose（调用方 SetPictureBoxImage 负责释放）
+                    return own;
+                }
+                return new Bitmap(src); // ch:非 Bitmap 的 Image 兜底，拷贝一次，finally 负责 Dispose
+            }
+            catch (Exception ex) { new ErrorLog().WriteLog(ex.ToString()); return null; }
+            finally
+            {
                 if (src != null)
                 {
                     try { src.Dispose(); } catch (Exception ex) { new ErrorLog().WriteLog(ex.ToString()); }
                 }
             }
-            ICogImage img = TryGetRecordImage(rec);
-            if (img == null)
+        }
+
+        // ch:R27 抓图稳定器：①首抓后 DiagnoseCapture 完成度诊断，干净(常规路径)1 次抓图直接返回，成本≈旧实现；
+        //   ②可疑(近黑/中间黑条)才补抓对比，最多共 3 次——两次逐字节一致=确定性内容：中间黑条若是稳定真实画面
+        //   (合法黑边)则采用、近黑则仍不可用；不一致=抓到中间态→取下一次直到干净；
+        //   ③3 次仍不稳/稳定仍近黑/抓图失败 → 返回 null，由调用方直读 record 主图兜底。
+        private Bitmap CaptureStableRecordBitmap()
+        {
+            Bitmap settled = CaptureLiveRecord(false);
+            if (settled == null)
                 return null;
-            return CopyCogImageToBitmap(img);
+            bool nearBlack, midBand;
+            DiagnoseCapture(settled, out nearBlack, out midBand);
+            if (!nearBlack && !midBand)
+                return settled; // ch:常规路径，与旧行为一致
+            for (int attempt = 0; attempt < 2; attempt++)
+            {
+                Bitmap next = CaptureLiveRecord(true);
+                if (next == null)
+                    break;
+                if (BitmapBytesEqual(settled, next))
+                {
+                    next.Dispose();
+                    if (nearBlack)
+                    { // ch:两次一致且仍整幅近黑=确定性坏帧 → 放弃栅格产出，转直读兜底
+                        settled.Dispose();
+                        return null;
+                    }
+                    return settled; // ch:一致的中间黑条属稳定真实画面(合法黑边)，不误伤
+                }
+                settled.Dispose();
+                settled = next;
+                DiagnoseCapture(settled, out nearBlack, out midBand);
+                if (!nearBlack && !midBand)
+                    return settled; // ch:已抓到稳定且干净的帧
+            }
+            if (settled != null)
+                settled.Dispose();
+            return null;
+        }
+
+        // ch:R27 抓图完成度诊断：步长 4 网格、每采样行 5 点。
+        //   nearAllBlack = 采样点 ≥99% RGB 全 0（整幅纯黑症状）；
+        //   midBlackBand  = 连续 ≥2 个采样行(≥8px)整行全黑、且黑条上方与下方都有内容行
+        //                   （顶/底合法黑边只有一侧有内容，被排除）。
+        private static void DiagnoseCapture(Bitmap bmp, out bool nearAllBlack, out bool midBlackBand)
+        {
+            nearAllBlack = false;
+            midBlackBand = false;
+            if (bmp == null)
+                return;
+            try
+            {
+                int w = bmp.Width, h = bmp.Height;
+                if (w < 32 || h < 32)
+                    return;
+                int bpp = Image.GetPixelFormatSize(bmp.PixelFormat) / 8;
+                if (bpp < 3)
+                    return; // ch:非三/四通道格式不诊断，宁可漏判不误判
+                byte[] buf = LockBitsSnapshot(bmp, new Rectangle(0, 0, w, h));
+                if (buf == null)
+                    return;
+                int stride = Math.Abs(buf.Length / h); // ch:按整缓冲均摊还原行跨(仅本方法内索引用)
+                int step = 4;
+                int rows = (h - 1) / step + 1;
+                int[] blackCnt = new int[rows];
+                bool[] hasContent = new bool[rows];
+                int total = 0, black = 0;
+                for (int r = 0; r < rows; r++)
+                {
+                    int y = r * step;
+                    for (int k = 0; k < 5; k++)
+                    {
+                        int x = k * (w - 1) / 4;
+                        int i = y * stride + x * bpp;
+                        if (i + 2 >= buf.Length)
+                            break;
+                        if (buf[i] == 0 && buf[i + 1] == 0 && buf[i + 2] == 0)
+                        {
+                            blackCnt[r]++;
+                            black++;
+                        }
+                        else
+                            hasContent[r] = true;
+                        total++;
+                    }
+                }
+                nearAllBlack = total > 0 && (long)black * 100 >= (long)total * 99;
+                if (nearAllBlack)
+                    return;
+                for (int r0 = 0; r0 < rows; )
+                {
+                    int full = 5;
+                    if (blackCnt[r0] < full)
+                    {
+                        r0++;
+                        continue;
+                    }
+                    int r1 = r0;
+                    while (r1 + 1 < rows && blackCnt[r1 + 1] >= full)
+                        r1++;
+                    if (r1 - r0 >= 1) // ch:连续 ≥2 个采样行
+                    {
+                        bool above = false, below = false;
+                        for (int a = 0; a < r0; a++)
+                            if (hasContent[a]) { above = true; break; }
+                        for (int b2 = r1 + 1; b2 < rows; b2++)
+                            if (hasContent[b2]) { below = true; break; }
+                        if (above && below)
+                        {
+                            midBlackBand = true;
+                            return;
+                        }
+                    }
+                    r0 = r1 + 1;
+                }
+            }
+            catch { nearAllBlack = false; midBlackBand = false; }
+        }
+
+        // ch:R27 两次抓图逐字节比对：完全一致=内容已稳定；尺寸/格式不同视为不一致(取新帧)
+        private static bool BitmapBytesEqual(Bitmap a, Bitmap b)
+        {
+            if (a == null || b == null)
+                return false;
+            if (a.Width != b.Width || a.Height != b.Height || a.PixelFormat != b.PixelFormat)
+                return false;
+            try
+            {
+                Rectangle rect = new Rectangle(0, 0, a.Width, a.Height);
+                byte[] ba = LockBitsSnapshot(a, rect);
+                byte[] bb = LockBitsSnapshot(b, rect);
+                if (ba == null || bb == null || ba.Length != bb.Length)
+                    return false;
+                for (int i = 0; i < ba.Length; i++)
+                    if (ba[i] != bb[i])
+                        return false;
+                return true;
+            }
+            catch { return false; }
+        }
+
+        // ch:R27 整幅像素快照(LockBits + Marshal.Copy，无 unsafe)；失败返回 null
+        private static byte[] LockBitsSnapshot(Bitmap bmp, Rectangle rect)
+        {
+            BitmapData bd = bmp.LockBits(rect, ImageLockMode.ReadOnly, bmp.PixelFormat);
+            try
+            {
+                int stride = Math.Abs(bd.Stride);
+                byte[] buf = new byte[stride * rect.Height];
+                Marshal.Copy(bd.Scan0, buf, 0, buf.Length);
+                return buf;
+            }
+            finally { bmp.UnlockBits(bd); }
+        }
+
+        // ch:R27 直读兜底日志(10 秒节流)：正常不出现；现场若 grep 到此行说明栅格器持续产出坏帧，供后续取证
+        private int _renderFallbackLastLogMs;
+        private void LogRenderFallbackThrottled()
+        {
+            int now = Environment.TickCount;
+            if (unchecked(now - _renderFallbackLastLogMs) < 10000)
+                return;
+            _renderFallbackLastLogMs = now;
+            MsgErroeLog.WriteLog("渲染抓图未稳定/近黑，已直读 record 主图兜底(R27)");
         }
 
         private void SetPictureBoxImage(PictureBox box, Bitmap bmpNew)
