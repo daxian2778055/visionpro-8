@@ -11245,22 +11245,31 @@ namespace WindowsFormsApplication1
             _liveRecordRenderer.Height = h;
             try
             {
-                _liveRecordRenderer.DrawingEnabled = false;
-                _liveRecordRenderer.Record = rec;
-                _liveRecordRenderer.BackColor = Color.FromArgb(255, 60, 60, 60);
-                _liveRecordRenderer.DrawingEnabled = true;
-                _liveRecordRenderer.Fit(true);
-                // ch:R27 抓图 + 完成度校验（详见 CaptureStableRecordBitmap）：正常帧 1 次抓图即交出所有权
-                Bitmap stable = CaptureStableRecordBitmap();
-                if (stable != null)
-                    return stable;
+                // ch:R28 置位走忙重试(见 TryApplyLiveRecord)：现场日志 16 秒 141 条「此时无法调用 DrawingEnabled」
+                //   =栅格器渲染偶发异步执行；把该异常当"正在渲染"的同步信号，短等后重试到控件接受(=空闲=渲染完成)
+                //   才抓图，抓图不再落入半渲染窗口；忙异常内部消化，错误日志不再刷屏。
+                bool waited;
+                if (TryApplyLiveRecord(rec, out waited))
+                {
+                    // ch:R28 抓图+完成度校验(详见 CaptureStableRecordBitmap)；waited=本拍经历过渲染忙(异步实锤)，
+                    //   需补抓比对拿「一致的干净对」，防上一帧残影+本帧半渲染且无黑行的混帧漏检
+                    Bitmap stable = CaptureStableRecordBitmap(waited);
+                    if (stable != null)
+                        return stable;
+                }
             }
             catch (Exception ex) { new ErrorLog().WriteLog(ex.ToString()); }
             finally
             {
-                try { _liveRecordRenderer.Record = null; } catch (Exception ex) { new ErrorLog().WriteLog(ex.ToString()); }
+                // ch:R28 清 Record 也可能撞上渲染忙：静默短等重试，避免 finally 逐拍刷错误日志(与现场 141 条同源)
+                try { _liveRecordRenderer.Record = null; }
+                catch (Exception)
+                {
+                    try { RenderWait(); _liveRecordRenderer.Record = null; } catch { }
+                }
             }
-            // ch:R27 终端兜底：栅格产出不可信（近黑/3 次仍不稳/抓图失败/异常）→ 直读 record 主图像素——
+            // ch:R27/R28 终端兜底：栅格产出不可信（渲染忙重试耗尽/近黑/未取得确认的干净帧/抓图失败/异常）
+            //   → 直读 record 主图像素——
             //   与原图模式同一像素来源（image.ToBitmap() 独立位图，现场实证从不黑），宁可丢叠加图形也不黑屏
             //   （与 DownscaleToBox 同哲学）；缩放对齐 R15 语义，避免全分辨率图塞小框被裁。
             LogRenderFallbackThrottled();
@@ -11270,14 +11279,70 @@ namespace WindowsFormsApplication1
             return DownscaleToBox(CopyCogImageToBitmap(img), viewSize);
         }
 
-        // ch:R27 单次抓图：refresh=true 时先 Refresh() 促使隐藏栅格器完成重绘；
-        //   返回全新位图（所有权交调用方）或 null（失败/尺寸非法）。CreateContentBitmap 每次返回全新位图，无共享。
-        private Bitmap CaptureLiveRecord(bool refresh)
+        private int _renderSetBusyLastLogMs;
+
+        // ch:R28 Record 置位 + 渲染完成同步：CogRecordDisplay 的 Record 渲染偶发异步执行，渲染进行中设置
+        //   DrawingEnabled 会抛「此时无法调用“DrawingEnabled”的属性 set」(现场 14:59:55~15:00:11 共 141 条；
+        //   每条异常=整帧转直读、丢叠加图形)。把该异常当作"控件忙=正在渲染"的探测信号：RenderWait 短等后重试
+        //   整个置位序列；末尾再做一次 false→true 往返作完成度探测(仍在渲染会抛同款异常继续等)，控件接受
+        //   即空闲即渲染完成，此时抓图才不落入半渲染窗口。最多 5 轮仍忙才放弃(调用方转直读兜底)；中间忙异常
+        //   内部消化不记错误日志(防刷屏)，仅连续失败时按 10 秒节流记一次。
+        //   waited=out：本拍是否经历过忙(供 CaptureStableRecordBitmap 决定是否补抓"一致的干净对")。
+        private bool TryApplyLiveRecord(ICogRecord rec, out bool waited)
         {
-            if (refresh)
+            waited = false;
+            Exception lastEx = null;
+            for (int i = 0; i < 5; i++)
             {
-                try { _liveRecordRenderer.Refresh(); } catch { }
+                try
+                {
+                    _liveRecordRenderer.DrawingEnabled = false;
+                    _liveRecordRenderer.Record = rec;
+                    _liveRecordRenderer.BackColor = Color.FromArgb(255, 60, 60, 60);
+                    _liveRecordRenderer.DrawingEnabled = true;
+                    _liveRecordRenderer.Fit(true);
+                    _liveRecordRenderer.DrawingEnabled = false; // ch:R28 完成度探测往返：渲染进行中会抛忙异常
+                    _liveRecordRenderer.DrawingEnabled = true;
+                    return true;
+                }
+                catch (Exception ex)
+                {
+                    waited = true;
+                    lastEx = ex;
+                    RenderWait();
+                }
             }
+            LogRenderSetBusyThrottled(lastEx);
+            return false;
+        }
+
+        // ch:R28 渲染忙等待：Sleep 给异步渲染留时间 + DoEvents 泵消息(兼容消息驱动的渲染实现)。
+        //   重入安全：仅在 KickOcxPaint 持有 _ocxPaintBusy=1 期间调用，DoEvents 里再进 Kick 会立即 return；
+        //   期间 _ocxPaintingIdx 占位，本相机槽位不会被其他拍子抢走。
+        private void RenderWait()
+        {
+            try { System.Threading.Thread.Sleep(6); } catch { }
+            try { Application.DoEvents(); } catch { }
+        }
+
+        // ch:R28 置位连续忙的节流日志(10 秒)：保留现场取证信息又不刷屏
+        private void LogRenderSetBusyThrottled(Exception ex)
+        {
+            if (ex == null)
+                return;
+            int now = Environment.TickCount;
+            if (unchecked(now - _renderSetBusyLastLogMs) < 10000)
+                return;
+            _renderSetBusyLastLogMs = now;
+            new ErrorLog().WriteLog("渲染置位连续忙(已转直读兜底): " + ex.ToString());
+        }
+
+        // ch:R28 单次抓图：wait=true 时先 RenderWait(短等+泵消息)让异步渲染推进再抓；
+        //   返回全新位图（所有权交调用方）或 null（失败/尺寸非法）。CreateContentBitmap 每次返回全新位图，无共享。
+        private Bitmap CaptureLiveRecord(bool wait)
+        {
+            if (wait)
+                RenderWait();
             Image src = null;
             try
             {
@@ -11308,43 +11373,69 @@ namespace WindowsFormsApplication1
             }
         }
 
-        // ch:R27 抓图稳定器：①首抓后 DiagnoseCapture 完成度诊断，干净(常规路径)1 次抓图直接返回，成本≈旧实现；
-        //   ②可疑(近黑/中间黑条)才补抓对比，最多共 3 次——两次逐字节一致=确定性内容：中间黑条若是稳定真实画面
-        //   (合法黑边)则采用、近黑则仍不可用；不一致=抓到中间态→取下一次直到干净；
-        //   ③3 次仍不稳/稳定仍近黑/抓图失败 → 返回 null，由调用方直读 record 主图兜底。
-        private Bitmap CaptureStableRecordBitmap()
+        // ch:R28 抓图稳定器：①常规快路径(本拍未经历渲染忙+首抓诊断干净)→1 次抓图直接返回，成本与旧实现一致；
+        //   ②首抓可疑(近黑/中间黑条)→RenderWait 后补抓，抓到干净帧才采用；连续两次与坏帧逐字节一致=渲染卡死
+        //   在同一坏态→放弃转直读；③本拍经历过渲染忙(异步渲染实锤)→即使首抓干净也要拿到「一致的干净对」才算
+        //   完成(防上一帧残影+本帧半渲染、恰好无黑行的混帧漏检)；最多共 4 次抓图，拿不到确认帧→null 直读兜底。
+        //   R28 收紧：删 R27「一致且非近黑即采用」——一致只证明卡在同一半渲染态，稳定地错也是错(现场 v1.3.22
+        //   仍见撕裂的漏点之一)。
+        private Bitmap CaptureStableRecordBitmap(bool confirmStale)
         {
-            Bitmap settled = CaptureLiveRecord(false);
-            if (settled == null)
+            Bitmap prev = CaptureLiveRecord(false);
+            if (prev == null)
                 return null;
-            bool nearBlack, midBand;
-            DiagnoseCapture(settled, out nearBlack, out midBand);
-            if (!nearBlack && !midBand)
-                return settled; // ch:常规路径，与旧行为一致
-            for (int attempt = 0; attempt < 2; attempt++)
+            bool prevSuspect = DiagnoseIsSuspect(prev);
+            if (!prevSuspect && !confirmStale)
+                return prev; // ch:常规快路径(未经历渲染忙+诊断干净)，与旧实现同成本
+            for (int attempt = 0; attempt < 3; attempt++)
             {
                 Bitmap next = CaptureLiveRecord(true);
                 if (next == null)
                     break;
-                if (BitmapBytesEqual(settled, next))
+                bool nextSuspect = DiagnoseIsSuspect(next);
+                if (!nextSuspect)
+                {
+                    if (!prevSuspect)
+                    {
+                        if (BitmapBytesEqual(prev, next))
+                        {
+                            prev.Dispose();
+                            return next; // ch:一致的干净对 ✓ 完成度确认达成
+                        }
+                        prev.Dispose();
+                        prev = next; // ch:两连干净但不等=渲染仍在推进，以新帧为基线再要一对
+                        continue;
+                    }
+                    if (!confirmStale)
+                    {
+                        prev.Dispose();
+                        return next; // ch:常规拍：可疑帧等到干净帧即采用
+                    }
+                    prev.Dispose();
+                    prev = next;
+                    prevSuspect = false; // ch:忙拍：干净帧仍需一致确认
+                    continue;
+                }
+                if (BitmapBytesEqual(prev, next))
                 {
                     next.Dispose();
-                    if (nearBlack)
-                    { // ch:两次一致且仍整幅近黑=确定性坏帧 → 放弃栅格产出，转直读兜底
-                        settled.Dispose();
-                        return null;
-                    }
-                    return settled; // ch:一致的中间黑条属稳定真实画面(合法黑边)，不误伤
+                    prev.Dispose();
+                    return null; // ch:等过一轮仍与坏帧逐字节一致=卡死在坏态 → 转直读兜底
                 }
-                settled.Dispose();
-                settled = next;
-                DiagnoseCapture(settled, out nearBlack, out midBand);
-                if (!nearBlack && !midBand)
-                    return settled; // ch:已抓到稳定且干净的帧
+                prev.Dispose();
+                prev = next;
+                prevSuspect = true;
             }
-            if (settled != null)
-                settled.Dispose();
+            prev.Dispose();
             return null;
+        }
+
+        // ch:R28 诊断简写：近黑或中间黑条任一命中即视为可疑
+        private static bool DiagnoseIsSuspect(Bitmap bmp)
+        {
+            bool nearBlack, midBand;
+            DiagnoseCapture(bmp, out nearBlack, out midBand);
+            return nearBlack || midBand;
         }
 
         // ch:R27 抓图完成度诊断：步长 4 网格、每采样行 5 点。
@@ -11462,7 +11553,8 @@ namespace WindowsFormsApplication1
             finally { bmp.UnlockBits(bd); }
         }
 
-        // ch:R27 直读兜底日志(10 秒节流)：正常不出现；现场若 grep 到此行说明栅格器持续产出坏帧，供后续取证
+        // ch:R27/R28 直读兜底日志(10 秒节流)：正常不出现；现场若 grep 到此行说明栅格器持续产出坏帧/持续忙，
+        //   供后续取证(与「渲染置位连续忙」节流日志配合区分)
         private int _renderFallbackLastLogMs;
         private void LogRenderFallbackThrottled()
         {
@@ -11470,7 +11562,7 @@ namespace WindowsFormsApplication1
             if (unchecked(now - _renderFallbackLastLogMs) < 10000)
                 return;
             _renderFallbackLastLogMs = now;
-            MsgErroeLog.WriteLog("渲染抓图未稳定/近黑，已直读 record 主图兜底(R27)");
+            MsgErroeLog.WriteLog("渲染抓图未完成(渲染忙/不稳定/近黑)，已直读 record 主图兜底(R28)");
         }
 
         private void SetPictureBoxImage(PictureBox box, Bitmap bmpNew)
