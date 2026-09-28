@@ -11774,6 +11774,100 @@ namespace WindowsFormsApplication1
             _overlayLabelsCreated = true;
         }
 
+        // ch:R35 覆盖层第二行「实时帧率」的口径定案（帧率逻辑在此决定）：
+        //   ① 每相机独立：8 相机各测各的——既有 zhen 只算相机1、周期还由 numericUpDown6 配成 5s，太粗且不覆盖其它相机；
+        //   ② 主值=检测帧率：该相机最近 1000ms 完成检测的帧数，取 myjobN.sum 增量——与 zhen/统计表/「收-检」同一
+        //      计数器家族，不另起炉灶；背压丢帧时它必然先掉，客户一眼可见；
+        //   ③ 括号「采」=同窗口到帧数(m_nFrames 增量)，仅当 采-检≥1fps 才显示：采40检27=我们处理不过来在丢帧、
+        //      采27检27=相机只来了27(触发/相机侧问题)；相等时省略保持画面简洁；
+        //   ④ 窗口 1000ms、每 500ms 滑动更新：稳态 25fps 恒显 25(500ms 短窗会 24/26 来回跳)，显示滞后≤500ms。
+        private System.Windows.Forms.Timer _overlayFpsTimer;        // 采样+刷新定时器(500ms，覆盖层首次激活后常驻)
+        private int _overlayFpsTickMs;                               // 上次采样 TickCount(500ms 节流)
+        private bool _overlayFpsFirstTick;                           // 建基线后首拍只有半个窗：×2 外推首拍即准
+        private readonly int[] _overlayFpsProcBase = new int[8];     // 上次采样的 myjobN.sum(算半窗检测增量)
+        private readonly int[] _overlayFpsArrBase = new int[8];      // 上次采样的 m_nFrames(算半窗到帧增量)
+        private readonly int[] _overlayFpsProcPrev = new int[8];     // 上一 500ms 半窗检测增量
+        private readonly int[] _overlayFpsArrPrev = new int[8];      // 上一 500ms 半窗到帧增量
+        private readonly int[] _overlayFpsProc = new int[8];         // 显示值：最近 1000ms 检测帧率
+        private readonly int[] _overlayFpsArr = new int[8];          // 显示值：最近 1000ms 到帧率
+
+        // ch:R35 覆盖层激活时确保存在帧率定时器；刻意常驻不停——覆盖层关掉期间仍每 500ms 记基线，
+        //   重开时立即显示真值，没有「开机以来累计值炸第一个窗口」或 0 值热身问题
+        private void EnsureOverlayFpsTimer()
+        {
+            if (_overlayFpsTimer != null) return;
+            _overlayFpsTimer = new System.Windows.Forms.Timer();
+            _overlayFpsTimer.Interval = 500;
+            _overlayFpsTimer.Tick += delegate
+            {
+                SampleOverlayFps();
+                // ch:帧率行必须由定时器自己刷——相机断流时不再有帧上屏(SetPictureBoxImage 不来)，
+                //   只靠上屏路径刷新会让帧率永远停在断流前的旧值，客户会被误导
+                UpdateModbusOverlayLabels();
+            };
+            ArmOverlayFpsBaseline();
+            _overlayFpsTimer.Start();
+        }
+
+        // ch:R35 建增量基线：myjobN.sum/m_nFrames 都是开机以来累计值，直接取差会把历史全算进第一个窗口
+        private void ArmOverlayFpsBaseline()
+        {
+            Myjob[] jobs = { myjob1, myjob2, myjob3, myjob4, myjob5, myjob6, myjob7, myjob8 };
+            for (int i = 0; i < 8; i++)
+            {
+                int s = 0, a = 0;
+                try { if (jobs[i] != null) s = jobs[i].sum; } catch { }
+                try { a = m_nFrames[i]; } catch { }
+                _overlayFpsProcBase[i] = s;
+                _overlayFpsArrBase[i] = a;
+                _overlayFpsProcPrev[i] = 0;
+                _overlayFpsArrPrev[i] = 0;
+                _overlayFpsProc[i] = 0;
+                _overlayFpsArr[i] = 0;
+            }
+            _overlayFpsTickMs = Environment.TickCount;
+            _overlayFpsFirstTick = true;
+        }
+
+        // ch:R35 每 500ms 采一次半窗增量，显示值=上一拍+本拍(=最近 1000ms)；仅 UI 线程进(定时器)，无并发
+        private void SampleOverlayFps()
+        {
+            try
+            {
+                int now = Environment.TickCount;
+                if (unchecked(now - _overlayFpsTickMs) < 500) return;
+                _overlayFpsTickMs = now;
+                bool first = _overlayFpsFirstTick;
+                _overlayFpsFirstTick = false;
+                Myjob[] jobs = { myjob1, myjob2, myjob3, myjob4, myjob5, myjob6, myjob7, myjob8 };
+                for (int i = 0; i < 8; i++)
+                {
+                    int s = 0, a = 0;
+                    try { if (jobs[i] != null) s = jobs[i].sum; } catch { }
+                    try { a = m_nFrames[i]; } catch { }
+                    int dProc = s - _overlayFpsProcBase[i];
+                    int dArr = a - _overlayFpsArrBase[i];
+                    _overlayFpsProcBase[i] = s;
+                    _overlayFpsArrBase[i] = a;
+                    if (dProc < 0) dProc = 0; // ch:计数清零/方案切换回退时不显示负帧率
+                    if (dArr < 0) dArr = 0;
+                    if (first)
+                    {
+                        _overlayFpsProc[i] = dProc * 2; // ch:首个半窗只有 500ms，×2 外推
+                        _overlayFpsArr[i] = dArr * 2;
+                    }
+                    else
+                    {
+                        _overlayFpsProc[i] = _overlayFpsProcPrev[i] + dProc;
+                        _overlayFpsArr[i] = _overlayFpsArrPrev[i] + dArr;
+                    }
+                    _overlayFpsProcPrev[i] = dProc;
+                    _overlayFpsArrPrev[i] = dArr;
+                }
+            }
+            catch (Exception ex) { new ErrorLog().WriteLog("SampleOverlayFps: " + ex.Message); }
+        }
+
         // ch:R33 检测线程侧登记：取该相机方案流程(ToolBlock)的 modbustcp 键值——需求口径即
         //   「流程里有 modbustcp 这个键，每次拍照这个键的值就是 modbustcp 输出，真正通讯输出的数据也来自它」，
         //   故直接读 block.Outputs["modbustcp"]；该端不存在时才回落 serial 端(R19：个别流程数据落在 serial 端)。
@@ -11874,6 +11968,7 @@ namespace WindowsFormsApplication1
                 }
 
                 EnsureModbusOverlayLabels();
+                EnsureOverlayFpsTimer(); // ch:R35 覆盖层激活即启动帧率采样/刷新定时器(常驻，见其注释)
 
                 for (int cam = 1; cam <= 8; cam++)
                 {
@@ -11892,8 +11987,14 @@ namespace WindowsFormsApplication1
                     if (string.IsNullOrEmpty(text))
                         text = "相机" + cam + " 待机";
 
+                    // ch:R35 第二行=实时帧率(1000ms 窗/500ms 滑动)；仅当 采集≠检测 时括号标采集率，
+                    //   让客户一眼分辨「相机/触发没出够帧」与「我们处理不过来在丢帧」
+                    int fpsShow = _overlayFpsProc[cam - 1];
+                    string fpsLine = "帧率 " + fpsShow + " fps";
+                    if (_overlayFpsArr[cam - 1] - fpsShow >= 1)
+                        fpsLine += "（采" + _overlayFpsArr[cam - 1] + "）";
                     // ch:位置：画面中上——水平居中、垂直 8% 处（留白不遮关键特征）；长文本换行，最多 3 行
-                    lbl.Text = text;
+                    lbl.Text = text + "\n" + fpsLine;
                     lbl.ForeColor = _overlayFontColor;
                     if (lbl.Font.Size != _overlayFontSize)
                         lbl.Font = new Font(lbl.Font.FontFamily, _overlayFontSize, FontStyle.Bold);
