@@ -11796,6 +11796,59 @@ namespace WindowsFormsApplication1
             _mtcpOverlayOut[cam] = v ?? "";
         }
 
+        // ch:R34 覆盖层显示的输出格式解析：优先配置窗(FormModbus)该相机写回通道的配置格式，
+        //   其次 frm3 的 modbus_style，都没有则按 int（现场主流配置，且需求明确要求四舍五入显示）。
+        private string ResolveModbusOverlayFormat(int cam)
+        {
+            try
+            {
+                if (modbustcp != null)
+                {
+                    string f = modbustcp.GetCamOutFormat(cam);
+                    if (!string.IsNullOrEmpty(f))
+                        return f;
+                }
+            }
+            catch { }
+            try
+            {
+                if (frm3 != null)
+                {
+                    string f = (frm3.modbus_style ?? "").Trim().ToLowerInvariant();
+                    if (f == "int" || f == "long" || f == "float" || f == "string")
+                        return f;
+                }
+            }
+            catch { }
+            return "int";
+        }
+
+        // ch:R34 覆盖层显示值 = 实际发出去的数：与通讯写出同一套换算，逐段四舍五入
+        //   (int → (short)Math.Round(double.Parse(x))、long → (int)Math.Round(...)，逐字复制
+        //   FormModbus.xie/XieWuWriteOne 的生产写法，含 short 截断——现场若某通道收到 -32768，
+        //   标签会同步显示 -32768，可与 PLC 侧对账；float/string 格式原样显示不四舍五入)。
+        //   解析用当前区域文化(与生产 double.Parse 一致，comboBox39 改 CurrentCulture 的行为保持同步)。
+        private string FormatModbusOverlayOut(string raw, int cam)
+        {
+            if (string.IsNullOrEmpty(raw))
+                return raw;
+            string fmt = ResolveModbusOverlayFormat(cam);
+            if (fmt == "float" || fmt == "string")
+                return raw;
+            string[] parts = raw.Split(',');
+            for (int i = 0; i < parts.Length; i++)
+            {
+                string s = parts[i].Trim();
+                if (s.Length == 0)
+                    continue;
+                double d;
+                if (!double.TryParse(s, out d)) // ch:非数值段(文字/编码串等)原样保留，不吞不改
+                    continue;
+                parts[i] = (fmt == "long" ? (int)Math.Round(d) : (short)Math.Round(d)).ToString();
+            }
+            return string.Join(",", parts);
+        }
+
         // ch:R33 覆盖层显示条件（严格按需求口径，两条同时成立即显示）：
         //   ①「输出方式」下拉选的是 ModbusTCP（mode4「ModbusTCP输出」或 mode6「ModbusTCP(配置窗)」）；
         //   ②画面处于「显示原图」——原图是给操作工看数值的画面，渲染图带叠加图形不适合压字。
@@ -11831,7 +11884,11 @@ namespace WindowsFormsApplication1
 
                     // ch:R33 文案 = 该相机本拍流程 modbustcp 键的值(检测线程每帧登记)，
                     //   不再读 FormModbus.camera_dic——那只在配置窗数据路命中，现场恒空导致标签一直「待机」。
+                    // ch:R34 再经「与通讯写出同一套」的四舍五入换算：int/long 取整(现场配 int，显示即 PLC 实收值)，
+                    //   float/string 保持原样。例：0,11.6908147189864,10.890993543755,226.438743555937 → 0,12,11,226
                     string text = (_mtcpOverlayOut[cam] ?? "").Trim();
+                    if (!string.IsNullOrEmpty(text))
+                        text = FormatModbusOverlayOut(text, cam);
                     if (string.IsNullOrEmpty(text))
                         text = "相机" + cam + " 待机";
 

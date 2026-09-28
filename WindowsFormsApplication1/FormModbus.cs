@@ -2013,6 +2013,39 @@ namespace WindowsFormsApplication1
                 MsgErroeLog.WriteLog(ex.Message + "WriteCameraResult");
             }
         }
+        // ch:R34 供 Form1 画面覆盖层用：取该相机 ModbusTCP 写回通道的配置格式(int/long/float/string)。
+        //   覆盖层要显示「实际发出去的那个数」，int/long 需先四舍五入(与 xie/XieWuWriteOne 同一套换算)，
+        //   float/string 原样——故必须知道本相机配的是哪种格式。查相机→写回通道名([5]待写通道/[3]反馈通道)→fins_dic[..][4]。
+        //   配置窗未打开过(Load 未跑、fins_dic 为空)或查不到时返回空串，由调用方按 frm3/默认回落。
+        public string GetCamOutFormat(int cam)
+        {
+            try
+            {
+                string[] row;
+                if (camera_dic != null && camera_dic.TryGetValue(cam, out row) && row != null)
+                {
+                    string chPending = row.Length > 5 ? (row[5] ?? "").Trim() : "";
+                    string chFankui = row.Length > 3 ? (row[3] ?? "").Trim() : "";
+                    string[] cand = new string[] { chPending, chFankui };
+                    for (int k = 0; k < cand.Length; k++)
+                    {
+                        string name = cand[k];
+                        if (name.Length == 0 || name == "无" || name == "0")
+                            continue;
+                        string[] fd;
+                        if (fins_dic.TryGetValue(name, out fd) && fd != null && fd.Length > 4)
+                        {
+                            string f = (fd[4] ?? "").Trim().ToLowerInvariant();
+                            if (f == "int" || f == "long" || f == "float" || f == "string")
+                                return f;
+                        }
+                    }
+                }
+            }
+            catch { }
+            return "";
+        }
+
         // ch:P0 方案切换写回暂存：与 xie/XieWuWriteOne 消费共用 modbusIoLock，保证 [4](值)/[5](通道) 原子配对，消除跨线程撕裂
         public void SetSwitchPending(int camIndex)
         {
