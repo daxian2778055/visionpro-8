@@ -50,11 +50,8 @@ namespace WindowsFormsApplication1
         private volatile bool _overlayLabelsCreated = false;
         private int _overlayFontSize = 12;   // ini camera/overlay_font_size
         private Color _overlayFontColor = Color.Yellow; // ini camera/overlay_font_color (ARGB)
-        // ch:R31 覆盖层配置控件（输出方式行右侧，WinForms 原生、Designer 可编辑、不写 resx）
-        private Label _labelOverlayFontSize;
-        private NumericUpDown _numOverlayFontSize;
-        private Label _labelOverlayFontColor;
-        private Button _btnOverlayFontColor;
+        // ch:R32 覆盖层配置控件本体已在 Designer（labelOverlayFontSize/numOverlayFontSize/labelOverlayFontColor/btnOverlayFontColor），
+        //   设计器可直接拖改；此处只保留状态字段与回填/事件方法。
         private CogRecordDisplay[] _camRecordDisplay = new CogRecordDisplay[10];
         private CogRecordDisplay _liveRecordRenderer; // ch:现场画面隐藏栅格器，结果贴 PictureBox
         private readonly object _ocxPaintLock = new object();
@@ -224,23 +221,6 @@ namespace WindowsFormsApplication1
             InitLiveRecordRenderer();
             ApplyCameraDisplayMode();
 
-            // ch:R31 覆盖层字号/字色 ini 回填（默认 12pt、Yellow）
-            try
-            {
-                int fs = int.Parse(canshuIni.ReadString("camera", "overlay_font_size", "12"));
-                _overlayFontSize = Math.Max(6, Math.Min(72, fs));
-            }
-            catch { _overlayFontSize = 12; }
-            try
-            {
-                string cstr = canshuIni.ReadString("camera", "overlay_font_color", "").Replace("\0", "");
-                if (!string.IsNullOrEmpty(cstr))
-                    _overlayFontColor = ColorTranslator.FromHtml(cstr);
-            }
-            catch { _overlayFontColor = Color.Yellow; }
-
-            // ch:R31 创建覆盖层配置控件（输出方式行右侧：字号 NUD + 字色 Button，WinForms 原生、Designer 可编辑、不写 resx）
-            CreateOverlayConfigControls();
             // ch:已移除 IrisSkin4 皮肤引擎（其全局窗口钩子对 VisionPro 编辑控件 GetWindowText 崩溃，正常删工具操作即触发）
             // ch:基础视觉优化见下方 InitDefaultAppearance()
             InitDefaultAppearance();
@@ -251,6 +231,8 @@ namespace WindowsFormsApplication1
             // ch:大华相机开关（IO 线号偏移）从 ini 读取并持久化，默认海康(false，不偏移)
             dahua = canshuIni.ReadString("canshu", "dahua", "false").Replace("\0", "") == "true";
             cbDahua.Checked = dahua; // ch:同步 UI 开关状态（Designer 控件，可在设计器里编辑）
+            // ch:R32 覆盖层配置回填：必须在 canshuIni.ReadINIFile 之后（控件本体已由 Designer 创建，设计器可直接编辑）
+            ApplyOverlayConfigFromIni();
             try { DeviceListAcq(); } catch (Exception ex) { MsgErroeLog.WriteLog("设备枚举异常:" + ex.Message); }
             RebuildImageCallback(); // ch:P2 重建回调并登记强引用（防 GC 后 SDK 仍持旧指针 → AV）
             StartDetectWorkers(); // ch:P0-① 启动每相机检测工作线程（须在注册回调/开始采集之前）
@@ -321,6 +303,7 @@ namespace WindowsFormsApplication1
             try { canshuIni.WriteString("camera", "display_raw", displayRawImage ? "true" : "false"); }
             catch (Exception ex) { new ErrorLog().WriteLog(ex.ToString()); }
             ApplyCameraDisplayMode();
+            UpdateModbusOverlayLabels(); // ch:R32 切显示模式立即生效覆盖层，不必等下一帧
         }
 
         private void ApplyDisplayRawFromIni()
@@ -400,6 +383,7 @@ namespace WindowsFormsApplication1
                 catch (Exception ex) { MsgErroeLog.WriteLog("输出方式保存失败:" + ex.Message); }
             }
             _logPathSerial = _logPathFrm3 = _logPathMtcpWin = true; // ch:R19 切模式后各 Modbus 数据路首次触发各记一条，现场日志直接看出走了哪条路
+            UpdateModbusOverlayLabels(); // ch:R32 切输出方式立即生效覆盖层（ModbusTCP 相关模式才显示）
             try // ch:R19 记录三路决策状态与数据终端存在性：mode4 再遇无输出时，一行日志即可定位卡在哪一闸
             {
                 string term;
@@ -453,69 +437,50 @@ namespace WindowsFormsApplication1
             catch (Exception ex) { MsgErroeLog.WriteLog("性能打印开关设置失败:" + ex.Message); }
         }
 
-        // ch:R31 创建覆盖层配置控件（输出方式行右侧：字号 NUD + 字色 Button）
-        private void CreateOverlayConfigControls()
+        // ch:R31/R32 覆盖层字号/字色 ini 回填（默认 12pt、Yellow）；控件本体已在 Designer 中创建（设计器可直接编辑）
+        private bool _overlaySyncing;
+        private void ApplyOverlayConfigFromIni()
         {
             try
             {
-                if (tabPage5 == null) return;
-
-                // ch:字号标签 + NumericUpDown（紧跟 chkPerfPrint 右侧，y=351）
-                _labelOverlayFontSize = new Label();
-                _labelOverlayFontSize.AutoSize = true;
-                _labelOverlayFontSize.Location = new Point(520, 353);
-                _labelOverlayFontSize.Name = "labelOverlayFontSize";
-                _labelOverlayFontSize.Text = "覆盖字号";
-                _labelOverlayFontSize.TabIndex = 1005;
-                tabPage5.Controls.Add(_labelOverlayFontSize);
-
-                _numOverlayFontSize = new NumericUpDown();
-                _numOverlayFontSize.Location = new Point(585, 350);
-                _numOverlayFontSize.Maximum = 72;
-                _numOverlayFontSize.Minimum = 6;
-                _numOverlayFontSize.Name = "numOverlayFontSize";
-                _numOverlayFontSize.Size = new Size(55, 21);
-                _numOverlayFontSize.TabIndex = 1006;
-                _numOverlayFontSize.Value = _overlayFontSize;
-                _numOverlayFontSize.ValueChanged += NumOverlayFontSize_ValueChanged;
-                tabPage5.Controls.Add(_numOverlayFontSize);
-
-                // ch:字色标签 + Button（打开 ColorDialog）
-                _labelOverlayFontColor = new Label();
-                _labelOverlayFontColor.AutoSize = true;
-                _labelOverlayFontColor.Location = new Point(650, 353);
-                _labelOverlayFontColor.Name = "labelOverlayFontColor";
-                _labelOverlayFontColor.Text = "覆盖字色";
-                _labelOverlayFontColor.TabIndex = 1007;
-                tabPage5.Controls.Add(_labelOverlayFontColor);
-
-                _btnOverlayFontColor = new Button();
-                _btnOverlayFontColor.Location = new Point(715, 350);
-                _btnOverlayFontColor.Name = "btnOverlayFontColor";
-                _btnOverlayFontColor.Size = new Size(60, 23);
-                _btnOverlayFontColor.TabIndex = 1008;
-                _btnOverlayFontColor.Text = "选择颜色";
-                _btnOverlayFontColor.UseVisualStyleBackColor = true;
-                _btnOverlayFontColor.Click += BtnOverlayFontColor_Click;
-                _btnOverlayFontColor.BackColor = _overlayFontColor;
-                tabPage5.Controls.Add(_btnOverlayFontColor);
+                int fs;
+                if (int.TryParse(canshuIni.ReadString("camera", "overlay_font_size", "12").Replace("\0", ""), out fs))
+                    _overlayFontSize = Math.Max(6, Math.Min(72, fs));
             }
-            catch (Exception ex) { MsgErroeLog.WriteLog("CreateOverlayConfigControls: " + ex.Message); }
+            catch { _overlayFontSize = 12; }
+            try
+            {
+                string cstr = canshuIni.ReadString("camera", "overlay_font_color", "").Replace("\0", "");
+                if (!string.IsNullOrEmpty(cstr))
+                    _overlayFontColor = ColorTranslator.FromHtml(cstr);
+            }
+            catch { _overlayFontColor = Color.Yellow; }
+            _overlaySyncing = true;
+            try
+            {
+                if (numOverlayFontSize != null && (int)numOverlayFontSize.Value != _overlayFontSize)
+                    numOverlayFontSize.Value = _overlayFontSize;
+                if (btnOverlayFontColor != null)
+                    btnOverlayFontColor.BackColor = _overlayFontColor;
+            }
+            finally { _overlaySyncing = false; }
         }
 
-        // ch:R31 字号改变：即时生效+落 ini
-        private void NumOverlayFontSize_ValueChanged(object sender, EventArgs e)
+        // ch:R32 覆盖层字号改变：即时生效 + 落 ini + 立刻刷新画面上的 Label
+        private void numOverlayFontSize_ValueChanged(object sender, EventArgs e)
         {
+            if (_overlaySyncing) return;
             try
             {
-                _overlayFontSize = (int)_numOverlayFontSize.Value;
+                _overlayFontSize = (int)numOverlayFontSize.Value;
                 canshuIni.WriteString("camera", "overlay_font_size", _overlayFontSize.ToString());
+                UpdateModbusOverlayLabels();
             }
-            catch (Exception ex) { MsgErroeLog.WriteLog("NumOverlayFontSize_ValueChanged: " + ex.Message); }
+            catch (Exception ex) { MsgErroeLog.WriteLog("numOverlayFontSize_ValueChanged: " + ex.Message); }
         }
 
-        // ch:R31 字色选择：ColorDialog 拾取，Button 背色同步预览+落 ini
-        private void BtnOverlayFontColor_Click(object sender, EventArgs e)
+        // ch:R32 覆盖层字色选择：ColorDialog 拾色，Button 自身背景即当前色预览，落 ini + 立刻刷新
+        private void btnOverlayFontColor_Click(object sender, EventArgs e)
         {
             try
             {
@@ -526,12 +491,13 @@ namespace WindowsFormsApplication1
                     if (dlg.ShowDialog(this) == DialogResult.OK)
                     {
                         _overlayFontColor = dlg.Color;
-                        _btnOverlayFontColor.BackColor = _overlayFontColor;
+                        btnOverlayFontColor.BackColor = _overlayFontColor;
                         canshuIni.WriteString("camera", "overlay_font_color", ColorTranslator.ToHtml(_overlayFontColor));
+                        UpdateModbusOverlayLabels();
                     }
                 }
             }
-            catch (Exception ex) { MsgErroeLog.WriteLog("BtnOverlayFontColor_Click: " + ex.Message); }
+            catch (Exception ex) { MsgErroeLog.WriteLog("btnOverlayFontColor_Click: " + ex.Message); }
         }
 
         // ch:递归设置菜单项颜色：一级白字（深色顶栏），下拉子项黑字（浅色面板）
@@ -11777,7 +11743,7 @@ namespace WindowsFormsApplication1
             UpdateModbusOverlayLabels();
         }
 
-        // ch:R31 创建/确保覆盖 Label 存在（WinForms 原生、Designer 可编辑、不写 resx）
+        // ch:R31/R32 创建/确保覆盖 Label 存在（WinForms 原生、运行时按相机画面创建，不写 resx）
         private void EnsureModbusOverlayLabels()
         {
             if (_overlayLabelsCreated) return;
@@ -11788,26 +11754,43 @@ namespace WindowsFormsApplication1
                 Label lbl = new Label();
                 lbl.Name = "lblModbusOverlayCam" + cam;
                 lbl.AutoSize = false;
-                lbl.TextAlign = ContentAlignment.TopCenter;
+                lbl.TextAlign = ContentAlignment.MiddleCenter;
                 lbl.BackColor = Color.Transparent;
                 lbl.ForeColor = _overlayFontColor;
                 lbl.Font = new Font("微软雅黑", _overlayFontSize, FontStyle.Bold);
                 lbl.Text = "";
                 lbl.Visible = false;
-                lbl.MouseDown += (s, e) => { /* 允许设计器拖拽：捕获鼠标在 Form 级处理，这里不拦截 */ };
-                box.Controls.Add(lbl); // ch:作为 PictureBox 子控件，随图缩放/移动自动跟随
+                box.Controls.Add(lbl); // ch:作为 PictureBox 子控件，随画面缩放/移动自动跟随
                 _modbusOverlayLabels[cam] = lbl;
             }
             _overlayLabelsCreated = true;
         }
 
-        // ch:R31 更新覆盖 Label：条件满足(ModbusTCP配置窗输出+原图模式)才显示并刷文案/位置/样式
+        // ch:R32 覆盖层显示条件：原图模式 + ModbusTCP 数据路在用。
+        //   R31 只认 _outputMode==6(仅「ModbusTCP(配置窗)」一项)，现场实际多选「ModbusTCP输出」(mode4)，
+        //   或留在「自动」而配置窗路活跃(fins_en&&chushihua)——三种情况一律不显示，是 v1.3.26「没看到字」的根因。
+        //   R32 三选一即显示：mode4 / mode6 / 配置窗路活跃(自动模式下同样成立)。
+        private bool ModbusOverlayActive()
+        {
+            if (!displayRawImage)
+                return false;
+            if (_outputMode == OutModbusTcp || _outputMode == OutModbusTcpWin)
+                return true;
+            try
+            {
+                if (modbustcp != null && modbustcp.fins_en && modbustcp.chushihua)
+                    return true;
+            }
+            catch { }
+            return false;
+        }
+
+        // ch:R31/R32 更新覆盖 Label：条件满足才显示并刷文案/位置/样式
         private void UpdateModbusOverlayLabels()
         {
             try
             {
-                // ch:仅 ModbusTCP配置窗输出(OutModbusTcpWin=6) 且 原图模式 时显示
-                if (_outputMode != 6 || !displayRawImage)
+                if (!ModbusOverlayActive())
                 {
                     for (int cam = 1; cam <= 8; cam++)
                         if (_modbusOverlayLabels[cam] != null) _modbusOverlayLabels[cam].Visible = false;
@@ -11822,28 +11805,41 @@ namespace WindowsFormsApplication1
                     Label lbl = _modbusOverlayLabels[cam];
                     if (lbl == null) continue;
                     PictureBox box = GetCameraPictureBox(cam.ToString());
-                    if (box == null || !box.Visible) { lbl.Visible = false; continue; }
+                    if (box == null || !box.Visible || CameraRoiOn(cam)) { lbl.Visible = false; continue; }
 
-                    // ch:取该相机输出信息：优先反馈值 camera_dic[cam][1]，其次通道名 [0]
+                    // ch:R32 文案取「真正发出去的值」：camera_dic[cam][4] 由 WriteCameraResult 登记
+                    //   （ToolBlock 输出的原样值串），[3]=反馈通道名，[1]=PLC 读回的触发字。
+                    //   R31 误取 [1]（读回触发字）——那是 PLC 给我们的信号，不是我们发出的输出。
                     string text = "";
                     string[] row;
-                    if (modbustcp.camera_dic.TryGetValue(cam, out row) && row != null && row.Length >= 2)
+                    if (modbustcp.camera_dic.TryGetValue(cam, out row) && row != null && row.Length >= 5)
                     {
-                        text = (row[1] ?? "").Trim();
-                        if (string.IsNullOrEmpty(text) && row.Length >= 1) text = (row[0] ?? "").Trim();
+                        text = (row[4] ?? "").Trim();
+                        if (!string.IsNullOrEmpty(text) && text != "无")
+                        {
+                            string chn = (row[3] ?? "").Trim();
+                            if (!string.IsNullOrEmpty(chn) && chn != "0")
+                                text = text + "  →" + chn; // ch:值 + 目标反馈通道，一眼看出发给哪路
+                        }
                     }
-                    if (string.IsNullOrEmpty(text)) text = "Cam" + cam + " 无输出";
+                    if (string.IsNullOrEmpty(text) || text == "无")
+                        text = "相机" + cam + " 待机";
 
                     // ch:位置：画面中上——水平居中、垂直 8% 处（留白不遮关键特征）
                     lbl.Text = text;
                     lbl.ForeColor = _overlayFontColor;
-                    lbl.Font = new Font(lbl.Font.FontFamily, _overlayFontSize, FontStyle.Bold);
-                    int x = (box.ClientSize.Width - lbl.PreferredWidth) / 2;
-                    int y = Math.Max(4, (int)(box.ClientSize.Height * 0.08));
+                    if (lbl.Font.Size != _overlayFontSize)
+                        lbl.Font = new Font(lbl.Font.FontFamily, _overlayFontSize, FontStyle.Bold);
+                    int w = Math.Min(lbl.PreferredWidth + 10, Math.Max(40, box.ClientSize.Width - 8));
+                    int h = lbl.PreferredHeight + 4;
+                    int x = (box.ClientSize.Width - w) / 2;
+                    if (x < 2) x = 2;
+                    int y = Math.Max(2, (int)(box.ClientSize.Height * 0.08));
                     lbl.Location = new Point(x, y);
-                    lbl.Size = new Size(Math.Min(lbl.PreferredWidth + 8, box.ClientSize.Width - 8), lbl.PreferredHeight + 4);
+                    lbl.Size = new Size(w, h);
                     lbl.Visible = true;
                     lbl.BringToFront();
+                    lbl.Invalidate(); // ch:透明底色 Label 需自身重绘才能透出下方新图像
                 }
             }
             catch (Exception ex) { new ErrorLog().WriteLog("UpdateModbusOverlayLabels: " + ex.Message); }

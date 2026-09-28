@@ -105,6 +105,10 @@
             this.labelDisplayHz = new System.Windows.Forms.Label();
             this.chkPerfPrint = new System.Windows.Forms.CheckBox();
             this.numDisplayHz = new System.Windows.Forms.NumericUpDown();
+            this.labelOverlayFontSize = new System.Windows.Forms.Label();
+            this.numOverlayFontSize = new System.Windows.Forms.NumericUpDown();
+            this.labelOverlayFontColor = new System.Windows.Forms.Label();
+            this.btnOverlayFontColor = new System.Windows.Forms.Button();
             this.checkBox2 = new System.Windows.Forms.CheckBox();
             this.checkBox1 = new System.Windows.Forms.CheckBox();
             this.label18 = new System.Windows.Forms.Label();
@@ -1622,6 +1626,56 @@
             this.chkPerfPrint.UseVisualStyleBackColor = true;
             this.chkPerfPrint.CheckedChanged += new System.EventHandler(this.chkPerfPrint_CheckedChanged);
             // 
+            // labelOverlayFontSize（ch:R32 覆盖层字号标注；输出方式行「下方单独一行」y=388，x 从 6 起）
+            //   整行控件 x 均 <581（tabPage5 页宽），无需横向滚动即可见；设计器可直接拖改
+            // 
+            this.labelOverlayFontSize.AutoSize = true;
+            this.labelOverlayFontSize.Location = new System.Drawing.Point(6, 388);
+            this.labelOverlayFontSize.Name = "labelOverlayFontSize";
+            this.labelOverlayFontSize.TabIndex = 1005;
+            this.labelOverlayFontSize.Text = "覆盖字号";
+            // 
+            // numOverlayFontSize（ch:R32 覆盖层字号 6~72pt，默认 12；ValueChanged 落 ini camera/overlay_font_size）
+            // 
+            this.numOverlayFontSize.Location = new System.Drawing.Point(76, 385);
+            this.numOverlayFontSize.Maximum = new decimal(new int[] {
+            72,
+            0,
+            0,
+            0});
+            this.numOverlayFontSize.Minimum = new decimal(new int[] {
+            6,
+            0,
+            0,
+            0});
+            this.numOverlayFontSize.Name = "numOverlayFontSize";
+            this.numOverlayFontSize.Size = new System.Drawing.Size(55, 21);
+            this.numOverlayFontSize.TabIndex = 1006;
+            this.numOverlayFontSize.Value = new decimal(new int[] {
+            12,
+            0,
+            0,
+            0});
+            this.numOverlayFontSize.ValueChanged += new System.EventHandler(this.numOverlayFontSize_ValueChanged);
+            // 
+            // labelOverlayFontColor（ch:R32 覆盖层字色标注；同行 x=140）
+            // 
+            this.labelOverlayFontColor.AutoSize = true;
+            this.labelOverlayFontColor.Location = new System.Drawing.Point(140, 388);
+            this.labelOverlayFontColor.Name = "labelOverlayFontColor";
+            this.labelOverlayFontColor.TabIndex = 1007;
+            this.labelOverlayFontColor.Text = "覆盖字色";
+            // 
+            // btnOverlayFontColor（ch:R32 覆盖层字色选择：ColorDialog 拾色，按钮自身背景即当前色预览）
+            // 
+            this.btnOverlayFontColor.Location = new System.Drawing.Point(206, 385);
+            this.btnOverlayFontColor.Name = "btnOverlayFontColor";
+            this.btnOverlayFontColor.Size = new System.Drawing.Size(72, 23);
+            this.btnOverlayFontColor.TabIndex = 1008;
+            this.btnOverlayFontColor.Text = "选颜色";
+            this.btnOverlayFontColor.UseVisualStyleBackColor = true;
+            this.btnOverlayFontColor.Click += new System.EventHandler(this.btnOverlayFontColor_Click);
+            // 
             // tabPage5
             // 
             resources.ApplyResources(this.tabPage5, "tabPage5");
@@ -1631,6 +1685,10 @@
             this.tabPage5.Controls.Add(this.labelDisplayHz);
             this.tabPage5.Controls.Add(this.numDisplayHz);
             this.tabPage5.Controls.Add(this.chkPerfPrint);
+            this.tabPage5.Controls.Add(this.labelOverlayFontSize);
+            this.tabPage5.Controls.Add(this.numOverlayFontSize);
+            this.tabPage5.Controls.Add(this.labelOverlayFontColor);
+            this.tabPage5.Controls.Add(this.btnOverlayFontColor);
             this.tabPage5.Controls.Add(this.label48);
             this.tabPage5.Controls.Add(this.numericUpDown5);
             this.tabPage5.Controls.Add(this.label111);
@@ -7253,6 +7311,10 @@
         private System.Windows.Forms.Label labelDisplayHz;
         private System.Windows.Forms.NumericUpDown numDisplayHz;
         private System.Windows.Forms.CheckBox chkPerfPrint;
+        private System.Windows.Forms.Label labelOverlayFontSize;
+        private System.Windows.Forms.NumericUpDown numOverlayFontSize;
+        private System.Windows.Forms.Label labelOverlayFontColor;
+        private System.Windows.Forms.Button btnOverlayFontColor;
         private System.Windows.Forms.Button button6;
         private System.Windows.Forms.Button button14;
         private System.Windows.Forms.Button button15;
