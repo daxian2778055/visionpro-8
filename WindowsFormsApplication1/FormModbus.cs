@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.ComponentModel;
 using System.Data;
@@ -22,6 +22,9 @@ namespace WindowsFormsApplication1
     public partial class FormModbus : Form
     {
         public Label labelFallbackHint = new Label();
+
+        private volatile bool _pollingStop; // ch:R31 轮询线程退出标志
+        private Thread _pollingThread;      // ch:R31 替代 fins_duxie 字段，便于 Shown 启动、FormClosing 停止
 
         public FormModbus()
         {
@@ -48,6 +51,9 @@ namespace WindowsFormsApplication1
             xieWuTip.SetToolTip(checkBoxXieWu, "勾选：独立长连接极速写(xie_wu)，不占用轮询连接。\r\n取消：走 HSL 安全写(xie)。设置自动保存。");
             checkBoxXieWu.CheckedChanged += checkBoxXieWu_CheckedChanged;
             checkBox1.CheckedChanged += (s, e) => { xieWuAddrFromZero = checkBox1.Checked; };
+
+            // ch:R31 增加 Shown 事件：窗口完全显示后再启动轮询线程，避免 Load 期控件未就绪时后台线程读 UI 导致白屏/闪退
+            this.Shown += FormModbus_Shown;
         }
 
         private ClassIni wdini = new ClassIni();
@@ -205,9 +211,6 @@ namespace WindowsFormsApplication1
             //   需再取证时在 test.ini [camera] fankui_diag=1 重开(若现场已显式存在 =1 需改为0或删该行)。
             _fankuiDiag = wdini.ReadString("camera", "fankui_diag", "0").Replace("\0", "") == "1";
 
-            fins_duxie = new Thread(new ThreadStart(Fins_duxie));
-            fins_duxie.IsBackground = true;
-            fins_duxie.Start(); // ch:恢复原版时序：轮询线程尽早启动（Load 后续异常不影响轮询）
             decimal xuanzhong_temp = 0;
 
            // comboBox1.DataSource = HslCommunication.BasicFramework.SoftBasic.GetEnumValues<HslCommunication.Core.DataFormat>();
@@ -287,7 +290,7 @@ namespace WindowsFormsApplication1
             if (fins_en)
             {
                 checkBox2.CheckState = CheckState.Checked;
-                button1_Click(null, null);
+                // ch:R31 去掉 Load 里同步连接（阻塞 UI 导致白屏），改由用户手动点"连接"按钮，或在 Shown 里异步自连
             }
             geshu = (int)IniDec(wdini.ReadString("modbustcp", "geshu", "0"), 0); // ch:R11-2 TryParse+下限 0（负值直接跳过循环）
             geshu = Math.Max(0, Math.Min(64, geshu)); // 上限 64：通道数即循环上界，防 ini 手改天文数字把 Load 卡死
@@ -592,6 +595,14 @@ namespace WindowsFormsApplication1
             }
         }
 
+        // ch:R31 Shown 事件：窗口完全显示后再启动轮询线程，避免 Load 期控件未就绪时后台线程读 UI 导致白屏/闪退
+        private void FormModbus_Shown(object sender, EventArgs e)
+        {
+            _pollingStop = false;
+            _pollingThread = new Thread(PollingLoop) { IsBackground = true, Name = "ModbusTCP-Polling" };
+            _pollingThread.Start();
+        }
+
         private void CheckBox3_CheckedChanged(object sender, EventArgs e)
         {
             if (busTcpClient != null)
@@ -603,6 +614,14 @@ namespace WindowsFormsApplication1
         {
             e.Cancel = true;
             this.Visible = false;
+            // ch:R31 停止轮询线程，避免窗口隐藏后后台线程继续访问已隐藏的 UI 控件
+            _pollingStop = true;
+            try
+            {
+                if (_pollingThread != null && _pollingThread.IsAlive)
+                    _pollingThread.Join(200); // 最多等 200ms
+            }
+            catch { }
         }
         
 
@@ -1306,7 +1325,6 @@ namespace WindowsFormsApplication1
             }
         }
         public bool[] fins_xie = new bool[] { false, false, false, false, false, false, false, false, false, false };
-        private Thread fins_duxie;
 
         private void button9_Click(object sender, EventArgs e)
         {
@@ -1432,175 +1450,210 @@ namespace WindowsFormsApplication1
             Regex rg = new Regex("(?<=(" + sta + "))[.\\s\\S]*?(?=(" + end + "))", RegexOptions.Multiline | RegexOptions.Singleline);
             return rg.Match(str).Value;
         }
-        void Fins_duxie()
+        // ch:R31 替代原 Fins_duxie：1) 用 _pollingStop 标志优雅退出；2) 每轮循环头用 Invoke 缓存 UI 控件值，彻底消除跨线程读取导致的白屏/闪退
+        private void PollingLoop()
         {
-            while (true)
+            while (!_pollingStop)
             {
-                // ch:R10-3 原 int.Parse(decimal.ToString()) 在区域小数点/ini 带小数时抛 FormatException，且在 try 外直接杀死轮询线程；
-                // 另：lunxun_time<=0 时补 50ms 小睡，避免 while(true) 全速空转吃满一核
-                // ch:R12 判据由 >0 改为 >=1：原 0<lunxun_time<1 时 (int) 截成 0 → Sleep(0) 忙等，
-                //   且 if 仍为真 → 全速轮询 + 单核打满 + Modbus 请求风暴（NUD3 最小值为 0，ini 手改 0.5 即触发）
-                bool pollOn = lunxun_time >= 1;
-                Thread.Sleep(pollOn ? (int)lunxun_time : 50);
-                if (pollOn)
+                // ch:每轮循环头在 UI 线程缓存一次界面配置，后续全部用缓存值，零跨线程访问
+                string cachedIp = "127.0.0.1";
+                int cachedPort = 9600;
+                byte cachedStation = 1;
+                bool cachedAddrZero = false;
+                bool cachedStrReverse = false;
+                string cachedUser = "";
+                string cachedPwd = "";
+                int cachedDataFmt = 0;
+                decimal cachedLunxunTime = 20;
+                bool cachedLunxunen = false;
+                bool cachedEn = false;
+                bool cachedChushihua = false;
+                bool cachedClearing = false;
+                Dictionary<string, string[]> cachedFinsDic = new Dictionary<string, string[]>();
+                decimal cachedAddressQishi = 0;
+
+                try
                 {
-                    try
+                    if (InvokeRequired)
                     {
-                        if (chushihua)
+                        Invoke(new Action(() =>
                         {
-                            if (fins_en && fins_lunxunen && !clearing)
+                            cachedIp = textBox1.Text.Trim();
+                            int.TryParse(textBox2.Text.Trim(), out cachedPort);
+                            byte.TryParse(textBox15.Text.Trim(), out cachedStation);
+                            cachedAddrZero = checkBox1.Checked;
+                            cachedStrReverse = checkBox3.Checked;
+                            cachedUser = textBox14.Text;
+                            cachedPwd = textBox12.Text;
+                            cachedDataFmt = comboBox1.SelectedIndex;
+                            cachedLunxunTime = lunxun_time;
+                            cachedLunxunen = fins_lunxunen;
+                            cachedEn = fins_en;
+                            cachedChushihua = chushihua;
+                            cachedClearing = clearing;
+                            cachedAddressQishi = address_qishi;
+                            cachedFinsDic = new Dictionary<string, string[]>(fins_dic);
+                        }));
+                    }
+                }
+                catch { /* 窗口已关闭等异常，用默认值继续 */ }
+
+                bool pollOn = cachedLunxunTime >= 1;
+                Thread.Sleep(pollOn ? (int)cachedLunxunTime : 50);
+
+                if (!_pollingStop && pollOn && cachedChushihua && cachedEn && cachedLunxunen && !cachedClearing)
+                {
+                    lock (modbusIoLock)
+                    {
+                        // ch:自动连接/重连——用缓存值
+                        if (busTcpClient == null)
+                        {
+                            try
                             {
-                                lock (modbusIoLock)
+                                busTcpClient = new ModbusTcpNet(cachedIp, cachedPort, cachedStation);
+                                busTcpClient.AddressStartWithZero = cachedAddrZero;
+                                busTcpClient.IsStringReverse = cachedStrReverse;
+                                busTcpClient.SetLoginAccount(cachedUser, cachedPwd);
+                                busTcpClient.ConnectServer();
+                                // ch:字节序在连接后设置
+                                if (busTcpClient != null)
                                 {
-                                if (busTcpClient == null)
-                                {
-                                    // ch:未连接时用当前界面配置自动创建并连接（修改 IP 后无需重启即可生效）
-                                    try
+                                    switch (cachedDataFmt)
                                     {
-                                        busTcpClient = new ModbusTcpNet(textBox1.Text.Trim(), int.Parse(textBox2.Text.Trim()), byte.Parse(textBox15.Text.Trim()));
-                                        busTcpClient.AddressStartWithZero = checkBox1.Checked;
-                                        busTcpClient.IsStringReverse = checkBox3.Checked;
-                                        busTcpClient.SetLoginAccount(textBox14.Text, textBox12.Text);
-                                        busTcpClient.ConnectServer();
-                                        ApplyTcpDataFormat(); // ch:P1-⑦ 新连接补设字节序，避免重连后 float/long 写错
+                                        case 0: busTcpClient.DataFormat = HslCommunication.Core.DataFormat.ABCD; break;
+                                        case 1: busTcpClient.DataFormat = HslCommunication.Core.DataFormat.BADC; break;
+                                        case 2: busTcpClient.DataFormat = HslCommunication.Core.DataFormat.CDAB; break;
+                                        case 3: busTcpClient.DataFormat = HslCommunication.Core.DataFormat.DCBA; break;
                                     }
-                                    catch (Exception ex) { MsgErroeLog.WriteLog("ModbusTCP 自动连接失败:" + ex.Message); }
-                                    if (busTcpClient == null) continue;
                                 }
-                                bool gridUi = AllowModbusGridRefresh();
-                                int xuanzhong_temp = 0;
-                                string fins_temp = "";
-                                string shuju_temp = "";
-                                if (fins_dic.Count > 0)
+                            }
+                            catch (Exception ex) { MsgErroeLog.WriteLog("ModbusTCP 自动连接失败:" + ex.Message); }
+                            if (busTcpClient == null) continue;
+                        }
+
+                        bool gridUi = AllowModbusGridRefresh();
+                        int xuanzhong_temp = 0;
+                        string fins_temp = "";
+                        string shuju_temp = "";
+                        if (cachedFinsDic.Count > 0)
+                        {
+                            foreach (var par in cachedFinsDic)
+                            {
+                                shuju_temp = "";
+                                int plen;
+                                if (!int.TryParse(par.Value[2], out plen)) continue;
+                                for (int j = 0; j < plen; j++)
                                 {
-                                    foreach (var par in fins_dic)
+                                    int addrBase;
+                                    if (!int.TryParse(par.Value[1], out addrBase)) continue;
+                                    if (par.Value[4] == "int")
                                     {
-                                        shuju_temp = "";
-                                        for (int j = 0; j < int.Parse(par.Value[2]); j++)
+                                        xuanzhong_temp = addrBase - (int)cachedAddressQishi + j;
+                                        string addrRd = (addrBase + j).ToString();
+                                        OperateResult<short> rdR24 = busTcpClient.ReadInt16(addrRd);
+                                        DemoUtils.ReadResultRender1(rdR24, addrRd, out fins_temp);
+                                        FankuiDiagLogByKey("读回|" + addrRd, "反馈诊断 读回 addr=" + addrRd + " val=" + (rdR24.IsSuccess ? rdR24.Content.ToString() : "读失败"));
+                                        if (gridUi && xuanzhong_temp >= 0 && xuanzhong_temp < 50 && fins_data.ContainsKey(xuanzhong_temp))
+                                            SetModbusGridValue(fins_data[xuanzhong_temp][0], fins_data[xuanzhong_temp][1], fins_temp);
+                                        shuju_temp += GetMiddleValue(fins_temp, " ", "\r");
+                                    }
+                                    else if (par.Value[4] == "string")
+                                    {
+                                        xuanzhong_temp = addrBase - (int)cachedAddressQishi + j;
+                                        DemoUtils.ReadResultRender1(busTcpClient.ReadString((addrBase + j).ToString(), 1), (addrBase + j).ToString(), out fins_temp);
+                                        if (gridUi && xuanzhong_temp >= 0 && xuanzhong_temp < 50 && fins_data.ContainsKey(xuanzhong_temp))
+                                            SetModbusGridValue(fins_data[xuanzhong_temp][0], fins_data[xuanzhong_temp][1], fins_temp);
+                                        shuju_temp += GetMiddleValue(fins_temp, " ", "\r");
+                                    }
+                                    else if (par.Value[4] == "long" && j % 2 == 0)
+                                    {
+                                        xuanzhong_temp = addrBase - (int)cachedAddressQishi + j;
+                                        DemoUtils.ReadResultRender1(busTcpClient.ReadInt32((addrBase + j).ToString()), (addrBase + j).ToString(), out fins_temp);
+                                        if (gridUi && xuanzhong_temp >= 0 && xuanzhong_temp < 50 && fins_data.ContainsKey(xuanzhong_temp))
+                                            SetModbusGridValue(fins_data[xuanzhong_temp][0], fins_data[xuanzhong_temp][1], fins_temp);
+                                        shuju_temp += GetMiddleValue(fins_temp, " ", "\r");
+                                    }
+                                    else if (par.Value[4] == "float" && j % 2 == 0)
+                                    {
+                                        xuanzhong_temp = addrBase - (int)cachedAddressQishi + j;
+                                        DemoUtils.ReadResultRender1(busTcpClient.ReadFloat((addrBase + j).ToString()), (addrBase + j).ToString(), out fins_temp);
+                                        if (gridUi && xuanzhong_temp >= 0 && xuanzhong_temp < 50 && fins_data.ContainsKey(xuanzhong_temp))
+                                            SetModbusGridValue(fins_data[xuanzhong_temp][0], fins_data[xuanzhong_temp][1], fins_temp);
+                                        shuju_temp += GetMiddleValue(fins_temp, " ", "\r");
+                                    }
+                                }
+                                if (par.Value[3] == "触发")
+                                {
+                                    foreach (var pap in camera_dic)
+                                    {
+                                        if (pap.Value[0] == par.Value[0])
                                         {
-                                            if (par.Value[4] == "int")
+                                            if (pap.Key == 10 && qiehuanzhong == 0)
                                             {
-
-                                                xuanzhong_temp = int.Parse(par.Value[1]) - int.Parse(address_qishi.ToString()) + j;
-                                                // 读取short变量
-                                                string addrRd = (int.Parse(par.Value[1]) + j).ToString(); // ch:R24 地址只算一次
-                                                OperateResult<short> rdR24 = busTcpClient.ReadInt16(addrRd);
-                                                DemoUtils.ReadResultRender1(rdR24, addrRd, out fins_temp);
-                                                FankuiDiagLogByKey("读回|" + addrRd, "反馈诊断 读回 addr=" + addrRd + " val=" + (rdR24.IsSuccess ? rdR24.Content.ToString() : "读失败")); // ch:R24 环④ 线上寄存器原值，与环②发出值同日志时间轴夹击改写时刻
-                                                if (gridUi && xuanzhong_temp >= 0 && xuanzhong_temp < 50)
-                                                    SetModbusGridValue(fins_data[int.Parse(xuanzhong_temp.ToString())][0], fins_data[int.Parse(xuanzhong_temp.ToString())][1], fins_temp);
-                                                shuju_temp += GetMiddleValue(fins_temp, " ", "\r");
-                                            }
-                                            else if (par.Value[4] == "string")
-                                            {
-                                                xuanzhong_temp = int.Parse(par.Value[1]) - int.Parse(address_qishi.ToString()) + j;
-                                                // 读取字符串
-                                                DemoUtils.ReadResultRender1(busTcpClient.ReadString((int.Parse(par.Value[1]) + j).ToString(), 1), (int.Parse(par.Value[1]) + j).ToString(), out fins_temp);
-                                                if (gridUi && xuanzhong_temp >= 0 && xuanzhong_temp < 50)
-                                                    SetModbusGridValue(fins_data[int.Parse(xuanzhong_temp.ToString())][0], fins_data[int.Parse(xuanzhong_temp.ToString())][1], fins_temp);
-                                                shuju_temp += GetMiddleValue(fins_temp, " ", "\r");
-                                            }
-                                            else if (par.Value[4] == "long" && j % 2 == 0)
-                                            {
-                                                xuanzhong_temp = int.Parse(par.Value[1]) - int.Parse(address_qishi.ToString()) + j;
-                                                // 读取字符串
-                                                DemoUtils.ReadResultRender1(busTcpClient.ReadInt32((int.Parse(par.Value[1]) + j).ToString()), (int.Parse(par.Value[1]) + j).ToString(), out fins_temp);
-                                                if (gridUi && xuanzhong_temp >= 0 && xuanzhong_temp < 50)
-                                                    SetModbusGridValue(fins_data[int.Parse(xuanzhong_temp.ToString())][0], fins_data[int.Parse(xuanzhong_temp.ToString())][1], fins_temp);
-                                                shuju_temp += GetMiddleValue(fins_temp, " ", "\r");
-                                            }
-                                            else if (par.Value[4] == "float" && j % 2 == 0)
-                                            {
-                                                xuanzhong_temp = int.Parse(par.Value[1]) - int.Parse(address_qishi.ToString()) + j;
-                                                // 读取字符串
-                                                DemoUtils.ReadResultRender1(busTcpClient.ReadFloat((int.Parse(par.Value[1]) + j).ToString()), (int.Parse(par.Value[1]) + j).ToString(), out fins_temp);
-                                                if (gridUi && xuanzhong_temp >= 0 && xuanzhong_temp < 50)
-                                                    SetModbusGridValue(fins_data[int.Parse(xuanzhong_temp.ToString())][0], fins_data[int.Parse(xuanzhong_temp.ToString())][1], fins_temp);
-                                                shuju_temp += GetMiddleValue(fins_temp, " ", "\r");
-                                            }
-                                        }
-                                        if (par.Value[3] == "触发")
-                                        {
-                                            foreach (var pap in camera_dic)
-                                            {
-                                                if (pap.Value[0] == par.Value[0])
+                                                if (qiehuan(shuju_temp.Replace("\0", "")) == 1)
                                                 {
-                                                    if (pap.Key == 10 && qiehuanzhong == 0)
+                                                    if (File.Exists(lujing.Replace("\0", "")))
                                                     {
-
-                                                        if (qiehuan(shuju_temp.Replace("\0", "")) == 1)
-                                                        {
-                                                            if (File.Exists(lujing.Replace("\0", "")))
-                                                            {
-                                                                qiehuanzhong = 1;
-                                                                SelectionChangedEventArgs E = new SelectionChangedEventArgs(shuju_temp, pap.Key.ToString(), "0");
-                                                                getData(this, E);
-                                                            }
-                                                            else
-                                                            {
-                                                                MsgErroeLog.WriteLog("方案路径:" + lujing + ":不存在!");
-                                                            }
-                                                        }
+                                                        qiehuanzhong = 1;
+                                                        SelectionChangedEventArgs E = new SelectionChangedEventArgs(shuju_temp, pap.Key.ToString(), "0");
+                                                        getData(this, E);
                                                     }
-                                                    else if (pap.Key != 10)
+                                                    else
                                                     {
-                                                        if (camera_dic[pap.Key][2] == "true")
-                                                        {
-                                                            if (shuju_temp != camera_dic[pap.Key][1])
-                                                            {
-                                                                SelectionChangedEventArgs E = new SelectionChangedEventArgs(shuju_temp, pap.Key.ToString(), fins_zuhe[camera_dic[pap.Key][0]]);
-                                                                getData(this, E);
-                                                                // ch:记录已处理的触发值，防止 PLC 触发字保持期间重复触发
-                                                                camera_dic[pap.Key][1] = shuju_temp;
-                                                            }
-                                                        }
-
+                                                        MsgErroeLog.WriteLog("方案路径:" + lujing + ":不存在!");
+                                                    }
+                                                }
+                                            }
+                                            else if (pap.Key != 10)
+                                            {
+                                                if (camera_dic[pap.Key][2] == "true")
+                                                {
+                                                    if (shuju_temp != camera_dic[pap.Key][1])
+                                                    {
+                                                        SelectionChangedEventArgs E = new SelectionChangedEventArgs(shuju_temp, pap.Key.ToString(), fins_zuhe[camera_dic[pap.Key][0]]);
+                                                        getData(this, E);
+                                                        camera_dic[pap.Key][1] = shuju_temp;
                                                     }
                                                 }
                                             }
                                         }
                                     }
-
                                 }
-                                if (fins_temp.Contains(":"))
-                                {
-                                    failCount++;
-                                    if (failCount % 30 == 1)
-                                        MsgErroeLog.WriteLog(fins_temp + "_modbustcp");
-                                    // ch:读取失败自动用当前界面配置重连（修改 IP/端口后无需重启即可生效）
-                                    try
-                                    {
-                                        busTcpClient?.ConnectClose();
-                                        busTcpClient = new ModbusTcpNet(textBox1.Text.Trim(), int.Parse(textBox2.Text.Trim()), byte.Parse(textBox15.Text.Trim()));
-                                        busTcpClient.AddressStartWithZero = checkBox1.Checked;
-                                        busTcpClient.IsStringReverse = checkBox3.Checked;
-                                        busTcpClient.SetLoginAccount(textBox14.Text, textBox12.Text);
-                                        busTcpClient.ConnectServer();
-                                        ApplyTcpDataFormat(); // ch:P1-⑦ 重连分支补设字节序，避免重连后 float/long 写错
-                                    }
-                                    catch (Exception ex) { new ErrorLog().WriteLog(ex.ToString()); }
-                                }
-                                else
-                                {
-                                    failCount = 0;
-                                }
-                                } // ch:modbusIoLock
                             }
                         }
-                    }
-                    catch (Exception ex)
-                    {
-                        MsgErroeLog.WriteLog(ex.Message + "modbustcp");
-                    }
-                }
-                else
-                {
-                    // ch:R12 轮询关闭期的空闲小睡；顶部三元在 pollOn=false 时已 Sleep(50)，此处再睡一次是冗余的，
-                    //   但仅让关闭期循环从 50ms 变 100ms（更省 CPU），无功能影响，故保留不动原结构
+
+                        if (fins_temp.Contains(":"))
+                        {
+                            failCount++;
+                            if (failCount % 30 == 1)
+                                MsgErroeLog.WriteLog(fins_temp + "_modbustcp");
+                            // ch:读取失败自动用缓存配置重连
+                            try
+                            {
+                                busTcpClient?.ConnectClose();
+                                busTcpClient = new ModbusTcpNet(cachedIp, cachedPort, cachedStation);
+                                busTcpClient.AddressStartWithZero = cachedAddrZero;
+                                busTcpClient.IsStringReverse = cachedStrReverse;
+                                busTcpClient.SetLoginAccount(cachedUser, cachedPwd);
+                                busTcpClient.ConnectServer();
+                                switch (cachedDataFmt)
+                                {
+                                    case 0: busTcpClient.DataFormat = HslCommunication.Core.DataFormat.ABCD; break;
+                                    case 1: busTcpClient.DataFormat = HslCommunication.Core.DataFormat.BADC; break;
+                                    case 2: busTcpClient.DataFormat = HslCommunication.Core.DataFormat.CDAB; break;
+                                    case 3: busTcpClient.DataFormat = HslCommunication.Core.DataFormat.DCBA; break;
+                                }
+                            }
+                            catch (Exception ex) { new ErrorLog().WriteLog(ex.ToString()); }
+                        }
+                        else
+                        {
+                            failCount = 0;
+                        }
+                    } // ch:modbusIoLock
                 }
             }
-        }
-        public void xie(string value)
+        }        public void xie(string value)
         {
             try
             {
