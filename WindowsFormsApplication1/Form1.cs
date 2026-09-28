@@ -50,6 +50,9 @@ namespace WindowsFormsApplication1
         private volatile bool _overlayLabelsCreated = false;
         private int _overlayFontSize = 12;   // ini camera/overlay_font_size
         private Color _overlayFontColor = Color.Yellow; // ini camera/overlay_font_color (ARGB)
+        // ch:R33 每相机「本拍 ModbusTCP 输出文本」缓存：检测线程在 blockLock 内写入(取 block 的 modbustcp 输出端)，
+        //   UI 线程覆盖层只读本字段——不读 FormModbus.camera_dic，故无论最终走 frm3 还是配置窗都能显示。
+        private readonly string[] _mtcpOverlayOut = new string[9];
         // ch:R32 覆盖层配置控件本体已在 Designer（labelOverlayFontSize/numOverlayFontSize/labelOverlayFontColor/btnOverlayFontColor），
         //   设计器可直接拖改；此处只保留状态字段与回填/事件方法。
         private CogRecordDisplay[] _camRecordDisplay = new CogRecordDisplay[10];
@@ -4608,6 +4611,11 @@ namespace WindowsFormsApplication1
                             try { snapTcp = (outTcp && myjob.tcp) ? (faultThisFrame ? "999" : (myjob.block.Outputs.Contains("tcp") && myjob.block.Outputs["tcp"].Value != null ? myjob.block.Outputs["tcp"].Value.ToString() : "")) : ""; } catch { snapTcp = ""; } // ch:R13 只在本路真的会发时才读 Output（持 blockLock，关键路径上）
                             try { snapSerial = ((outSerial && myjob.serial) || (outMode == OutModbusTcp && myjob.modbustcp)) ? (faultThisFrame ? "999" : (myjob.block.Outputs.Contains("serial") && myjob.block.Outputs["serial"].Value != null ? myjob.block.Outputs["serial"].Value.ToString() : "")) : ""; } catch { snapSerial = ""; } // ch:R13 + ch:R19 mode4 下数据若在 serial 终端也读出（见串口分支的 mode4 回退子句）
                             try { snapMtcp = (outMtcp && myjob.modbustcp) ? (faultThisFrame ? "999" : (myjob.block.Outputs.Contains("modbustcp") && myjob.block.Outputs["modbustcp"].Value != null ? myjob.block.Outputs["modbustcp"].Value.ToString() : "")) : ""; } catch { snapMtcp = ""; } // ch:R13
+                            // ch:R33 画面覆盖层的 ModbusTCP 输出值捕获（与数据路无关）：
+                            //   需求口径=「该流程勾了 modbustcp 输出 + 输出模式选 ModbusTCP」就显示 ToolBlock 的 modbustcp 输出值，
+                            //   最终经 frm3 还是 FormModbus 出数不在考虑内。故直接读 block 的 modbustcp 输出端取文本，
+                            //   为空时回落 serial 端(R19：现场数据也有落在 serial 端的情况)，两条都不通才算无输出。
+                            RecordModbusOverlayOut(int.Parse(myjob.path_number), myjob);
                             try { snapBuchang = (myjob.block.Outputs.Contains("buchang") && myjob.block.Outputs["buchang"].Value != null ? myjob.block.Outputs["buchang"].Value.ToString() : "0"); } catch { snapBuchang = "0"; }
                             try
                             {
@@ -11754,7 +11762,7 @@ namespace WindowsFormsApplication1
                 Label lbl = new Label();
                 lbl.Name = "lblModbusOverlayCam" + cam;
                 lbl.AutoSize = false;
-                lbl.TextAlign = ContentAlignment.MiddleCenter;
+                lbl.TextAlign = ContentAlignment.MiddleCenter; // ch:R33 AutoSize=false 时 Label 按给定宽度自动换行，长输出串也能完整显示
                 lbl.BackColor = Color.Transparent;
                 lbl.ForeColor = _overlayFontColor;
                 lbl.Font = new Font("微软雅黑", _overlayFontSize, FontStyle.Bold);
@@ -11766,26 +11774,41 @@ namespace WindowsFormsApplication1
             _overlayLabelsCreated = true;
         }
 
-        // ch:R32 覆盖层显示条件：原图模式 + ModbusTCP 数据路在用。
-        //   R31 只认 _outputMode==6(仅「ModbusTCP(配置窗)」一项)，现场实际多选「ModbusTCP输出」(mode4)，
-        //   或留在「自动」而配置窗路活跃(fins_en&&chushihua)——三种情况一律不显示，是 v1.3.26「没看到字」的根因。
-        //   R32 三选一即显示：mode4 / mode6 / 配置窗路活跃(自动模式下同样成立)。
+        // ch:R33 检测线程侧登记：取该相机方案流程(ToolBlock)的 modbustcp 键值——需求口径即
+        //   「流程里有 modbustcp 这个键，每次拍照这个键的值就是 modbustcp 输出，真正通讯输出的数据也来自它」，
+        //   故直接读 block.Outputs["modbustcp"]；该端不存在时才回落 serial 端(R19：个别流程数据落在 serial 端)。
+        //   与最终走 frm3 还是 FormModbus 出数无关。
+        private void RecordModbusOverlayOut(int cam, Myjob job)
+        {
+            if (cam < 1 || cam > 8 || job == null)
+                return;
+            string v = "";
+            try
+            {
+                // ch:调用点已在 blockLock 内（getrecord 快照段），此处不再重复入锁，避免 Monitor 重入外的死锁风险
+                if (job.block.Outputs.Contains("modbustcp") && job.block.Outputs["modbustcp"].Value != null)
+                    v = job.block.Outputs["modbustcp"].Value.ToString();
+                if (string.IsNullOrEmpty(v) && job.block.Outputs.Contains("serial") && job.block.Outputs["serial"].Value != null)
+                    v = job.block.Outputs["serial"].Value.ToString();
+            }
+            catch { }
+            if (v == "无") v = "";
+            _mtcpOverlayOut[cam] = v ?? "";
+        }
+
+        // ch:R33 覆盖层显示条件（严格按需求口径，两条同时成立即显示）：
+        //   ①「输出方式」下拉选的是 ModbusTCP（mode4「ModbusTCP输出」或 mode6「ModbusTCP(配置窗)」）；
+        //   ②画面处于「显示原图」——原图是给操作工看数值的画面，渲染图带叠加图形不适合压字。
+        //   流程里有没有 modbustcp 键不作为条件：有键就显示其值(每拍照更新)，没值显示「相机N 待机」；
+        //   数据最终经 frm3 还是配置窗出数与显示无关(R19 的数据路裁决只管发哪条，不影响显示口径)。
         private bool ModbusOverlayActive()
         {
             if (!displayRawImage)
                 return false;
-            if (_outputMode == OutModbusTcp || _outputMode == OutModbusTcpWin)
-                return true;
-            try
-            {
-                if (modbustcp != null && modbustcp.fins_en && modbustcp.chushihua)
-                    return true;
-            }
-            catch { }
-            return false;
+            return _outputMode == OutModbusTcp || _outputMode == OutModbusTcpWin;
         }
 
-        // ch:R31/R32 更新覆盖 Label：条件满足才显示并刷文案/位置/样式
+        // ch:R31/R32/R33 更新覆盖 Label：条件满足才显示并刷文案/位置/样式
         private void UpdateModbusOverlayLabels()
         {
             try
@@ -11796,7 +11819,6 @@ namespace WindowsFormsApplication1
                         if (_modbusOverlayLabels[cam] != null) _modbusOverlayLabels[cam].Visible = false;
                     return;
                 }
-                if (modbustcp == null) return;
 
                 EnsureModbusOverlayLabels();
 
@@ -11807,36 +11829,25 @@ namespace WindowsFormsApplication1
                     PictureBox box = GetCameraPictureBox(cam.ToString());
                     if (box == null || !box.Visible || CameraRoiOn(cam)) { lbl.Visible = false; continue; }
 
-                    // ch:R32 文案取「真正发出去的值」：camera_dic[cam][4] 由 WriteCameraResult 登记
-                    //   （ToolBlock 输出的原样值串），[3]=反馈通道名，[1]=PLC 读回的触发字。
-                    //   R31 误取 [1]（读回触发字）——那是 PLC 给我们的信号，不是我们发出的输出。
-                    string text = "";
-                    string[] row;
-                    if (modbustcp.camera_dic.TryGetValue(cam, out row) && row != null && row.Length >= 5)
-                    {
-                        text = (row[4] ?? "").Trim();
-                        if (!string.IsNullOrEmpty(text) && text != "无")
-                        {
-                            string chn = (row[3] ?? "").Trim();
-                            if (!string.IsNullOrEmpty(chn) && chn != "0")
-                                text = text + "  →" + chn; // ch:值 + 目标反馈通道，一眼看出发给哪路
-                        }
-                    }
-                    if (string.IsNullOrEmpty(text) || text == "无")
+                    // ch:R33 文案 = 该相机本拍流程 modbustcp 键的值(检测线程每帧登记)，
+                    //   不再读 FormModbus.camera_dic——那只在配置窗数据路命中，现场恒空导致标签一直「待机」。
+                    string text = (_mtcpOverlayOut[cam] ?? "").Trim();
+                    if (string.IsNullOrEmpty(text))
                         text = "相机" + cam + " 待机";
 
-                    // ch:位置：画面中上——水平居中、垂直 8% 处（留白不遮关键特征）
+                    // ch:位置：画面中上——水平居中、垂直 8% 处（留白不遮关键特征）；长文本换行，最多 3 行
                     lbl.Text = text;
                     lbl.ForeColor = _overlayFontColor;
                     if (lbl.Font.Size != _overlayFontSize)
                         lbl.Font = new Font(lbl.Font.FontFamily, _overlayFontSize, FontStyle.Bold);
-                    int w = Math.Min(lbl.PreferredWidth + 10, Math.Max(40, box.ClientSize.Width - 8));
-                    int h = lbl.PreferredHeight + 4;
+                    int w = Math.Max(40, box.ClientSize.Width - 8);
+                    lbl.Size = new Size(w, lbl.PreferredHeight + 4); // ch:先定宽(整行)再取 PreferredHeight → 自动换行
                     int x = (box.ClientSize.Width - w) / 2;
                     if (x < 2) x = 2;
                     int y = Math.Max(2, (int)(box.ClientSize.Height * 0.08));
                     lbl.Location = new Point(x, y);
-                    lbl.Size = new Size(w, h);
+                    int maxH = (int)(box.ClientSize.Height * 0.45);
+                    if (lbl.Height > maxH) lbl.Height = maxH;
                     lbl.Visible = true;
                     lbl.BringToFront();
                     lbl.Invalidate(); // ch:透明底色 Label 需自身重绘才能透出下方新图像
