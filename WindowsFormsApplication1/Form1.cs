@@ -6011,8 +6011,8 @@ namespace WindowsFormsApplication1
                         int w = width; // ch:R36 截止时间改在"真正置高"时锚定：入队延迟不再吃掉脉宽（原实现请求时就算好 until，队列排队会缩短实际高电平）
                         EnqueueIoWork(() =>
                         {
-                            lock (_ioPulseLock) { if (job.ioOkHigh) job.ioOkUntil = Environment.TickCount + w; }
                             SetCameraIoLine(job, true, true);
+                            lock (_ioPulseLock) { if (job.ioOkHigh) job.ioOkUntil = Environment.TickCount + w; } // ch:R39 锚定移到置高之后：脉宽从硬件真正拉高时刻起算（R36 放在 SDK 调用前，仍含调用耗时）
                         });
                     }
                 }
@@ -6025,34 +6025,30 @@ namespace WindowsFormsApplication1
                         int w = width; // ch:R36 同上：NG 线截止时间在真正置高时锚定
                         EnqueueIoWork(() =>
                         {
-                            lock (_ioPulseLock) { if (job.ioNgHigh) job.ioNgUntil = Environment.TickCount + w; }
                             SetCameraIoLine(job, false, true);
+                            lock (_ioPulseLock) { if (job.ioNgHigh) job.ioNgUntil = Environment.TickCount + w; } // ch:R39 锚定移到置高之后：脉宽从硬件真正拉高时刻起算
                         });
                     }
                 }
+                StartIoPulseTimerLocked(); // ch:R38 N1 启表纳入同一把 _ioPulseLock：旧回调的空闲停表与之同锁串行，不会把刚启的表再停掉（原实现启/停都在锁外，交错可致新脉冲高电平无人关断）
             }
-            EnsureIoPulseTimer();
         }
 
-        // ch:R36 脉冲关断节拍改由 System.Threading.Timer 驱动。原实现用 WinForms UI 定时器（20ms Tick），
-        //   界面卡住/模态框/死循环时 Tick 不跑 → OK/NG 拦截线可能一直保持高电平直到 UI 恢复；
-        //   线程定时器与 UI 消息泵无关，创建/停启可在任意线程（检测线程调用 RequestIoPulse）。
-        private void EnsureIoPulseTimer()
+        // ch:R36 脉冲关断节拍改由 System.Threading.Timer 驱动（WinForms UI 定时器在界面卡住时 Tick 不跑，拦截线可能一直保持高电平）。
+        // ch:R38 N1 本方法重构为"调用方必须已持有 _ioPulseLock"的锁内启表：启表与 ExpireIoPulses 的关表同锁串行，
+        //   旧回调不可能在新脉冲启动后再把定时器停掉（原锁外启/停交错可致最后一次高电平无人关断）。
+        private void StartIoPulseTimerLocked()
         {
             if (_ioPulseTimer == null)
-            {
-                lock (_ioPulseLock)
+                _ioPulseTimer = new System.Threading.Timer(delegate
                 {
-                    if (_ioPulseTimer == null)
-                        _ioPulseTimer = new System.Threading.Timer(delegate
-                        {
-                            try { ExpireIoPulses(); }
-                            catch (Exception ex) { new ErrorLog().WriteLog("IO脉冲关断:" + ex.Message); }
-                        }, null, 20, 20);
-                }
-                return; // 新建即以 20ms 周期运行
+                    try { ExpireIoPulses(); }
+                    catch (Exception ex) { new ErrorLog().WriteLog("IO脉冲关断:" + ex.Message); }
+                }, null, 20, 20); // 新建即以 20ms 周期运行
+            else
+            {
+                try { _ioPulseTimer.Change(20, 20); } catch (Exception ex) { new ErrorLog().WriteLog(ex.ToString()); } // 已自停则重新起跑
             }
-            try { _ioPulseTimer.Change(20, 20); } catch (Exception ex) { new ErrorLog().WriteLog(ex.ToString()); } // 已自停则重新起跑
         }
 
         private void ExpireIoPulses()
@@ -6069,6 +6065,8 @@ namespace WindowsFormsApplication1
             ExpireOneIoPulse(myjob7, now);
             ExpireOneIoPulse(myjob8, now);
             bool any = false;
+            // ch:R38 N1 "判空闲 + 停表"与 RequestIoPulse 的"置高 + 启表"在同一把 _ioPulseLock 内串行：
+            //   原实现停表在锁外，旧回调可在新脉冲启表后再执行 Change(Infinite) 把表停掉 → 最后一次高电平再无人关断。
             lock (_ioPulseLock)
             {
                 any = (myjob1 != null && (myjob1.ioOkHigh || myjob1.ioNgHigh))
@@ -6079,10 +6077,10 @@ namespace WindowsFormsApplication1
                     || (myjob6 != null && (myjob6.ioOkHigh || myjob6.ioNgHigh))
                     || (myjob7 != null && (myjob7.ioOkHigh || myjob7.ioNgHigh))
                     || (myjob8 != null && (myjob8.ioOkHigh || myjob8.ioNgHigh));
-            }
-            if (!any && _ioPulseTimer != null)
-            {
-                try { _ioPulseTimer.Change(System.Threading.Timeout.Infinite, System.Threading.Timeout.Infinite); } catch { }
+                if (!any && _ioPulseTimer != null)
+                {
+                    try { _ioPulseTimer.Change(System.Threading.Timeout.Infinite, System.Threading.Timeout.Infinite); } catch { }
+                }
             }
         }
 
@@ -6110,10 +6108,15 @@ namespace WindowsFormsApplication1
 
         private void StopAllIoPulses()
         {
-            _ioPulseEnabled = false;
-            if (_ioPulseTimer != null)
+            // ch:R38 N1 停用与停表纳入同一把 _ioPulseLock：与 RequestIoPulse 的持锁启表串行，
+            //   避免"停用后新脉冲又把表启起来"导致停用态下定时器空转（关断职责由下面 StopOneIoPulse 兜底，不受影响）
+            lock (_ioPulseLock)
             {
-                try { _ioPulseTimer.Change(System.Threading.Timeout.Infinite, System.Threading.Timeout.Infinite); } catch (Exception ex) { new ErrorLog().WriteLog(ex.ToString()); }
+                _ioPulseEnabled = false;
+                if (_ioPulseTimer != null)
+                {
+                    try { _ioPulseTimer.Change(System.Threading.Timeout.Infinite, System.Threading.Timeout.Infinite); } catch (Exception ex) { new ErrorLog().WriteLog(ex.ToString()); }
+                }
             }
             StopOneIoPulse(myjob1);
             StopOneIoPulse(myjob2);
@@ -8525,10 +8528,14 @@ namespace WindowsFormsApplication1
                 if (yunxing)
                 {
                     button11_Click_1(null, null);
-                    // ch:R37 固定 Sleep(300) 属猜测等待：序列化仍可能与在途检测(block.Run)并发；改为真正排空（正常几十 ms 返回），
-                    //   仅异常超时才保底睡眠，行为与旧版兼容但正常路径更快更稳
+                    // ch:R37 真排空替代猜测睡眠；ch:R38 H2 排空失败不再强存——序列化与在途 block.Run 并发是文件损坏/崩溃级风险
                     if (!WaitDetectDrain(3000))
-                        Thread.Sleep(300);
+                    {
+                        MsgErroeLog.WriteLog("P1-06 保存：检测排空超时(3000ms)，已中止保存（不序列化活动方案，请稍后重试或重启软件）");
+                        MessageBox.Show("检测线程未排空，保存已中止。请稍后重试或重启软件。", "保存中止", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                        保存ToolStripMenuItem.Enabled = true;
+                        return;
+                    }
                 }
                 CogSerializer.SaveObjectToFile(manager1, path_1);
                 保存ToolStripMenuItem.Enabled = true;
@@ -9429,9 +9436,13 @@ namespace WindowsFormsApplication1
             if (yunxing)
             {
                 button11_Click_1(null, null);
-                // ch:R37 同保存菜单：真排空替代猜测睡眠，超时才保底 300ms
+                // ch:R37 真排空替代猜测睡眠；ch:R38 H2 排空失败不再强存——序列化与在途 block.Run 并发是文件损坏/崩溃级风险
                 if (!WaitDetectDrain(3000))
-                    Thread.Sleep(300);
+                {
+                    MsgErroeLog.WriteLog("P1-06 另存为：检测排空超时(3000ms)，已中止保存（不序列化活动方案，请稍后重试或重启软件）");
+                    MessageBox.Show("检测线程未排空，保存已中止。请稍后重试或重启软件。", "保存中止", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                    return;
+                }
             }
             CogSerializer.SaveObjectToFile(manager1, path_1);
             MessageBox.Show("保存方案成功!" + (yunxing ? "（已停止运行，请重新开始检测）" : ""));
@@ -9578,12 +9589,28 @@ namespace WindowsFormsApplication1
                         listBox2.Visible = false;
                         listBox2.Items.Clear();
                         // ch:排空：等待正在执行的检测帧（block.Run）结束，防止 Shutdown 与 Run 并发（参考正常版本）
-                        // ch:R36 超时不再"记一行就拆"：先 5s，再给 10s 二次排空；二级都超时（累计 15s）才按原策略继续强拆并升级日志
+                        // ch:R36 两段式排空；ch:R38 H2 二级仍超时（累计 15s）时不再强拆——中止本次切换：不 Shutdown、不加载新方案，
+                        //   旧方案保持装载（Shutdown 与在途 Run 并发是崩溃级风险，宁可让操作员重启软件）
                         if (!WaitDetectDrain(5000))
                         {
                             MsgErroeLog.WriteLog("P1-06 切换：检测排空超时(5000ms)，启动二次排空(10000ms)");
                             if (!WaitDetectDrain(10000))
-                                MsgErroeLog.WriteLog("P1-06 切换：二次排空仍超时(累计15000ms)，检测线程疑卡死；按原策略继续 Shutdown（并发风险已知）");
+                            {
+                                MsgErroeLog.WriteLog("P1-06 切换：二次排空仍超时(累计15000ms)，检测线程卡死；已中止方案切换（未 Shutdown/未加载新方案，请重启软件）");
+                                Volatile.Write(ref qiehuanzhong, 0); // ch:R38 解锁切换闩，避免后续操作被永久挡在门闩外
+                                if (omron.qiehuanzhong == 0)
+                                {
+                                    try { Frm2.start = 1; } catch { } // ch:R38 收尾进度窗（与 catch 分支同手法）
+                                }
+                                try
+                                {
+                                    this.BeginInvoke(new Action(() =>
+                                        MessageBox.Show("检测线程卡死，方案切换已中止（当前方案未变）。请重启软件后重试。", "方案切换中止", MessageBoxButtons.OK, MessageBoxIcon.Error)
+                                    ));
+                                }
+                                catch { }
+                                return; // ch:R38 H2 中止：跳过 Shutdown/加载
+                            }
                         }
                         try
                         {
@@ -13056,10 +13083,14 @@ namespace WindowsFormsApplication1
             ClearPendingOcxPaints();
             if (!WaitDetectDrain(3000))
             {
-                // ch:R36 超时不再立刻拆：再给 5s；仍超时才按原策略继续（破坏性步骤不跳过，仅升级日志）
+                // ch:R36 两段式排空；ch:R38 H2 二级仍超时（累计 8s）时不再强拆——中止关闭：
+                //   StopGrabbing/Close/DestroyDevice 与在途检测（或自动曝光 Set 参数）并发是崩溃级风险，设备与缓冲保持原状，由重启软件收尾
                 MsgErroeLog.WriteLog("P1-06 关闭：检测排空超时(3000ms)，启动二次排空(5000ms)");
                 if (!WaitDetectDrain(5000))
-                    MsgErroeLog.WriteLog("P1-06 关闭：二次排空仍超时(累计8000ms)，检测线程疑卡死；后续释放缓冲/StopGrabbing/销毁设备存在野指针/并发风险");
+                {
+                    MsgErroeLog.WriteLog("P1-06 关闭：二次排空仍超时(累计8000ms)，检测线程卡死；已中止关闭（设备/缓冲保持原状，请重启软件）");
+                    return;
+                }
             }
             ReleaseAllBmpSlots();
             if (IsHandleCreated && !IsDisposed)

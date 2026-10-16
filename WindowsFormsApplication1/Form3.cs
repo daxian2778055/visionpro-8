@@ -378,6 +378,8 @@ namespace WindowsFormsApplication1
         public void modbus_duxie(string address,ref object value,int duxie)
         {
             
+            // ch:R38 H4 旧的整段 lock(locker_2) 因锁区跨 getData(封送到 UI 线程)与 UI 线程互等可死锁，保持注释不恢复（现场也不走 frm3 modbustcp）；
+            //   出站并发改由下面每个 busTcpClient 调用点的短临界区串行：锁内只有一次读写，不跨事件/UI 封送。
             //lock (locker_2)
            // {
                tongxunzhong = true;       
@@ -390,17 +392,17 @@ namespace WindowsFormsApplication1
                     if (value is float)
                     {
                         f1 = (float)value;
-                        busTcpClient.Write(address, f1);
+                        lock (locker_2) { busTcpClient.Write(address, f1); } // ch:R38 H4 短临界区串行写
                     }
                     else if (value is int)
                     {
                         i1 = (int)value;
-                        busTcpClient.Write(address, i1);
+                        lock (locker_2) { busTcpClient.Write(address, i1); } // ch:R38 H4 短临界区串行写
                     }
                     else if (value is short)
                     {
                     s1 = (short)value;
-                    busTcpClient.Write(address, s1);
+                    lock (locker_2) { busTcpClient.Write(address, s1); } // ch:R38 H4 短临界区串行写
                 }
                 if (timelunxun1.ElapsedMilliseconds > 400)
                 {
@@ -416,7 +418,7 @@ namespace WindowsFormsApplication1
                     {
                         if (value is float)
                         {
-                            f1 = Getfloat(busTcpClient.ReadFloat((int.Parse(du)+(i*2)).ToString()).Content);
+                            lock (locker_2) { f1 = Getfloat(busTcpClient.ReadFloat((int.Parse(du)+(i*2)).ToString()).Content); } // ch:R38 H4 短临界区串行读
                             value = f1;
                             if (xiangji == i + 1)
                             {
@@ -426,7 +428,7 @@ namespace WindowsFormsApplication1
                         else if (value is int)
                         {
                             byte[] tempdata;
-                            i1 = Getint(busTcpClient.ReadInt32((int.Parse(du) + (i * 2)).ToString()).Content, out tempdata);
+                            lock (locker_2) { i1 = Getint(busTcpClient.ReadInt32((int.Parse(du) + (i * 2)).ToString()).Content, out tempdata); } // ch:R38 H4 短临界区串行读
                             value = i1;
                             if (xiangji == i + 1)
                             {
@@ -435,7 +437,7 @@ namespace WindowsFormsApplication1
                         }
                         else if (value is short)
                         {
-                            s1 = busTcpClient.ReadInt16((int.Parse(du) + i).ToString()).Content;
+                            lock (locker_2) { s1 = busTcpClient.ReadInt16((int.Parse(du) + i).ToString()).Content; } // ch:R38 H4 短临界区串行读
                             value = s1;
                             if (xiangji == i + 1)
                             {
@@ -448,17 +450,17 @@ namespace WindowsFormsApplication1
                             if (value is float)
                             {
                                 f1 = 0;
-                                busTcpClient.Write((int.Parse(du) + (i * 2)).ToString(), f1);
+                                lock (locker_2) { busTcpClient.Write((int.Parse(du) + (i * 2)).ToString(), f1); } // ch:R38 H4 短临界区串行写
                             }
                             else if (value is int)
                             {
                                 i1 = 0;
-                                busTcpClient.Write((int.Parse(du) + (i * 2)).ToString(), i1);
+                                lock (locker_2) { busTcpClient.Write((int.Parse(du) + (i * 2)).ToString(), i1); } // ch:R38 H4 短临界区串行写
                             }
                             else if (value is short)
                             {
                                 s1 = 0;
-                                busTcpClient.Write((int.Parse(du) +i).ToString(), s1);
+                                lock (locker_2) { busTcpClient.Write((int.Parse(du) +i).ToString(), s1); } // ch:R38 H4 短临界区串行写
                             }
                             if (qiehuan(value.ToString()) == 0)
                             {
@@ -2286,8 +2288,13 @@ namespace WindowsFormsApplication1
                     MessageBox.Show("ip不能为空!");
                     return;
                 }
-                busTcpClient = new ModbusTcpNet(ip, port, 0x01);
-                OperateResult res = busTcpClient.ConnectServer();
+                // ch:R38 H4 建连纳入短临界区：避免与轮询/写回并发调用交错（锁内只有创建对象+连接，不跨事件/UI 封送）
+                OperateResult res;
+                lock (locker_2)
+                {
+                    busTcpClient = new ModbusTcpNet(ip, port, 0x01);
+                    res = busTcpClient.ConnectServer();
+                }
                 if (res.IsSuccess == true) //接收状态返回值
                 {
                     IsEnable = true;
@@ -2313,7 +2320,7 @@ namespace WindowsFormsApplication1
                     MsgErroeLog.WriteLog("尚未建立连接!");
                     return;
                 }
-                busTcpClient.ConnectClose();
+                lock (locker_2) { busTcpClient.ConnectClose(); } // ch:R38 H4 短临界区：断连与轮询/写回串行
                 IsEnable = false;
                 MsgErroeLog.WriteLog("关闭连接成功！");
             }
