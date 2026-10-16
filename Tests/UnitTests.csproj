@@ -11,6 +11,8 @@
     <!-- ch:R14 直接链接生产源码：CRC 回归测的是 WindowsFormsApplication1 正在跑的那份实现，
          而不是测试里的复刻副本（复刻版会与生产悄悄分叉，测试形同虚设） -->
     <Compile Include="..\WindowsFormsApplication1\Core\ModbusCrc.cs" Link="Core\ModbusCrc.cs" />
+    <!-- ch:R42 同上：TCP 触发串组帧器直链生产源码 -->
+    <Compile Include="..\WindowsFormsApplication1\Core\ProtoFrameAssembler.cs" Link="Core\ProtoFrameAssembler.cs" />
   </ItemGroup>
 
   <ItemGroup>

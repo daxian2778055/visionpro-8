@@ -21,6 +21,10 @@ namespace WindowsFormsApplication1
         // ch:P1-⑥ 增加读取超时（2s），避免 PLC 无响应时 while 永久阻塞挂死调用线程
         // ch:修复：原 buffer1 = buffer 为引用别名（非拷贝，buffer1 与 buffer 同体），且轮询内层判定仍硬编码 0x01；
         //   现统一直接使用 buffer、内层同样按 station 匹配，并对短帧/空读做保护，避免用残留数据误判。
+        // ch:R42 错帧轮询窗口 500ms（原 2000ms）：本循环在 PortLock 内，一台不回/坏线的站在旧窗口下
+        //   会把所有串口写拖住 2s+；500ms 与读超时(ReadTimeout=500)同级，健康设备响应通常几十 ms 内到。
+        private const int MismatchPollWindowMs = 500;
+
         protected int ReadData(byte[] buffer, out string b, int expectCount, byte station = 0x01)
         {
             try
@@ -42,22 +46,27 @@ namespace WindowsFormsApplication1
                 }
                 if (buffer[0] == station && buffer[1] == 0X03)
                 {
-                    // ch:P1-10 按本次实读长度 r 解析，不再按 buffer.Length（避免读到短帧/残留时把无效字节拼进 b）
-                    for (int i = 0; i < r; i++)
+                    // ch:R42 长度完整的 FC03 响应先过 CRC：坏帧不采信、不解析，落入下面轮询等下一帧
+                    if (r != expectCount || Crc16Ok(buffer, r))
                     {
-                        if (i >= 3 && i <= r - 3)
-                            b += buffer[i].ToString("X2") + " ";
+                        // ch:P1-10 按本次实读长度 r 解析，不再按 buffer.Length（避免读到短帧/残留时把无效字节拼进 b）
+                        for (int i = 0; i < r; i++)
+                        {
+                            if (i >= 3 && i <= r - 3)
+                                b += buffer[i].ToString("X2") + " ";
+                        }
+                        port.DiscardInBuffer();
+                        return r;
                     }
-                    port.DiscardInBuffer();
-                    return r;
+                    LogCrcFailThrottled(station); // 长度完整但 CRC 不符：丢弃该帧
                 }
-                // 首帧不匹配：轮询等待直到匹配（按 station）或超时
+                // 首帧不匹配/坏帧：轮询等待直到匹配（按 station）或超时
                 // ch:P2 改差值式超时：原 long deadline = TickCount + 2000L; if (TickCount > deadline) 在 TickCount 回绕
                 //   （int.MaxValue→int.MinValue）的瞬间会永远不成立 → 死等约 24.9 天。差值式在 24.9 天窗口内恒正确。
                 int waitStart = Environment.TickCount;
-                while (buffer[0] != station || buffer[1] != 0X03)
+                while (true)
                 {
-                    if (unchecked(Environment.TickCount - waitStart) > 2000)
+                    if (unchecked(Environment.TickCount - waitStart) > MismatchPollWindowMs)
                     {
                         MsgErroeLog.WriteLog("Modbus 读响应超时(站号" + station.ToString("X2") + ")");
                         break;
@@ -68,6 +77,11 @@ namespace WindowsFormsApplication1
                     r = n;
                     if (buffer[0] == station && buffer[1] == 0X03)
                     {
+                        if (n == expectCount && !Crc16Ok(buffer, n))
+                        {
+                            LogCrcFailThrottled(station); // 坏帧不采信：继续等下一帧（下一次读会覆盖缓冲）
+                            continue;
+                        }
                         // ch:P1-10 按本次实读 n 解析（原 buffer.Length 会读入未更新/残留字节）
                         for (int i = 0; i < n; i++)
                         {
@@ -85,6 +99,28 @@ namespace WindowsFormsApplication1
                 MsgErroeLog.WriteLog(ex.Message);
                 return 0;
             }
+        }
+
+        // ch:R42 响应帧 CRC 校验：复用 ModbusCrc.Append（单测直链回归的那份实现，帧尾 [低,高]）。
+        //   仅对长度完整(r==expectCount)的 FC03 响应调用；不通过则帧被丢弃，坏线噪点不再被当成寄存器数据。
+        private static bool Crc16Ok(byte[] frame, int len)
+        {
+            if (frame == null || len < 4)
+                return false;
+            byte[] body = new byte[len - 2];
+            Array.Copy(frame, body, len - 2);
+            byte[] withCrc = ModbusCrc.Append(body);
+            return withCrc[len - 2] == frame[len - 2] && withCrc[len - 1] == frame[len - 1];
+        }
+        // ch:R42 CRC 失败日志 10s 限流：坏线况下每次收包都可能失败，避免日志被刷爆
+        private static int _lastCrcFailLogTick = 0;
+        private void LogCrcFailThrottled(byte station)
+        {
+            int now = Environment.TickCount;
+            if (unchecked(now - _lastCrcFailLogTick) < 10000)
+                return;
+            _lastCrcFailLogTick = now;
+            MsgErroeLog.WriteLog("Modbus 响应 CRC 校验失败(站号" + station.ToString("X2") + ")：帧已丢弃，继续等待下一帧");
         }
 
         /// <summary>

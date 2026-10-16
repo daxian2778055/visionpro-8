@@ -455,6 +455,7 @@
   </ItemGroup>
   <ItemGroup>
     <Compile Include="Core\ModbusCrc.cs" />
+    <Compile Include="Core\ProtoFrameAssembler.cs" />
     <Compile Include="Datas.cs" />
     <Compile Include="DemoControl\UserControlCurve.cs">
       <SubType>UserControl</SubType>

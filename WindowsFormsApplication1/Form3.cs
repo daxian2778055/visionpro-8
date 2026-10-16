@@ -701,6 +701,36 @@ namespace WindowsFormsApplication1
                 + s.Replace("\r", "\\r").Replace("\n", "\\n").Replace("\0", "\\0") + "] 长度=" + s.Length
                 + "；若频繁出现请与对端确认是否分段/合并发送或需要约定组帧");
         }
+        // ch:R42 收包组帧用触发串集合：Form3 本地 8 条载图串 + Form1 经 framePatternsProvider 提供的
+        //   各相机方案 triggerZifu（vpp 输入，Form3 拿不到）。每次收包现取现用（运行中可能改配置），数量很小；
+        //   与 NoteProtoFrameAnomaly 一样在通讯线程读 textBox，属既有做法（CheckForIllegalCrossThreadCalls=false）。
+        public Func<string[]> framePatternsProvider;
+        private List<byte[]> BuildFramePatterns()
+        {
+            List<byte[]> list = new List<byte[]>();
+            HashSet<string> seen = new HashSet<string>();
+            string[] own = new string[] { textBox18.Text, textBox19.Text, textBox21.Text, textBox20.Text,
+                                          textBox23.Text, textBox22.Text, textBox25.Text, textBox24.Text };
+            foreach (string t in own) AddFramePattern(list, seen, t);
+            try
+            {
+                Func<string[]> ext = framePatternsProvider;
+                if (ext != null)
+                {
+                    string[] more = ext();
+                    if (more != null)
+                        foreach (string t in more) AddFramePattern(list, seen, t);
+                }
+            }
+            catch (Exception ex) { new ErrorLog().WriteLog(ex.ToString()); }
+            return list;
+        }
+        private void AddFramePattern(List<byte[]> list, HashSet<string> seen, string t)
+        {
+            if (string.IsNullOrEmpty(t) || list.Count >= ProtoFrameAssembler.MaxPatterns) return;
+            if (!seen.Add(t)) return;
+            list.Add(_protoEncoding.GetBytes(t));
+        }
         private string DecodeProtoBytes(byte[] buf, int len)
         {
             string s = _protoEncoding.GetString(buf, 0, len);
@@ -718,6 +748,7 @@ namespace WindowsFormsApplication1
             if (sock == null)
                 return;
             byte[] buffer = new byte[1024 * 1024 * 3]; // ch:P1-② 提到循环外复用，避免高频消息下大对象堆(LOH)反复分配
+            ProtoFrameAssembler asm = new ProtoFrameAssembler(); // ch:R42 本连接独立组帧缓冲
             try
             {
                 while (true)
@@ -727,17 +758,23 @@ namespace WindowsFormsApplication1
                         int r = sock.Receive(buffer);
                         if (r == 0)
                         { break; }
-                        string sss = DecodeProtoBytes(buffer, r); // ch:P2 显式 GBK 解码（原 Encoding.Default 依赖系统代码页）
-                        if (jinzhi == 1)
-                            sss = sss.Replace('\0', '0');
-                        ShowMsgClient(sock.RemoteEndPoint + ":" + sss + "\r\n");
-                        if (qiehuan_fangshi == "Tcp_client")
+                        // ch:R42 TCP 触发串组帧：按已知触发串集合（Form3 载图串 ∪ Form1 方案 triggerZifu）做字节级组帧，
+                        //   被拆开/合并的触发串还原为完整帧后再走既有 qiehuan/getData 路径；非触发字节仍按残留段原样处理
+                        List<byte[]> frames = asm.Append(buffer, r, BuildFramePatterns());
+                        foreach (byte[] fb in frames)
                         {
-                            if (qiehuan(sss) == 0)
+                            string sss = DecodeProtoBytes(fb, fb.Length); // ch:P2 显式 GBK 解码（原 Encoding.Default 依赖系统代码页）
+                            if (jinzhi == 1)
+                                sss = sss.Replace('\0', '0');
+                            ShowMsgClient(sock.RemoteEndPoint + ":" + sss + "\r\n");
+                            if (qiehuan_fangshi == "Tcp_client")
                             {
-                                NoteProtoFrameAnomaly(sss); // ch:P2 未匹配时诊断是否被 TCP 粘包/拆包（限流，正常报文不记）
-                                SelectionChangedEventArgs E = new SelectionChangedEventArgs(sss);
-                                getData(this, E);
+                                if (qiehuan(sss) == 0)
+                                {
+                                    NoteProtoFrameAnomaly(sss); // ch:P2 未匹配时诊断是否被 TCP 粘包/拆包（限流，正常报文不记）
+                                    SelectionChangedEventArgs E = new SelectionChangedEventArgs(sss);
+                                    getData(this, E);
+                                }
                             }
                         }
                     }
@@ -751,6 +788,7 @@ namespace WindowsFormsApplication1
             }
             finally
             {
+                asm.Reset(); // ch:R42 连接结束丢弃半截组帧缓冲
                 // ch:P1-⑦ 线程退出时只关闭本次会话 socket；字段仍指向自己时才置空，避免误关重连后的新连接
                 try { sock.Close(); } catch (Exception exInner) { new ErrorLog().WriteLog(exInner.ToString()); }
                 lock (_clientSocketLock)
@@ -926,6 +964,7 @@ namespace WindowsFormsApplication1
             // ch:P1-08 每连接独立缓冲/长度：原 bufferr/rr 是窗体共享字段，多客户端并发 Receive 时互相覆盖未解码数据
             byte[] bufferr = new byte[1024 * 1024 * 5];
             int rr;
+            ProtoFrameAssembler asm = new ProtoFrameAssembler(); // ch:R42 本连接独立组帧缓冲
             Socket current = o as Socket;
             socketServer = current;
             string remoteKey = "";
@@ -941,19 +980,23 @@ namespace WindowsFormsApplication1
                         rr = current.Receive(bufferr);
                         if (rr == 0)
                         { break; }
-                        //发送的文字消息
-                        string str = DecodeProtoBytes(bufferr, rr); // ch:P2 显式 GBK 解码（原 Encoding.Default 依赖系统代码页）
-                        if (jinzhi == 1)
-                            str = str.Replace('\0', '0');
-                        ShowMsg(current.RemoteEndPoint + ";" + str + "\r\n");
-                        rcv1 = str;
-                        if (qiehuan_fangshi == "Tcp_server")
+                        // ch:R42 TCP 触发串组帧：同客户端路径（字节级组帧后再走既有 qiehuan/getData）
+                        List<byte[]> frames = asm.Append(bufferr, rr, BuildFramePatterns());
+                        foreach (byte[] fb in frames)
                         {
-                            if (qiehuan(str) == 0)
+                            string str = DecodeProtoBytes(fb, fb.Length); // ch:P2 显式 GBK 解码（原 Encoding.Default 依赖系统代码页）
+                            if (jinzhi == 1)
+                                str = str.Replace('\0', '0');
+                            ShowMsg(current.RemoteEndPoint + ";" + str + "\r\n");
+                            rcv1 = str;
+                            if (qiehuan_fangshi == "Tcp_server")
                             {
-                                NoteProtoFrameAnomaly(str); // ch:P2 未匹配时诊断是否被 TCP 粘包/拆包（限流，正常报文不记）
-                                SelectionChangedEventArgs E = new SelectionChangedEventArgs(str);
-                                getData(this, E);
+                                if (qiehuan(str) == 0)
+                                {
+                                    NoteProtoFrameAnomaly(str); // ch:P2 未匹配时诊断是否被 TCP 粘包/拆包（限流，正常报文不记）
+                                    SelectionChangedEventArgs E = new SelectionChangedEventArgs(str);
+                                    getData(this, E);
+                                }
                             }
                         }
                     }
@@ -967,6 +1010,7 @@ namespace WindowsFormsApplication1
             }
             finally
             {
+                asm.Reset(); // ch:R42 连接结束丢弃半截组帧缓冲
                 // ch:客户端断开后关闭 socket 并从字典移除，
                 // ch:否则后续 serverSocket[ip].Send 对已释放对象抛 ObjectDisposedException
                 try { if (current != null) current.Close(); } catch (Exception ex) { new ErrorLog().WriteLog(ex.ToString()); }
