@@ -4665,7 +4665,7 @@ namespace WindowsFormsApplication1
                             #endregion // ch:流程封
                             if (outTcp && myjob.tcp) // ch:R13 输出方式互斥闸
                             {
-                                Task.Run(() =>
+                                RunAsyncTail(() =>
                                 {
                                     try
                                     {
@@ -4686,7 +4686,7 @@ namespace WindowsFormsApplication1
                                 && !frm3.IsEnable))                               //   ch:R20 4732 闸开(IsEnable)就不碰——互斥按两组闸门输入裁决、与数据有无无关，杜绝 IsEnable 真但终端空时 4732 写零与本回退真值互覆的理论双写；三路必居其一可证明不双写。进入时 myjob.modbustcp 必真(4572 子闸)故只走寄存器写、绝不发原始串口文本
                             {
                                 if (_logPathSerial) { _logPathSerial = false; MsgErroeLog.WriteLog("Modbus数据路:串口分支寄存器子路径 mode=" + _outputMode + " myjob.modbustcp=" + myjob.modbustcp); } // ch:R19 每次切模式首次触发记一条
-                                Task.Run(() =>
+                                RunAsyncTail(() =>
                                 {
                                     try
                                     {
@@ -4754,7 +4754,7 @@ namespace WindowsFormsApplication1
                                 {
                                     fins = "无";
                                 }
-                                Task.Run(() =>
+                                RunAsyncTail(() =>
                                 {
                                     try
                                     {
@@ -4778,7 +4778,7 @@ namespace WindowsFormsApplication1
                                 {
                                     modbustcps = "无";
                                 }
-                                Task.Run(() =>
+                                RunAsyncTail(() =>
                                 {
                                     try
                                     {
@@ -4800,7 +4800,7 @@ namespace WindowsFormsApplication1
                                 {
                                     modbusrtus = "无";
                                 }
-                                Task.Run(() =>
+                                RunAsyncTail(() =>
                                 {
                                     try
                                     {
@@ -4816,7 +4816,7 @@ namespace WindowsFormsApplication1
                             }
                             if (myjob.zidongbaoguang)
                             {
-                                Task.Run(() =>
+                                RunAsyncTail(() =>
                                 {
                                     try
                                     {
@@ -4862,7 +4862,7 @@ namespace WindowsFormsApplication1
                             if (outMtcp && myjob.modbustcp && frm3.IsEnable && !(modbustcp.fins_en && modbustcp.chushihua)) // ch:R13 输出方式互斥闸
                             {
                                 if (_logPathFrm3) { _logPathFrm3 = false; MsgErroeLog.WriteLog("Modbus数据路:frm3标准路(4732) mode=" + _outputMode + " snapMtcp=" + (snapMtcp == "" ? "空" : "有")); } // ch:R19 每次切模式首次触发记一条
-                                Task.Run(() =>
+                                RunAsyncTail(() =>
 
                                {
 
@@ -5369,7 +5369,7 @@ namespace WindowsFormsApplication1
                                             myjob.jiasu = false;
                                     }
                                 }
-                                Task.Run(() =>
+                                RunAsyncTail(() =>
                                 {
                                     try
                                     {
@@ -5394,7 +5394,7 @@ namespace WindowsFormsApplication1
                             }
                             if ((myjob.cuntu || cuntu == 1) && yunxing)
                             {
-                                Task.Run(() =>
+                                RunAsyncTail(() =>
                                 {
                                     if (myjob.trrigerEn == true || myjob.triggerMode == "通讯触发" || cuntu == 1)
                                     {
@@ -6403,9 +6403,15 @@ namespace WindowsFormsApplication1
             try { if (frm3 != null) frm3.CloseResources(); } catch (Exception ex) { new ErrorLog().WriteLog(ex.ToString()); }
             // ch:兜底释放相机句柄（正常已由 bnClose_Click 释放；此处覆盖异常/未走关闭按钮的场景）。
             //   避免仅靠 Environment.Exit 强杀导致 GigE 会话残留，下次打开报 0x80000203。
+            // ch:R40 H2 统一出口门控：卡死时不做任何破坏性释放（相机句柄/方案）——
+            //   bnClose 已在中止路径保持设备原状，这里若再 StopGrabbing/Dispose 又会撞上在途 Run/写（崩溃级）；
+            //   正常路径几十 ms 通过、行为与旧版一致；卡死路径进程随后 Environment.Exit，会话由系统回收。
+            bool drainedAtExit = WaitDetectDrain(1000);
+            if (!drainedAtExit)
+                MsgErroeLog.WriteLog("P1-06 退出兜底：排空超时(1000ms)，跳过相机句柄/方案释放（避免与在途检测/写并发，会话由系统回收）");
             try
             {
-                if (m_MyCamera != null)
+                if (drainedAtExit && m_MyCamera != null)
                 {
                     for (int i = 0; i < m_MyCamera.Length; i++)
                     {
@@ -6421,7 +6427,7 @@ namespace WindowsFormsApplication1
             // ch:兜底释放 VisionPro QuickBuild 会话（正常路径已在 FormClosing 的 finally 中执行）
             try
             {
-                if (manager1 != null)
+                if (drainedAtExit && manager1 != null) // ch:R40 H2 卡死时跳过（FormClosing 已释放则 manager1 为 null）
                 {
                     manager1.Shutdown();
                     manager1 = null;
@@ -6490,12 +6496,21 @@ namespace WindowsFormsApplication1
                     catch (Exception ex) { MsgErroeLog.WriteLog("关闭相机异常:" + ex.Message); }
                     // ch:释放 VisionPro QuickBuild 会话（JobManager），否则关闭软件后调试会话/文件锁残留，
                     // ch:表现为“还在调试挂着”/vpp 被占用
+                    // ch:R40 H2 排空失败不再无条件 Shutdown：在途 block.Run/已投出的异步写(存图/PLC 写)与 Shutdown 并发
+                    //   是崩溃级风险；排空通过才释放调试会话（正常几十 ms），否则保留对象、进程退出由系统回收
                     try
                     {
                         if (manager1 != null)
                         {
-                            manager1.Shutdown();
-                            manager1 = null;
+                            if (WaitDetectDrain(3000))
+                            {
+                                manager1.Shutdown();
+                                manager1 = null;
+                            }
+                            else
+                            {
+                                MsgErroeLog.WriteLog("P1-06 退出：排空超时(3000ms)，跳过 manager1.Shutdown（避免与在途检测/写并发，进程退出由系统回收）");
+                            }
                         }
                     }
                     catch (Exception ex)
@@ -9404,31 +9419,12 @@ namespace WindowsFormsApplication1
             openFileDialog.RestoreDirectory = true;
             openFileDialog.Filter = "VP vpp File|*.vpp*";
             DialogResult openFileRes = openFileDialog.ShowDialog();
+            string newPath = null; // ch:R40 N2 新路径先存局部：排空通过后才提交到 path_1/label75/wenjianjia（中止路径不回滚旧值）
             if (DialogResult.OK == openFileRes)
             {
-                if (openFileDialog.FileName != "")
-                {
-                    if (!openFileDialog.FileName.Contains(".vpp"))
-                    {
-                        openFileDialog.FileName = openFileDialog.FileName + ".vpp";
-                        path_1 = openFileDialog.FileName;
-                    }
-                    else
-                        path_1 = openFileDialog.FileName;
-                }
-                if (label75.Text != openFileDialog.FileName.Split('\\').Last())
-                {
-                    label75.Text = openFileDialog.FileName.Split('\\').Last();
-                }
-                try
-                {
-                    wenjianjia = Path.GetDirectoryName(path_1);
-                    MsgErroeLog.WriteLog("方案文件夹:" + wenjianjia);
-                }
-                catch (Exception ex)
-                {
-                    MsgErroeLog.WriteLog(ex.Message);
-                }
+                newPath = openFileDialog.FileName;
+                if (newPath != "" && !newPath.Contains(".vpp"))
+                    newPath = newPath + ".vpp";
             }
             else
                 return;
@@ -9442,6 +9438,23 @@ namespace WindowsFormsApplication1
                     MsgErroeLog.WriteLog("P1-06 另存为：检测排空超时(3000ms)，已中止保存（不序列化活动方案，请稍后重试或重启软件）");
                     MessageBox.Show("检测线程未排空，保存已中止。请稍后重试或重启软件。", "保存中止", MessageBoxButtons.OK, MessageBoxIcon.Warning);
                     return;
+                }
+            }
+            // ch:R40 N2 排空通过（未运行时直接到这）才提交新路径与标题：中止路径保持旧 path_1/label75/wenjianjia，
+            //   否则后续「保存」会把旧方案写进新路径
+            if (newPath != "")
+            {
+                path_1 = newPath;
+                if (label75.Text != newPath.Split('\\').Last())
+                    label75.Text = newPath.Split('\\').Last();
+                try
+                {
+                    wenjianjia = Path.GetDirectoryName(path_1);
+                    MsgErroeLog.WriteLog("方案文件夹:" + wenjianjia);
+                }
+                catch (Exception ex)
+                {
+                    MsgErroeLog.WriteLog(ex.Message);
                 }
             }
             CogSerializer.SaveObjectToFile(manager1, path_1);
@@ -9547,20 +9560,8 @@ namespace WindowsFormsApplication1
             //   权威闩由 CompareExchange 把守；外层 7463/7700/7937 的 ==0 仅作预筛，保持不变。
             if (System.Threading.Interlocked.CompareExchange(ref qiehuanzhong, 1, 0) == 0)
             {
-                if (a.Contains(".vpp"))
-                {
-                    label75.Text = a.Split('\\').Last();
-                    path_1 = a;
-                    try
-                    {
-                        wenjianjia = Path.GetDirectoryName(path_1);
-                        MsgErroeLog.WriteLog("方案文件夹:" + wenjianjia);
-                    }
-                    catch (Exception ex)
-                    {
-                        MsgErroeLog.WriteLog(ex.Message);
-                    }
-                }
+                // ch:R40 N2 路径/标题不再预提交：延后到排空通过、真正要 Shutdown/加载之前再提交（见 Task 内），
+                //   中止路径保持旧 path_1/label75/wenjianjia，避免后续「保存」把旧方案写进新路径
                 if (yunxing == true)
                     button11_Click_1(null, null);
                 yunxing = false;
@@ -9610,6 +9611,21 @@ namespace WindowsFormsApplication1
                                 }
                                 catch { }
                                 return; // ch:R38 H2 中止：跳过 Shutdown/加载
+                            }
+                        }
+                        // ch:R40 N2 排空已通过（中止路径在上面 return），此处才提交新方案路径/标题/文件夹
+                        if (a.Contains(".vpp"))
+                        {
+                            path_1 = a;
+                            label75.Text = a.Split('\\').Last();
+                            try
+                            {
+                                wenjianjia = Path.GetDirectoryName(path_1);
+                                MsgErroeLog.WriteLog("方案文件夹:" + wenjianjia);
+                            }
+                            catch (Exception ex)
+                            {
+                                MsgErroeLog.WriteLog(ex.Message);
                             }
                         }
                         try
@@ -12133,9 +12149,27 @@ namespace WindowsFormsApplication1
                 ReleaseBmpSlot(i);
         }
 
+        // ch:R40 H2 已投出的异步输出/存图尾计数（TCP/串口寄存器/Omron/ModbusTCP/RTU/frm3/自动曝光/缺陷记录/存图）。
+        //   派发点(检测线程)在 Task.Run 之前同步自增、任务 finally 自减——自增落在派发同步段，
+        //   排空不会漏掉"刚派发、尚未开跑"的任务；Form3.changeok/changeng 的内层发送任务同样计入。
+        //   静态字段：Form3 没有稳定的 Form1 实例引用，用静态入口跨类登记。
+        private static int _asyncTailBusy = 0;
+        private void RunAsyncTail(Action act) { RunAsyncTailStatic(act); } // ch:R40 H2 Form1 内便捷入口
+        internal static void RunAsyncTailStatic(Action act)
+        {
+            Interlocked.Increment(ref _asyncTailBusy);
+            Task.Run(() =>
+            {
+                try { act(); }
+                finally { Interlocked.Decrement(ref _asyncTailBusy); }
+            });
+        }
+
         // ch:P1-06 关闭/切换前排空检测：等全 8 相机"检测中"门闩(_detectBusy)与 block.Run 计数(_detectingCount)清零。
         //   旧实现仅等 _detectingCount（只覆盖 block.Run，不含传图/输出/存图全程）；覆盖 _detectBusy 更彻底。
-        //   超时返回 false，由调用方记告警（不再静默销毁活动对象）。
+        // ch:R40 H2 排空范围再扩一层：已投出的异步尾(_asyncTailBusy)也必须归零——原排空只保证 Run 停下，
+        //   但 TCP/串口/Omron/ModbusTCP/RTU/frm3 写、自动曝光、存图任务仍可能在途，Shutdown/销毁设备/序列化
+        //   与这些写并发正是审查指出的风险窗口。超时返回 false，由调用方记告警并中止破坏性步骤。
         private bool WaitDetectDrain(int timeoutMs)
         {
             System.Diagnostics.Stopwatch sw = System.Diagnostics.Stopwatch.StartNew();
@@ -12145,7 +12179,8 @@ namespace WindowsFormsApplication1
                 bool busy = false;
                 for (int i = 0; i < 8; i++)
                     if (System.Threading.Volatile.Read(ref _detectBusy[i]) == 1) { busy = true; break; }
-                if (!running && !busy)
+                bool tailBusy = System.Threading.Volatile.Read(ref _asyncTailBusy) > 0; // ch:R40 H2 异步尾在途
+                if (!running && !busy && !tailBusy)
                     return true;
                 Thread.Sleep(10);
             }

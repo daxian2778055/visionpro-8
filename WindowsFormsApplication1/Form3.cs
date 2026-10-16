@@ -605,6 +605,8 @@ namespace WindowsFormsApplication1
         }
         // ch:P1-⑦ 客户端 socket 生命周期互斥：重连/退出/接收线程并发时避免误关新连接
         private readonly object _clientSocketLock = new object();
+        // ch:R40 H4 服务端发送短临界区：Accept/NG 帧的内层发送任务与手动发送（三处 target.Send）可能并发到同一 socket
+        private readonly object _serverSendLock = new object();
 
         // ch:R10-7 限流日志：同一失败点 5 秒内只记一条，避免重连/轮询循环刷屏
         private int _lastCliConnErrLogMs = 0;
@@ -1065,7 +1067,9 @@ namespace WindowsFormsApplication1
                 if (serverSocket.TryGetValue(ip, out target))
                 {
                     if (target != null && target.Connected)
-                        target.Send(buffer);
+                    {
+                        lock (_serverSendLock) { target.Send(buffer); } // ch:R40 H4 短临界区（服务端 socket 并发发送串行化）
+                    }
                     else
                     {
                         try { if (target != null) target.Close(); } catch (Exception ex) { new ErrorLog().WriteLog(ex.ToString()); }
@@ -1122,7 +1126,7 @@ namespace WindowsFormsApplication1
                 return;
             }
             byte[] data = Encoding.Default.GetBytes(str1);
-           mdcan.port.Write(data, 0, data.Length);
+           lock (mdcan.PortLock) { mdcan.port.Write(data, 0, data.Length); } // ch:R40 H4 串口短临界区（与检测线程数据路写同锁串行）
           //  this.label9.Text = "数据发送中······";
         }
 
@@ -1232,12 +1236,12 @@ namespace WindowsFormsApplication1
                         byte[] tempdata;
                         int.TryParse(texSend.Text, out indata);
                         Getint(indata, out tempdata);
-                        mdcan.port.Write(tempdata, 0, tempdata.Length);
+                        lock (mdcan.PortLock) { mdcan.port.Write(tempdata, 0, tempdata.Length); } // ch:R40 H4 串口短临界区
                     }
                     else
                     {
                         send = texSend.Text;
-                       mdcan.port.Write(send);
+                       lock (mdcan.PortLock) { mdcan.port.Write(send); } // ch:R40 H4 串口短临界区
                     }
 
                 }
@@ -1768,7 +1772,7 @@ namespace WindowsFormsApplication1
                         textBox8.Text = aa;
                         oks++;
 
-                        Task.Run(() =>
+                        Form1.RunAsyncTailStatic(() =>
                         {
                             try
                             {
@@ -1826,7 +1830,7 @@ namespace WindowsFormsApplication1
                         textBox2.Text = aa;
                         oks++;
 
-                        Task.Run(() =>
+                        Form1.RunAsyncTailStatic(() =>
                         {
                             try
                             {
@@ -1853,7 +1857,9 @@ namespace WindowsFormsApplication1
                                 {
                                     Socket target = serverSocket[ip];
                                     if (target != null && target.Connected)
-                                        target.Send(buffer);
+                                    {
+                                        lock (_serverSendLock) { target.Send(buffer); } // ch:R40 H4 短临界区
+                                    }
                                     else
                                     {
                                         try { if (target != null) target.Close(); } catch (Exception ex) { new ErrorLog().WriteLog(ex.ToString()); }
@@ -1881,7 +1887,7 @@ namespace WindowsFormsApplication1
                                 byte[] vbyte = null;
                                 mdcan.port.Encoding = System.Text.Encoding.GetEncoding("GB2312");
                                 send = aa;
-                                mdcan.port.Write(send);
+                                lock (mdcan.PortLock) { mdcan.port.Write(send); } // ch:R40 H4 串口短临界区
                             }
                             else
                             {
@@ -1889,7 +1895,7 @@ namespace WindowsFormsApplication1
                                 byte[] tempdata;
                                 int.TryParse(aa, out indata);
                                 Getint(indata, out tempdata);
-                                mdcan.port.Write(tempdata, 0, tempdata.Length);
+                                lock (mdcan.PortLock) { mdcan.port.Write(tempdata, 0, tempdata.Length); } // ch:R40 H4 串口短临界区
                             }
 
                         }
@@ -1916,7 +1922,7 @@ namespace WindowsFormsApplication1
                         textBox8.Text =aa;
                     oks++;
                    
-                    Task.Run(() =>
+                    Form1.RunAsyncTailStatic(() =>
                     {
                         if (monitor == "")
                         {
@@ -1984,7 +1990,7 @@ namespace WindowsFormsApplication1
                     ngs++;
         
 
-                    Task.Run(() =>
+                    Form1.RunAsyncTailStatic(() =>
                     {
                         if (monitor == "")
                         {
@@ -2019,7 +2025,9 @@ namespace WindowsFormsApplication1
                                 {
                                     Socket target = serverSocket[ip];
                                     if (target != null && target.Connected)
-                                        target.Send(buffer);
+                                    {
+                                        lock (_serverSendLock) { target.Send(buffer); } // ch:R40 H4 短临界区
+                                    }
                                     else
                                     {
                                         try { if (target != null) target.Close(); } catch (Exception ex) { new ErrorLog().WriteLog(ex.ToString()); }
@@ -2046,7 +2054,7 @@ namespace WindowsFormsApplication1
                         byte[] vbyte = null;
                        mdcan.port.Encoding = System.Text.Encoding.GetEncoding("GB2312");
                         send = aa;
-                       mdcan.port.Write(send);
+                       lock (mdcan.PortLock) { mdcan.port.Write(send); } // ch:R40 H4 串口短临界区
                     }
                     catch (Exception ex)
                     {

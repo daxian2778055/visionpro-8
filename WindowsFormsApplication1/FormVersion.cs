@@ -10,13 +10,14 @@ namespace WindowsFormsApplication1
     public partial class FormVersion : Form
     {
         // 当前版本（与推送仓库的 git tag 一一对应）：语义化版本 + 发布日期
-        public const string AppVersion = "1.3.34";
+        public const string AppVersion = "1.3.35";
         public const string AppVersionDate = "2026-10-16";
         public const string AppRepoName = "正泰 VP八相机连续海康（M4 - 加密）";
 
         // 版本时间线：与仓库 git tag 一一对应（新版本在最前）
         private static readonly string[] VersionTimeline = new string[] 
         {
+            "v1.3.35  2026-10-16  第40轮(审查续修：H2 关窗 Shutdown 收口+排空覆盖异步尾 / N2 路径标题后提交 / H4 串口与 Socket.Send 短临界区)：①H2——FormClosing 的 manager1.Shutdown 与 FormClosed 兜底(相机句柄+方案)改为先排空通过才执行：卡死时不再无条件强拆(此前窗口关闭路径仍会 Shutdown)，进程退出由系统回收，正常路径几十 ms 通过行为不变；排空判据扩展 _asyncTailBusy：TCP/串口寄存器/Omron/ModbusTCP/RTU/frm3 写、自动曝光、缺陷记录、存图共九处 Task.Run 全部改为 RunAsyncTail 派发(同步段自增、finally 自减，不漏「刚派发未开跑」)，Form3.changeok/changeng 的四个内层发送任务经 Form1.RunAsyncTailStatic 同计入——「已投出的存图/PLC 写」纳入排空范围；②N2——另存为与方案切换原先在排空前就提交 path_1/label75/wenjianjia，中止后不回滚，后续「保存」会把旧方案写进新路径；现全部延后到排空通过(切换则在 Shutdown/加载前)才提交，中止路径保持旧值；③H4——串口：Modbus 类加公共 PortLock，ReadRegister/WriteRegister/WriteRegisters 事务内加锁(写请求+读响应原子)，Form3 六处原始 mdcan.port.Write 复用同锁；Socket：Form3 三处服务端 target.Send 入 _serverSendLock 短临界区(服务端接入 socket 已有 SendTimeout=3000 兜底)，客户端 socketClient.Send 三处原本已在 _clientSocketLock，FormModbus 极速写 socket 原本已在 modbusIoLock+xieWuLock 内。构建0 error、单测20/20。",
             "v1.3.34  2026-10-16  第39轮(H3 收尾：IO 脉宽截止时间锚定移到硬件置高之后)：R36 把 until 从请求时改到置高动作内重锚，但仍放在 SetCameraIoLine 调用之前——脉宽实际从锚定点起算，仍把该次 SDK 调用(LineSelector+LineInverter 两次 P/Invoke)的耗时算进了高电平时长。本轮把锚定移到 SetCameraIoLine 返回之后：脉宽从硬件真正拉高时刻起算，与 job.timespace 一致；过期关断已先行入队时 ioXHigh 已为假、锚定自动跳过(FIFO 单调性不变)。至此 H3 闭环：后台定时器关断(R36)+置高后锚定(R39)。构建0 error、单测20/20。",
             "v1.3.33  2026-10-16  第38轮(审查升级项：N1 脉冲定时器启停竞态修复 / H2 排空超时不再强拆强存 / H4 Form3 短临界区串行)：①N1——脉冲定时器的「空闲停表」在锁外判 any 并 Change(Infinite)、「新脉冲启表」也在锁外，旧回调可交错到启表之后把定时器停掉→最后一次 OK/NG 高电平再无人关断；重构 StartIoPulseTimerLocked(调用方必须持 _ioPulseLock)并把启表移入 RequestIoPulse 锁内、「判空闲+停表」移入 ExpireIoPulses 同锁块、StopAllIoPulses 的停用+停表也入锁，启/停/停用三者完全串行，空闲自停保留；②H2 升级——切换二级排空(累计15s)失败不再按原策略强拆：中止本次切换(不 Shutdown、不加载新方案、旧方案保持装载)，复位切换闩+Frm2 收尾+弹窗提示重启，规避 Shutdown 与在途 Run 的崩溃级并发；关闭二级排空(累计8s)失败不再强拆设备：中止关闭(设备/缓冲保持原状，在途槽释放守卫不变)，避免 StopGrabbing/Close/DestroyDevice 与在途检测或自动曝光 Set 参数并发；保存/另存为排空失败不再强存：记录+提示+直接返回，不序列化活动方案防文件损坏；③H4——Form3 modbus_duxie 的整段 lock(locker_2) 因锁区跨 getData(封送到 UI)存在死锁路径故维持注释，改以短临界区落地审查诉求：modbus_duxie 内 9 个 busTcpClient 读写点、建连(创建+ConnectServer)、断连(ConnectClose) 各自 lock(locker_2) 短临界区串行(锁内只有一次读写/一次连接，不跨事件与 UI 封送)，轮询线程经 button9_Click 与 UI 线程的并发调用不再无串行。构建0 error、单测20/20。",
             "v1.3.32  2026-10-16  第37轮(保存前排空替代猜测睡眠)：保存菜单与保存分支在运行中先停采再固定 Thread.Sleep(300) 才 CogSerializer.SaveObjectToFile——300ms 是猜测等待，在途检测(block.Run)未退出时序列化仍并发，正常情况又白等 300ms。改为 WaitDetectDrain(3000) 真排空(覆盖 _detectBusy 门闩与 _detectingCount，正常路径几十 ms 即返回)，仅异常超时才保留 300ms 保底睡眠，与旧行为兼容；同一审查条第①③⑤项修复见 v1.3.31(第36轮)。构建0 error、单测20/20。",

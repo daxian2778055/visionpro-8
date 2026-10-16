@@ -13,6 +13,9 @@ namespace WindowsFormsApplication1
     public class Modbus
     {
         public SerialPort port;
+        // ch:R40 H4 串口短临界区：frm3.mdcan 同时被检测线程（数据路寄存器写）与 Form3 原始帧写调用，
+        //   同一 SerialPort 的"写请求+读响应"事务必须原子；Form3 的直接 port.Write 复用本锁。
+        public readonly object PortLock = new object();
         ErrorLog MsgErroeLog = new ErrorLog();
         // ch:P1-⑤ 响应判定改为按发送站号匹配，消除站号硬编码 0x01 的地雷（默认 0x01 兼容既有 station-1 现场）
         // ch:P1-⑥ 增加读取超时（2s），避免 PLC 无响应时 while 永久阻塞挂死调用线程
@@ -91,6 +94,8 @@ namespace WindowsFormsApplication1
         {
             a = "";
             b = "";
+            lock (PortLock) // ch:R40 H4 串口短临界区：写请求+读响应为一个事务，与其他串口调用串行
+            {
             try
             {
                 //OpenPort();
@@ -116,6 +121,7 @@ namespace WindowsFormsApplication1
               Thread.Sleep(200);
                 int bytes = ReadData(buffer, out b, 5 + 2 * length, (byte)stationID); 
             return bytes;
+            } // lock (PortLock)
 
         }
 
@@ -132,6 +138,8 @@ namespace WindowsFormsApplication1
             //OpenPort();
             a = "";
             string b="";
+            lock (PortLock) // ch:R40 H4 串口短临界区（写请求+读响应事务原子）
+            {
             try
             {
                 byte[] cmdHead = new byte[6];
@@ -158,6 +166,7 @@ namespace WindowsFormsApplication1
             }
                
             return 0;
+            }
         }
 
         /// <summary>
@@ -172,6 +181,8 @@ namespace WindowsFormsApplication1
             a = "";
             string b = "";
             // OpenPort();
+            lock (PortLock) // ch:R40 H4 串口短临界区（写请求+读响应事务原子）
+            {
             try
             {
                 int registerCount = value.Length / 2;
@@ -203,6 +214,7 @@ namespace WindowsFormsApplication1
                 MsgErroeLog.WriteLog(ex.Message);
             }
             return 0;
+            }
         }
         /// <summary>
         /// CRC校验，参数data为byte数组
