@@ -6011,8 +6011,8 @@ namespace WindowsFormsApplication1
                         int w = width; // ch:R36 截止时间改在"真正置高"时锚定：入队延迟不再吃掉脉宽（原实现请求时就算好 until，队列排队会缩短实际高电平）
                         EnqueueIoWork(() =>
                         {
-                            lock (_ioPulseLock) { if (job.ioOkHigh) job.ioOkUntil = Environment.TickCount + w; }
                             SetCameraIoLine(job, true, true);
+                            lock (_ioPulseLock) { if (job.ioOkHigh) job.ioOkUntil = Environment.TickCount + w; } // ch:R39 锚定移到置高之后：脉宽从硬件真正拉高时刻起算（R36 放在 SDK 调用前，仍含调用耗时）
                         });
                     }
                 }
@@ -6025,8 +6025,8 @@ namespace WindowsFormsApplication1
                         int w = width; // ch:R36 同上：NG 线截止时间在真正置高时锚定
                         EnqueueIoWork(() =>
                         {
-                            lock (_ioPulseLock) { if (job.ioNgHigh) job.ioNgUntil = Environment.TickCount + w; }
                             SetCameraIoLine(job, false, true);
+                            lock (_ioPulseLock) { if (job.ioNgHigh) job.ioNgUntil = Environment.TickCount + w; } // ch:R39 锚定移到置高之后：脉宽从硬件真正拉高时刻起算
                         });
                     }
                 }
