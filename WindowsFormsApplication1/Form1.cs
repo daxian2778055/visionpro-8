@@ -4854,7 +4854,7 @@ namespace WindowsFormsApplication1
                             }
                             if (gongjujilu == 1 && (myjob.trrigerEn == true || myjob.triggerMode == "通讯触发"))
                             {
-                                Task.Run(() =>
+                                RunAsyncTail(() => // ch:R41 工具块遍历也计入排空尾：不得排在 Shutdown 之后才执行
                                 {
                                     gongjukuai(myjob.path_number, tempout1);
                                 });
@@ -6408,7 +6408,15 @@ namespace WindowsFormsApplication1
             //   正常路径几十 ms 通过、行为与旧版一致；卡死路径进程随后 Environment.Exit，会话由系统回收。
             bool drainedAtExit = WaitDetectDrain(1000);
             if (!drainedAtExit)
+            {
                 MsgErroeLog.WriteLog("P1-06 退出兜底：排空超时(1000ms)，跳过相机句柄/方案释放（避免与在途检测/写并发，会话由系统回收）");
+                // ch:R41 卡死退出给操作员明确提示：本次未强制释放，GigE/调试会话可能残留到下次启动
+                try
+                {
+                    MessageBox.Show("检测线程未在限定时间内排空，本次未做强制释放。\r\n若稍后重新打开软件或相机提示「无权限(0x80000203)/设备被占用」，请等待约 10~30 秒后重试，必要时重启电脑。", "退出提示", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                }
+                catch { }
+            }
             try
             {
                 if (drainedAtExit && m_MyCamera != null)
@@ -9617,7 +9625,12 @@ namespace WindowsFormsApplication1
                         if (a.Contains(".vpp"))
                         {
                             path_1 = a;
-                            label75.Text = a.Split('\\').Last();
+                            // ch:R41 N3 后台线程不得直写控件：标题经 BeginInvoke 封送到 UI 线程
+                            string _title75 = a.Split('\\').Last();
+                            if (label75.InvokeRequired)
+                                label75.BeginInvoke(new Action(() => { label75.Text = _title75; }));
+                            else
+                                label75.Text = _title75;
                             try
                             {
                                 wenjianjia = Path.GetDirectoryName(path_1);
@@ -9643,7 +9656,11 @@ namespace WindowsFormsApplication1
                         }
                         catch (Exception ex)
                         {
-                            label75.Text = label75.Text + "方案已损坏";
+                            // ch:R41 N3 同前：损坏标记同样封送 UI 线程（拼接读+写都在 UI 线程内完成，避免跨线程读旧值）
+                            if (label75.InvokeRequired)
+                                label75.BeginInvoke(new Action(() => { label75.Text = label75.Text + "方案已损坏"; }));
+                            else
+                                label75.Text = label75.Text + "方案已损坏";
                             MsgErroeLog.WriteLog(ex.Message + "加载方案失败");
                             manager1 = null;
                             this.BeginInvoke(new Action(() =>
@@ -19403,6 +19420,7 @@ namespace WindowsFormsApplication1
                 Myjob gjob = camere == "1" ? myjob1 : camere == "2" ? myjob2 : camere == "3" ? myjob3 : camere == "4" ? myjob4 :
                              camere == "5" ? myjob5 : camere == "6" ? myjob6 : camere == "7" ? myjob7 : myjob8;
                 if (gjob == null || gjob.block == null) return;
+                if (closing) return; // ch:R41 关闭流程已开始（FormClosing 首置 closing）：本遍历不得在 Shutdown 之后执行
                 if (Volatile.Read(ref qiehuanzhong) == 1) return; // ch:P0-3 切换/加载期间加载器锁外重写 block，本渲染路径让路
                 lock (gjob.blockLock)
                 {

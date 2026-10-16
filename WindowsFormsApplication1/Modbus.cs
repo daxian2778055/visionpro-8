@@ -28,6 +28,11 @@ namespace WindowsFormsApplication1
                 b = "";
                 if (buffer == null || buffer.Length < 2)
                     return 0;
+                // ch:R41 防御：读超时必须为有限值（SerialPort 默认 -1 无限），否则一台不回的站会在 PortLock 内永久阻塞串口事务
+                if (port.ReadTimeout <= 0)
+                {
+                    try { port.ReadTimeout = 500; } catch { }
+                }
                 int r = port.Read(buffer, 0, buffer.Length);
                 if (expectCount == 8)
                 {
@@ -118,7 +123,8 @@ namespace WindowsFormsApplication1
             {
                 MsgErroeLog.WriteLog(ex.Message);
             }
-              Thread.Sleep(200);
+                // ch:R41 去掉锁内固定 200ms 睡眠：port.Read 本身会阻塞到有响应或 ReadTimeout 到期（Form3 配 500ms），
+                //   睡眠只是锁内叠加延迟；一台不回的站以前每次事务 ≥700ms，现在上界≈读超时，不再长时间拖住所有串口写
                 int bytes = ReadData(buffer, out b, 5 + 2 * length, (byte)stationID); 
             return bytes;
             } // lock (PortLock)
