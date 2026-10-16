@@ -8525,7 +8525,10 @@ namespace WindowsFormsApplication1
                 if (yunxing)
                 {
                     button11_Click_1(null, null);
-                    Thread.Sleep(300);
+                    // ch:R37 固定 Sleep(300) 属猜测等待：序列化仍可能与在途检测(block.Run)并发；改为真正排空（正常几十 ms 返回），
+                    //   仅异常超时才保底睡眠，行为与旧版兼容但正常路径更快更稳
+                    if (!WaitDetectDrain(3000))
+                        Thread.Sleep(300);
                 }
                 CogSerializer.SaveObjectToFile(manager1, path_1);
                 保存ToolStripMenuItem.Enabled = true;
@@ -9426,7 +9429,9 @@ namespace WindowsFormsApplication1
             if (yunxing)
             {
                 button11_Click_1(null, null);
-                Thread.Sleep(300);
+                // ch:R37 同保存菜单：真排空替代猜测睡眠，超时才保底 300ms
+                if (!WaitDetectDrain(3000))
+                    Thread.Sleep(300);
             }
             CogSerializer.SaveObjectToFile(manager1, path_1);
             MessageBox.Show("保存方案成功!" + (yunxing ? "（已停止运行，请重新开始检测）" : ""));
