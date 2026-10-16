@@ -3143,6 +3143,7 @@ namespace WindowsFormsApplication1
             f1.Show();
             f1.Visible = false;
             frm3.getData += new Form3.GetSeletionData(DataChange);
+            frm3.framePatternsProvider = GetForm3FramePatterns; // ch:R42 收包组帧触发串并集（含各方案 triggerZifu，Form3 拿不到 vpp 输入）
             frm3.Show();
             frm3.Visible = false;
             frm7.getData += new Form7.GetSeletionData(DataChange_mes);
@@ -4854,7 +4855,11 @@ namespace WindowsFormsApplication1
                             }
                             if (gongjujilu == 1 && (myjob.trrigerEn == true || myjob.triggerMode == "通讯触发"))
                             {
-                                RunAsyncTail(() => // ch:R41 工具块遍历也计入排空尾：不得排在 Shutdown 之后才执行
+                                // ch:R42 工具块遍历尾计数语义（审查确认项）：_asyncTailBusy 只覆盖「派发→UI 投递完成」这段——
+                                //   遍历本体在 gongjukuai 内经 BeginInvoke 落 UI 队列执行，而排空本身跑在 UI 线程
+                                //   （FormClosing/FormClosed 调用），若让排空等待 UI 队列里的回调会自锁死等；
+                                //   策略：投递前计数保证时序，投递后的遍历由封送体内 closing 门闩让路（见 gongjukuai 起始守卫）。
+                                RunAsyncTail(() =>
                                 {
                                     gongjukuai(myjob.path_number, tempout1);
                                 });
@@ -4985,6 +4990,9 @@ namespace WindowsFormsApplication1
                                     break;
                             }
                             #endregion
+                            // ch:R42 刻意不入排空尾(_asyncTailBusy)：本任务只累加各相机 oksum/sum/rate 内存计数并刷表格行，
+                            //   不触 VisionPro 方案、相机句柄、socket 或共享 teardown 对象——关窗 Shutdown 与它无并发冲突；
+                            //   若日后开始触碰方案/设备/共享 teardown 对象，必须改用 RunAsyncTail 纳入排空（审查确认项）。
                             Task.Run(() =>
                             {
                                 try
@@ -5259,6 +5267,9 @@ namespace WindowsFormsApplication1
                             });
                             if (yunxing || !yunxing)
                             {
+                                // ch:R42 刻意不入排空尾(_asyncTailBusy)：CSV/统计落账只做文件追加与内存计数
+                                //   （runlog*/CSV 行各自独立句柄），不触方案/相机/socket/共享 teardown 对象；
+                                //   关窗卡死强退时最多丢最后一条未落盘的账，属可接受代价（审查确认项）。
                                 Task.Run(() =>
                                 {
                                     #region 统计
@@ -7320,6 +7331,13 @@ namespace WindowsFormsApplication1
         private void RecvInfo(string str)
         {
             textBox1.Text = str;
+        }
+        // ch:R42 Form3 收包组帧需要「现场全部触发串」：Form3 本地 8 条载图串它自己取，各相机方案的
+        //   myjobN.triggerZifu（vpp 输入，加载方案时更新；未加载时为空串，构造时跳过）只有 Form1 有，经本委托随收包现取。
+        private string[] GetForm3FramePatterns()
+        {
+            return new string[] { myjob1.triggerZifu, myjob2.triggerZifu, myjob3.triggerZifu, myjob4.triggerZifu,
+                                  myjob5.triggerZifu, myjob6.triggerZifu, myjob7.triggerZifu, myjob8.triggerZifu };
         }
         private void DataChange(object sender, Form3.SelectionChangedEventArgs e)
         {
@@ -19420,7 +19438,8 @@ namespace WindowsFormsApplication1
                 Myjob gjob = camere == "1" ? myjob1 : camere == "2" ? myjob2 : camere == "3" ? myjob3 : camere == "4" ? myjob4 :
                              camere == "5" ? myjob5 : camere == "6" ? myjob6 : camere == "7" ? myjob7 : myjob8;
                 if (gjob == null || gjob.block == null) return;
-                if (closing) return; // ch:R41 关闭流程已开始（FormClosing 首置 closing）：本遍历不得在 Shutdown 之后执行
+                if (closing) return; // ch:R41/R42 关闭流程已开始（FormClosing 首置）：尾计数只等「投递」不等遍历本体，
+                                     //   经消息泵漏出的排队回调在此放弃，不再触已 Shutdown 的 JobManager
                 if (Volatile.Read(ref qiehuanzhong) == 1) return; // ch:P0-3 切换/加载期间加载器锁外重写 block，本渲染路径让路
                 lock (gjob.blockLock)
                 {
