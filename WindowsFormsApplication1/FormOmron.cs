@@ -1348,53 +1348,66 @@ namespace WindowsFormsApplication1
                                 {
                                     // 逗号分隔 → short数组, 批量写 (Omron FINS memory write)
                                     string[] parts = pat.Value[4].Split(new char[] { ',' }, StringSplitOptions.RemoveEmptyEntries);
-                                    short[] vals = new short[parts.Length];
-                                    for (int i = 0; i < parts.Length; i++)
+                                    int writeCount = Math.Min(parts.Length, regLen); // ch:R36 写回截断：R22 登记了 regLen 但本窗漏了 Math.Min，超长值会整段写出冲掉相邻寄存器(多相机数据互串)
+                                    if (writeCount < parts.Length) MsgErroeLog.WriteLog("写回超长截断 cam=" + pat.Key + " ch=" + par.Value[0] + " 值数=" + parts.Length + ">登记长度" + regLen); // ch:R36 仅截断时记一条
+                                    short[] vals = new short[writeCount];
+                                    for (int i = 0; i < writeCount; i++)
                                         vals[i] = (short)Math.Round(double.Parse(parts[i].Trim()));
                                     if (!DemoUtils.WriteResultRenderOk(() => omronFinsNet.Write("D" + addr_start.ToString(), vals), "D" + addr_start.ToString(), out fins_temp)) anyWriteFailed = true; // ch:P2-④
                                     for (int j = 0; j < vals.Length; j++)
                                     {
+                                        if (!gridUi) break;
                                         int xuanzhong_temp = addr_start - int.Parse(address_qishi.ToString()) + j;
-                                        if (gridUi)
-                                            SetModbusGridValue(fins_data[xuanzhong_temp][0], fins_data[xuanzhong_temp][1], fins_temp);
+                                        if (xuanzhong_temp < 0 || !fins_data.ContainsKey(xuanzhong_temp)) continue; // ch:R36 网格越界守卫：PLC已写成功，仅跳过UI回写，防 KeyNotFound 被 catch 误判写回失败
+                                        SetModbusGridValue(fins_data[xuanzhong_temp][0], fins_data[xuanzhong_temp][1], fins_temp);
                                     }
                                 }
                                 else if (fmt == "long")
                                 {
                                     string[] parts = pat.Value[4].Split(new char[] { ',' }, StringSplitOptions.RemoveEmptyEntries);
-                                    int[] vals = new int[parts.Length];
-                                    for (int i = 0; i < parts.Length; i++)
+                                    int valLen = Math.Max(1, regLen / 2); // ch:R36 long 占2寄存器
+                                    int writeCount = Math.Min(parts.Length, valLen); // ch:R36 写回截断，与 modbustcp(R21) 对齐
+                                    if (writeCount < parts.Length) MsgErroeLog.WriteLog("写回超长截断 cam=" + pat.Key + " ch=" + par.Value[0] + " 值数=" + parts.Length + ">登记长度" + regLen); // ch:R36 仅截断时记一条
+                                    int[] vals = new int[writeCount];
+                                    for (int i = 0; i < writeCount; i++)
                                         vals[i] = (int)Math.Round(double.Parse(parts[i].Trim()));
                                     if (!DemoUtils.WriteResultRenderOk(() => omronFinsNet.Write("D" + addr_start.ToString(), vals), "D" + addr_start.ToString(), out fins_temp)) anyWriteFailed = true; // ch:P2-④
                                     for (int j = 0; j < vals.Length * 2; j++)
                                     {
+                                        if (!gridUi) break;
                                         int xuanzhong_temp = addr_start - int.Parse(address_qishi.ToString()) + j;
-                                        if (gridUi)
-                                            SetModbusGridValue(fins_data[xuanzhong_temp][0], fins_data[xuanzhong_temp][1], fins_temp);
+                                        if (xuanzhong_temp < 0 || !fins_data.ContainsKey(xuanzhong_temp)) continue; // ch:R36 网格越界守卫，防 KeyNotFound 误判写回失败
+                                        SetModbusGridValue(fins_data[xuanzhong_temp][0], fins_data[xuanzhong_temp][1], fins_temp);
                                     }
                                 }
                                 else if (fmt == "float")
                                 {
                                     string[] parts = pat.Value[4].Split(new char[] { ',' }, StringSplitOptions.RemoveEmptyEntries);
-                                    float[] vals = new float[parts.Length];
-                                    for (int i = 0; i < parts.Length; i++)
+                                    int valLen = Math.Max(1, regLen / 2); // ch:R36 float 占2寄存器
+                                    int writeCount = Math.Min(parts.Length, valLen); // ch:R36 写回截断，与 modbustcp(R21) 对齐
+                                    if (writeCount < parts.Length) MsgErroeLog.WriteLog("写回超长截断 cam=" + pat.Key + " ch=" + par.Value[0] + " 值数=" + parts.Length + ">登记长度" + regLen); // ch:R36 仅截断时记一条
+                                    float[] vals = new float[writeCount];
+                                    for (int i = 0; i < writeCount; i++)
                                         vals[i] = float.Parse(parts[i].Trim());
                                     if (!DemoUtils.WriteResultRenderOk(() => omronFinsNet.Write("D" + addr_start.ToString(), vals), "D" + addr_start.ToString(), out fins_temp)) anyWriteFailed = true; // ch:P2-④
                                     for (int j = 0; j < vals.Length * 2; j++)
                                     {
+                                        if (!gridUi) break;
                                         int xuanzhong_temp = addr_start - int.Parse(address_qishi.ToString()) + j;
-                                        if (gridUi)
-                                            SetModbusGridValue(fins_data[xuanzhong_temp][0], fins_data[xuanzhong_temp][1], fins_temp);
+                                        if (xuanzhong_temp < 0 || !fins_data.ContainsKey(xuanzhong_temp)) continue; // ch:R36 网格越界守卫，防 KeyNotFound 误判写回失败
+                                        SetModbusGridValue(fins_data[xuanzhong_temp][0], fins_data[xuanzhong_temp][1], fins_temp);
                                     }
                                 }
                                 else if (fmt == "string")
                                 {
                                     string[] parts = pat.Value[4].Split(new char[] { ',' }, StringSplitOptions.RemoveEmptyEntries);
-                                    for (int j = 0; j < parts.Length; j++)
+                                    int writeCount = Math.Min(parts.Length, regLen); // ch:R36 string 每值占1寄存器，截断与 modbustcp(R21) 语义对齐
+                                    if (writeCount < parts.Length) MsgErroeLog.WriteLog("写回超长截断 cam=" + pat.Key + " ch=" + par.Value[0] + " 值数=" + parts.Length + ">登记长度" + regLen); // ch:R36 仅截断时记一条
+                                    for (int j = 0; j < writeCount; j++)
                                     {
                                         int xuanzhong_temp = addr_start - int.Parse(address_qishi.ToString()) + j;
                                         if (!DemoUtils.WriteResultRenderOk(() => omronFinsNet.Write("D" + (addr_start + j).ToString(), parts[j].Trim()), "D" + (addr_start + j).ToString(), out fins_temp)) anyWriteFailed = true; // ch:P2-④ 逐寄存器聚合，避免末次成功掩盖前次失败
-                                        if (gridUi)
+                                        if (gridUi && xuanzhong_temp >= 0 && fins_data.ContainsKey(xuanzhong_temp)) // ch:R36 网格越界守卫：值已写入PLC，仅守护UI回写
                                             SetModbusGridValue(fins_data[xuanzhong_temp][0], fins_data[xuanzhong_temp][1], fins_temp);
                                     }
                                 }

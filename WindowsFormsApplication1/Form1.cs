@@ -73,7 +73,7 @@ namespace WindowsFormsApplication1
         private int _lastUiInputTick;
         private System.Windows.Forms.Timer _ocxYieldTimer;
         private IMessageFilter _uiInputFilter;
-        private System.Windows.Forms.Timer _ioPulseTimer;
+        private System.Threading.Timer _ioPulseTimer; // ch:R36 由 WinForms UI 定时器改线程定时器：UI 卡住不再拖延脉冲关断
         private readonly object _ioPulseLock = new object();
         // ch:P1-③ 相机 IO 输出工作线程：把 MV_CC_SetEnumValue/SetBoolValue_NET 这类同步 P/Invoke
         //   从海康取流回调线程和 UI 定时器线程移出。回调/定时器只入队，由该线程串行执行，
@@ -4088,7 +4088,8 @@ namespace WindowsFormsApplication1
             }
             try
             {
-                SetBlockInputSafe(myjob, "Input", CreateCogImageFromBitmap(src, myjob.Color));
+                if (!SetBlockInputSafe(myjob, "Input", CreateCogImageFromBitmap(src, myjob.Color)))
+                    return false; // ch:R36 赋值失败(异常被吞)不再被 Value!=null 误判为成功
                 return myjob.block.Inputs["Input"].Value != null;
             }
             catch (Exception ex)
@@ -4107,14 +4108,16 @@ namespace WindowsFormsApplication1
         }
         // ch:P0 工具块输入安全设置：事件线程（通讯/轮询回调）直接写 block.Inputs 会与检测线程 block.Run() 并发。
         //   统一走本方法，按 job 粒度加锁，与 block.Run() 的临界区互斥。
-        private void SetBlockInputSafe(Myjob job, string inputName, object value)
+        // ch:R36 返回值化：原 void 版把赋值异常吞在锁内，调用方判 Value!=null 在失败时仍为真(旧图还在)，
+        //   在线连续路径从第二帧起赋值失败会静默沿用旧图；改为返回是否真正赋值成功，失败由调用方置故障帧(999)。
+        private bool SetBlockInputSafe(Myjob job, string inputName, object value)
         {
             if (job == null || job.block == null || string.IsNullOrEmpty(inputName))
-                return;
+                return false;
             lock (job.blockLock)
             {
-                try { job.block.Inputs[inputName].Value = value; }
-                catch (Exception ex) { MsgErroeLog.WriteLog("设置工具块输入失败[" + inputName + "]:" + ex.Message); }
+                try { job.block.Inputs[inputName].Value = value; return true; }
+                catch (Exception ex) { MsgErroeLog.WriteLog("设置工具块输入失败[" + inputName + "]:" + ex.Message); return false; }
             }
         }
 
@@ -4156,9 +4159,9 @@ namespace WindowsFormsApplication1
                                         if (bmp[0] != null)
                                         {
                                             if (myjob.Color)
-                                                SetBlockInputSafe(myjob, "Input", new CogImage24PlanarColor(bmp[0]));
+                                                inputAssignFailed |= !SetBlockInputSafe(myjob, "Input", new CogImage24PlanarColor(bmp[0])); // ch:R36 赋值失败置故障帧，不沿用旧图
                                             else
-                                                SetBlockInputSafe(myjob, "Input", new CogImage8Grey(bmp[0]));
+                                                inputAssignFailed |= !SetBlockInputSafe(myjob, "Input", new CogImage8Grey(bmp[0]));
                                             
 
                                         }
@@ -4168,63 +4171,63 @@ namespace WindowsFormsApplication1
                                         if (bmp[1] != null)
                                         {
                                             if (myjob.Color)
-                                                SetBlockInputSafe(myjob, "Input", new CogImage24PlanarColor(bmp[1]));
+                                                inputAssignFailed |= !SetBlockInputSafe(myjob, "Input", new CogImage24PlanarColor(bmp[1])); // ch:R36 赋值失败置故障帧，不沿用旧图
                                             else
-                                                SetBlockInputSafe(myjob, "Input", new CogImage8Grey(bmp[1]));
+                                                inputAssignFailed |= !SetBlockInputSafe(myjob, "Input", new CogImage8Grey(bmp[1]));
                                         }
                                         break;
                                     case "3":
                                         if (bmp[2] != null)
                                         {
                                             if (myjob.Color)
-                                                SetBlockInputSafe(myjob, "Input", new CogImage24PlanarColor(bmp[2]));
+                                                inputAssignFailed |= !SetBlockInputSafe(myjob, "Input", new CogImage24PlanarColor(bmp[2])); // ch:R36 赋值失败置故障帧，不沿用旧图
                                             else
-                                                SetBlockInputSafe(myjob, "Input", new CogImage8Grey(bmp[2]));
+                                                inputAssignFailed |= !SetBlockInputSafe(myjob, "Input", new CogImage8Grey(bmp[2]));
                                         }
                                         break;
                                     case "4":
                                         if (bmp[3] != null)
                                         {
                                             if (myjob.Color)
-                                                SetBlockInputSafe(myjob, "Input", new CogImage24PlanarColor(bmp[3]));
+                                                inputAssignFailed |= !SetBlockInputSafe(myjob, "Input", new CogImage24PlanarColor(bmp[3])); // ch:R36 赋值失败置故障帧，不沿用旧图
                                             else
-                                                SetBlockInputSafe(myjob, "Input", new CogImage8Grey(bmp[3]));
+                                                inputAssignFailed |= !SetBlockInputSafe(myjob, "Input", new CogImage8Grey(bmp[3]));
                                         }
                                         break;
                                     case "5":
                                         if (bmp[4] != null)
                                         {
                                             if (myjob.Color)
-                                                SetBlockInputSafe(myjob, "Input", new CogImage24PlanarColor(bmp[4]));
+                                                inputAssignFailed |= !SetBlockInputSafe(myjob, "Input", new CogImage24PlanarColor(bmp[4])); // ch:R36 赋值失败置故障帧，不沿用旧图
                                             else
-                                                SetBlockInputSafe(myjob, "Input", new CogImage8Grey(bmp[4]));
+                                                inputAssignFailed |= !SetBlockInputSafe(myjob, "Input", new CogImage8Grey(bmp[4]));
                                         }
                                         break;
                                     case "6":
                                         if (bmp[5] != null)
                                         {
                                             if (myjob.Color)
-                                                SetBlockInputSafe(myjob, "Input", new CogImage24PlanarColor(bmp[5]));
+                                                inputAssignFailed |= !SetBlockInputSafe(myjob, "Input", new CogImage24PlanarColor(bmp[5])); // ch:R36 赋值失败置故障帧，不沿用旧图
                                             else
-                                                SetBlockInputSafe(myjob, "Input", new CogImage8Grey(bmp[5]));
+                                                inputAssignFailed |= !SetBlockInputSafe(myjob, "Input", new CogImage8Grey(bmp[5]));
                                         }
                                         break;
                                     case "7":
                                         if (bmp[6] != null)
                                         {
                                             if (myjob.Color)
-                                                SetBlockInputSafe(myjob, "Input", new CogImage24PlanarColor(bmp[6]));
+                                                inputAssignFailed |= !SetBlockInputSafe(myjob, "Input", new CogImage24PlanarColor(bmp[6])); // ch:R36 赋值失败置故障帧，不沿用旧图
                                             else
-                                                SetBlockInputSafe(myjob, "Input", new CogImage8Grey(bmp[6]));
+                                                inputAssignFailed |= !SetBlockInputSafe(myjob, "Input", new CogImage8Grey(bmp[6]));
                                         }
                                         break;
                                     case "8":
                                         if (bmp[7] != null)
                                         {
                                             if (myjob.Color)
-                                                SetBlockInputSafe(myjob, "Input", new CogImage24PlanarColor(bmp[7]));
+                                                inputAssignFailed |= !SetBlockInputSafe(myjob, "Input", new CogImage24PlanarColor(bmp[7])); // ch:R36 赋值失败置故障帧，不沿用旧图
                                             else
-                                                SetBlockInputSafe(myjob, "Input", new CogImage8Grey(bmp[7]));
+                                                inputAssignFailed |= !SetBlockInputSafe(myjob, "Input", new CogImage8Grey(bmp[7]));
                                         }
                                         break;
                                 }
@@ -4615,7 +4618,7 @@ namespace WindowsFormsApplication1
                             //   需求口径=「该流程勾了 modbustcp 输出 + 输出模式选 ModbusTCP」就显示 ToolBlock 的 modbustcp 输出值，
                             //   最终经 frm3 还是 FormModbus 出数不在考虑内。故直接读 block 的 modbustcp 输出端取文本，
                             //   为空时回落 serial 端(R19：现场数据也有落在 serial 端的情况)，两条都不通才算无输出。
-                            RecordModbusOverlayOut(int.Parse(myjob.path_number), myjob);
+                            RecordModbusOverlayOut(int.Parse(myjob.path_number), myjob, faultThisFrame);
                             try { snapBuchang = (myjob.block.Outputs.Contains("buchang") && myjob.block.Outputs["buchang"].Value != null ? myjob.block.Outputs["buchang"].Value.ToString() : "0"); } catch { snapBuchang = "0"; }
                             try
                             {
@@ -6005,7 +6008,12 @@ namespace WindowsFormsApplication1
                     if (!job.ioOkHigh)
                     {
                         job.ioOkHigh = true;
-                        EnqueueIoWork(() => SetCameraIoLine(job, true, true));
+                        int w = width; // ch:R36 截止时间改在"真正置高"时锚定：入队延迟不再吃掉脉宽（原实现请求时就算好 until，队列排队会缩短实际高电平）
+                        EnqueueIoWork(() =>
+                        {
+                            lock (_ioPulseLock) { if (job.ioOkHigh) job.ioOkUntil = Environment.TickCount + w; }
+                            SetCameraIoLine(job, true, true);
+                        });
                     }
                 }
                 else
@@ -6014,34 +6022,37 @@ namespace WindowsFormsApplication1
                     if (!job.ioNgHigh)
                     {
                         job.ioNgHigh = true;
-                        EnqueueIoWork(() => SetCameraIoLine(job, false, true));
+                        int w = width; // ch:R36 同上：NG 线截止时间在真正置高时锚定
+                        EnqueueIoWork(() =>
+                        {
+                            lock (_ioPulseLock) { if (job.ioNgHigh) job.ioNgUntil = Environment.TickCount + w; }
+                            SetCameraIoLine(job, false, true);
+                        });
                     }
                 }
             }
             EnsureIoPulseTimer();
         }
 
+        // ch:R36 脉冲关断节拍改由 System.Threading.Timer 驱动。原实现用 WinForms UI 定时器（20ms Tick），
+        //   界面卡住/模态框/死循环时 Tick 不跑 → OK/NG 拦截线可能一直保持高电平直到 UI 恢复；
+        //   线程定时器与 UI 消息泵无关，创建/停启可在任意线程（检测线程调用 RequestIoPulse）。
         private void EnsureIoPulseTimer()
         {
-            if (IsDisposed || !IsHandleCreated)
-                return;
-            Action start = delegate
+            if (_ioPulseTimer == null)
             {
-                if (_ioPulseTimer == null)
+                lock (_ioPulseLock)
                 {
-                    _ioPulseTimer = new System.Windows.Forms.Timer();
-                    _ioPulseTimer.Interval = 20;
-                    _ioPulseTimer.Tick += delegate { ExpireIoPulses(); };
+                    if (_ioPulseTimer == null)
+                        _ioPulseTimer = new System.Threading.Timer(delegate
+                        {
+                            try { ExpireIoPulses(); }
+                            catch (Exception ex) { new ErrorLog().WriteLog("IO脉冲关断:" + ex.Message); }
+                        }, null, 20, 20);
                 }
-                if (!_ioPulseTimer.Enabled)
-                    _ioPulseTimer.Start();
-            };
-            if (InvokeRequired)
-            {
-                try { BeginInvoke(start); } catch (Exception ex) { new ErrorLog().WriteLog(ex.ToString()); }
+                return; // 新建即以 20ms 周期运行
             }
-            else
-                start();
+            try { _ioPulseTimer.Change(20, 20); } catch (Exception ex) { new ErrorLog().WriteLog(ex.ToString()); } // 已自停则重新起跑
         }
 
         private void ExpireIoPulses()
@@ -6070,7 +6081,9 @@ namespace WindowsFormsApplication1
                     || (myjob8 != null && (myjob8.ioOkHigh || myjob8.ioNgHigh));
             }
             if (!any && _ioPulseTimer != null)
-                _ioPulseTimer.Stop();
+            {
+                try { _ioPulseTimer.Change(System.Threading.Timeout.Infinite, System.Threading.Timeout.Infinite); } catch { }
+            }
         }
 
         private void ExpireOneIoPulse(Myjob job, int now)
@@ -6100,7 +6113,7 @@ namespace WindowsFormsApplication1
             _ioPulseEnabled = false;
             if (_ioPulseTimer != null)
             {
-                try { _ioPulseTimer.Stop(); } catch (Exception ex) { new ErrorLog().WriteLog(ex.ToString()); }
+                try { _ioPulseTimer.Change(System.Threading.Timeout.Infinite, System.Threading.Timeout.Infinite); } catch (Exception ex) { new ErrorLog().WriteLog(ex.ToString()); }
             }
             StopOneIoPulse(myjob1);
             StopOneIoPulse(myjob2);
@@ -6436,7 +6449,9 @@ namespace WindowsFormsApplication1
                     if (_ocxYieldTimer != null)
                         _ocxYieldTimer.Stop();
                     if (_ioPulseTimer != null)
-                        _ioPulseTimer.Stop();
+                    {
+                        try { _ioPulseTimer.Change(System.Threading.Timeout.Infinite, System.Threading.Timeout.Infinite); } catch { }
+                    }
                     StopAllIoPulses();
                     FlushIoWork(1500); // ch:P1-③ 退出前排空 IO 队列，确保脉冲拉低真正下发
                     if (_uiInputFilter != null)
@@ -8510,7 +8525,10 @@ namespace WindowsFormsApplication1
                 if (yunxing)
                 {
                     button11_Click_1(null, null);
-                    Thread.Sleep(300);
+                    // ch:R37 固定 Sleep(300) 属猜测等待：序列化仍可能与在途检测(block.Run)并发；改为真正排空（正常几十 ms 返回），
+                    //   仅异常超时才保底睡眠，行为与旧版兼容但正常路径更快更稳
+                    if (!WaitDetectDrain(3000))
+                        Thread.Sleep(300);
                 }
                 CogSerializer.SaveObjectToFile(manager1, path_1);
                 保存ToolStripMenuItem.Enabled = true;
@@ -9411,7 +9429,9 @@ namespace WindowsFormsApplication1
             if (yunxing)
             {
                 button11_Click_1(null, null);
-                Thread.Sleep(300);
+                // ch:R37 同保存菜单：真排空替代猜测睡眠，超时才保底 300ms
+                if (!WaitDetectDrain(3000))
+                    Thread.Sleep(300);
             }
             CogSerializer.SaveObjectToFile(manager1, path_1);
             MessageBox.Show("保存方案成功!" + (yunxing ? "（已停止运行，请重新开始检测）" : ""));
@@ -9557,9 +9577,14 @@ namespace WindowsFormsApplication1
                     {
                         listBox2.Visible = false;
                         listBox2.Items.Clear();
-                        // ch:排空：等待正在执行的检测帧（block.Run）结束（最长 3 秒），防止 Shutdown 与 Run 并发（参考正常版本）
+                        // ch:排空：等待正在执行的检测帧（block.Run）结束，防止 Shutdown 与 Run 并发（参考正常版本）
+                        // ch:R36 超时不再"记一行就拆"：先 5s，再给 10s 二次排空；二级都超时（累计 15s）才按原策略继续强拆并升级日志
                         if (!WaitDetectDrain(5000))
-                            MsgErroeLog.WriteLog("P1-06 切换：检测排空超时(5000ms)，仍有在途检测帧；Shutdown 可能与检测并发");
+                        {
+                            MsgErroeLog.WriteLog("P1-06 切换：检测排空超时(5000ms)，启动二次排空(10000ms)");
+                            if (!WaitDetectDrain(10000))
+                                MsgErroeLog.WriteLog("P1-06 切换：二次排空仍超时(累计15000ms)，检测线程疑卡死；按原策略继续 Shutdown（并发风险已知）");
+                        }
                         try
                         {
                             manager1.Shutdown();
@@ -11872,10 +11897,17 @@ namespace WindowsFormsApplication1
         //   「流程里有 modbustcp 这个键，每次拍照这个键的值就是 modbustcp 输出，真正通讯输出的数据也来自它」，
         //   故直接读 block.Outputs["modbustcp"]；该端不存在时才回落 serial 端(R19：个别流程数据落在 serial 端)。
         //   与最终走 frm3 还是 FormModbus 出数无关。
-        private void RecordModbusOverlayOut(int cam, Myjob job)
+        private void RecordModbusOverlayOut(int cam, Myjob job, bool fault)
         {
             if (cam < 1 || cam > 8 || job == null)
                 return;
+            // ch:R36 故障帧显示 999：与通讯写出同口径（getrecord 各输出分支对故障帧一律发 "999"），
+            //   覆盖层是"显示实际发出去的数"，故障帧不能继续显示流程里的旧数值误导客户
+            if (fault)
+            {
+                _mtcpOverlayOut[cam] = "999";
+                return;
+            }
             string v = "";
             try
             {
@@ -13023,7 +13055,12 @@ namespace WindowsFormsApplication1
             myjob8.yun = 0;
             ClearPendingOcxPaints();
             if (!WaitDetectDrain(3000))
-                MsgErroeLog.WriteLog("P1-06 关闭：检测排空超时(3000ms)，仍有在途检测帧；后续释放缓冲/Shutdown 存在野指针/并发风险");
+            {
+                // ch:R36 超时不再立刻拆：再给 5s；仍超时才按原策略继续（破坏性步骤不跳过，仅升级日志）
+                MsgErroeLog.WriteLog("P1-06 关闭：检测排空超时(3000ms)，启动二次排空(5000ms)");
+                if (!WaitDetectDrain(5000))
+                    MsgErroeLog.WriteLog("P1-06 关闭：二次排空仍超时(累计8000ms)，检测线程疑卡死；后续释放缓冲/StopGrabbing/销毁设备存在野指针/并发风险");
+            }
             ReleaseAllBmpSlots();
             if (IsHandleCreated && !IsDisposed)
             {
