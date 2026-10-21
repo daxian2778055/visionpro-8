@@ -27,84 +27,109 @@ namespace WindowsFormsApplication1
 
         protected int ReadData(byte[] buffer, out string b, int expectCount, byte station = 0x01)
         {
+            b = "";
+            if (buffer == null || expectCount < 4 || buffer.Length < expectCount)
+                return 0;
             try
             {
-                b = "";
-                if (buffer == null || buffer.Length < 2)
-                    return 0;
-                // ch:R41 防御：读超时必须为有限值（SerialPort 默认 -1 无限），否则一台不回的站会在 PortLock 内永久阻塞串口事务
+                // ch:R43 读超时必须为有限值（SerialPort 默认 -1 无限），否则一台不回的站会在 PortLock 内永久阻塞串口事务
                 if (port.ReadTimeout <= 0)
                 {
                     try { port.ReadTimeout = 500; } catch { }
                 }
-                int r = port.Read(buffer, 0, buffer.Length);
+                // ch:R43 只读取一帧：粘包时切出第一帧，剩余字节留在串口缓冲由下一次事务读取；
+                //   短读在窗口内拼满再校验；写回执(FC06/FC10)同样先过 CRC 才返回成功
+                int frameLen = ReadOneFrame(buffer, buffer.Length);
+                if (frameLen <= 0)
+                {
+                    try { port.DiscardInBuffer(); } catch { } // 半截/未知帧无法定界，丢弃以恢复同步
+                    return 0;
+                }
+                if (buffer[0] != station)
+                {
+                    LogFrameMismatchThrottled(station, frameLen, buffer[1], "站号不符");
+                    return 0; // 该帧已完整消费，下一帧留给下一次事务
+                }
+                if ((buffer[1] & 0x80) != 0)
+                {
+                    LogFrameMismatchThrottled(station, frameLen, buffer[1], "从站异常响应");
+                    return 0;
+                }
                 if (expectCount == 8)
                 {
-                    // 写寄存器回执：不解析数据，仅清空输入缓冲
-                    port.DiscardInBuffer();
-                    return r;
+                    // 写寄存器回执也是 8 字节：长度 + 功能码 + CRC 全部通过才返回成功
+                    if (frameLen == 8 && (buffer[1] == 0x06 || buffer[1] == 0x10) && Crc16Ok(buffer, 8))
+                        return 8;
+                    LogCrcFailThrottled(station);
+                    return 0;
                 }
-                if (buffer[0] == station && buffer[1] == 0X03)
+                if (frameLen != expectCount || buffer[1] != 0x03)
                 {
-                    // ch:R43 P1-7 长度完整才采信：原 `r != expectCount || Crc16Ok` 会把短帧/残留字节直接解析返回
-                    if (r == expectCount && Crc16Ok(buffer, r))
-                    {
-                        // ch:P1-10 按本次实读长度 r 解析，不再按 buffer.Length（避免读到短帧/残留时把无效字节拼进 b）
-                        for (int i = 0; i < r; i++)
-                        {
-                            if (i >= 3 && i <= r - 3)
-                                b += buffer[i].ToString("X2") + " ";
-                        }
-                        port.DiscardInBuffer();
-                        return r;
-                    }
-                    LogCrcFailThrottled(station); // 长度完整但 CRC 不符：丢弃该帧
+                    LogFrameMismatchThrottled(station, frameLen, buffer[1], "功能码/长度不符");
+                    return 0;
                 }
-                // 首帧不匹配/坏帧：轮询等待直到匹配（按 station）或超时
-                // ch:P2 改差值式超时：原 long deadline = TickCount + 2000L; if (TickCount > deadline) 在 TickCount 回绕
-                //   （int.MaxValue→int.MinValue）的瞬间会永远不成立 → 死等约 24.9 天。差值式在 24.9 天窗口内恒正确。
-                int waitStart = Environment.TickCount;
-                while (true)
+                if (!Crc16Ok(buffer, frameLen))
                 {
-                    if (unchecked(Environment.TickCount - waitStart) > MismatchPollWindowMs)
-                    {
-                        MsgErroeLog.WriteLog("Modbus 读响应超时(站号" + station.ToString("X2") + ")");
-                        break;
-                    }
-                    int n = port.Read(buffer, 0, buffer.Length);
-                    if (n <= 0)
-                        continue; // 未读到数据：不用残留内容判定，继续等待
-                    r = n;
-                    if (buffer[0] == station && buffer[1] == 0X03)
-                    {
-                        if (n != expectCount)
-                        {
-                            continue; // ch:R43 长度不符：短帧/粘包一律丢弃，继续等完整帧
-                        }
-                        if (!Crc16Ok(buffer, n))
-                        {
-                            LogCrcFailThrottled(station); // 坏帧不采信：继续等下一帧（下一次读会覆盖缓冲）
-                            continue;
-                        }
-                        // ch:P1-10 按本次实读 n 解析（原 buffer.Length 会读入未更新/残留字节）
-                        for (int i = 0; i < n; i++)
-                        {
-                            b += buffer[i].ToString("X2") + " ";
-                        }
-                        port.DiscardInBuffer();
-                        break;
-                    }
+                    LogCrcFailThrottled(station);
+                    return 0;
                 }
-                return r;
+                // 仅解析数据区（跳过站号/功能码/字节数/CRC），与原首帧成功路径口径一致
+                for (int i = 3; i <= frameLen - 3; i++)
+                    b += buffer[i].ToString("X2") + " ";
+                return frameLen;
             }
-            catch(Exception ex)
+            catch (Exception ex)
             {
                 b = "";
                 MsgErroeLog.WriteLog(ex.Message);
+                try { port.DiscardInBuffer(); } catch { }
                 return 0;
             }
         }
 
+        // ch:R43 读取恰好 count 字节；超时/短读返回 false（调用方丢弃半截帧）
+        private bool ReadExact(byte[] buffer, int offset, int count)
+        {
+            int got = 0;
+            int start = Environment.TickCount;
+            while (got < count)
+            {
+                if (unchecked(Environment.TickCount - start) > MismatchPollWindowMs)
+                    return false;
+                int n = port.Read(buffer, offset + got, count - got);
+                if (n <= 0)
+                    continue;
+                got += n;
+            }
+            return true;
+        }
+
+        // ch:R43 按功能码读出完整一帧（绝不预读下一帧）：FC03 先读字节数再读数据；FC06/FC10=8；异常响应=5。
+        //   未知功能码无法定界，丢弃输入缓冲并返回 -1，由下一次事务重新同步。
+        private int ReadOneFrame(byte[] buffer, int maxLen)
+        {
+            if (maxLen < 5 || !ReadExact(buffer, 0, 2))
+                return -1;
+            byte func = buffer[1];
+            int total;
+            if ((func & 0x80) != 0)
+                total = 5;
+            else if (func == 0x03)
+            {
+                if (!ReadExact(buffer, 2, 1))
+                    return -1;
+                total = 3 + buffer[2] + 2;
+            }
+            else if (func == 0x06 || func == 0x10)
+                total = 8;
+            else
+                return -1;
+            if (total < 5 || total > maxLen)
+                return -1;
+            if (!ReadExact(buffer, 3, total - 3))
+                return -1;
+            return total;
+        }
         // ch:R42 响应帧 CRC 校验：复用 ModbusCrc.Append（单测直链回归的那份实现，帧尾 [低,高]）。
         //   仅对长度完整(r==expectCount)的 FC03 响应调用；不通过则帧被丢弃，坏线噪点不再被当成寄存器数据。
         private static bool Crc16Ok(byte[] frame, int len)
@@ -125,6 +150,17 @@ namespace WindowsFormsApplication1
                 return;
             _lastCrcFailLogTick = now;
             MsgErroeLog.WriteLog("Modbus 响应 CRC 校验失败(站号" + station.ToString("X2") + ")：帧已丢弃，继续等待下一帧");
+        }
+        // ch:R43 帧不匹配日志（站号/功能码/长度），与 CRC 日志共用 10s 限流
+        private void LogFrameMismatchThrottled(byte station, int len, byte func, string reason)
+        {
+            int now = Environment.TickCount;
+            if (unchecked(now - _lastCrcFailLogTick) < 10000)
+                return;
+            _lastCrcFailLogTick = now;
+            MsgErroeLog.WriteLog("Modbus 响应帧不匹配(期望站号0x" + station.ToString("X2")
+                + " len=" + len + " func=0x" + func.ToString("X2") + " 原因=" + reason
+                + ")：该帧已完整消费，剩余字节保留给下次事务");
         }
 
         /// <summary>
