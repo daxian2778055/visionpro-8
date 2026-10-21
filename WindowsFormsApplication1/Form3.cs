@@ -1085,6 +1085,7 @@ namespace WindowsFormsApplication1
                     MessageBox.Show(msg + "\r\n\r\n请修改重复的载图串后再保存。", "载图串冲突", MessageBoxButtons.OK, MessageBoxIcon.Warning);
                 return false;
             }
+            List<string> cross = new List<string>();
             try
             {
                 Func<string[]> ext = framePatternsProvider;
@@ -1096,12 +1097,24 @@ namespace WindowsFormsApplication1
                         foreach (string t in more)
                         {
                             if (!string.IsNullOrEmpty(t) && seen.ContainsKey(t))
-                                LogTriggerConflictThrottled("载图串[" + t + "]与相机方案 triggerZifu 相同：同一帧会同时触发方案切换与相机采图，请确认是否预期");
+                            {
+                                string m = "载图串[" + t + "]与相机方案 triggerZifu 相同：同一帧只会切方案并跳过 getData，相机不会触发";
+                                cross.Add(m);
+                                LogTriggerConflictThrottled(m);
+                            }
                         }
                     }
                 }
             }
             catch (Exception ex) { new ErrorLog().WriteLog(ex.ToString()); }
+            if (cross.Count > 0)
+            {
+                string msg = "载图串与相机触发串冲突：" + string.Join("；", cross.ToArray());
+                MsgErroeLog.WriteLog(msg);
+                if (showUi)
+                    MessageBox.Show(msg + "\r\n\r\n请修改冲突的载图串或相机触发串后再保存。", "触发串冲突", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                return false;
+            }
             return true;
         }
         private void button3_Click(object sender, EventArgs e)

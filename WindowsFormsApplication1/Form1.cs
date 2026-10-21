@@ -9558,6 +9558,11 @@ namespace WindowsFormsApplication1
             //   权威闩由 CompareExchange 把守；外层 7463/7700/7937 的 ==0 仅作预筛，保持不变。
             if (System.Threading.Interlocked.CompareExchange(ref qiehuanzhong, 1, 0) == 0)
             {
+                // ch:R43 N4 残留：闩已置上后、Task.Run 之前的前置步骤（停采/枚举/关闭设备/进度窗）抛异常时
+                //   必须复位闩，否则后续切换与回调门控会被永久挡住；Task.Run 本身没起来时也不留闩。
+                bool preOk = true;
+                try
+                {
                 // ch:R40 N2 路径/标题不再预提交：延后到排空通过、真正要 Shutdown/加载之前再提交（见 Task 内），
                 //   中止路径保持旧 path_1/label75/wenjianjia，避免后续「保存」把旧方案写进新路径
                 if (yunxing == true)
@@ -9572,6 +9577,18 @@ namespace WindowsFormsApplication1
                 }
                 DeviceListAcq();
                 bnClose_Click(null, null);
+                }
+                catch (Exception exPre)
+                {
+                    preOk = false;
+                    MsgErroeLog.WriteLog("方案切换前置步骤失败:" + exPre.Message);
+                    Volatile.Write(ref qiehuanzhong, 0);
+                    if (omron.qiehuanzhong == 0 && Frm2 != null)
+                    {
+                        try { Frm2.start = 1; } catch { }
+                    }
+                }
+                if (preOk)
                 Task.Run(() =>
                 {
                     myjob1.baoguang = 0;
