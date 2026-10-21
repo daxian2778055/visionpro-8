@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.IO.Ports;
 using System.Linq;
@@ -46,8 +46,8 @@ namespace WindowsFormsApplication1
                 }
                 if (buffer[0] == station && buffer[1] == 0X03)
                 {
-                    // ch:R42 长度完整的 FC03 响应先过 CRC：坏帧不采信、不解析，落入下面轮询等下一帧
-                    if (r != expectCount || Crc16Ok(buffer, r))
+                    // ch:R43 P1-7 长度完整才采信：原 `r != expectCount || Crc16Ok` 会把短帧/残留字节直接解析返回
+                    if (r == expectCount && Crc16Ok(buffer, r))
                     {
                         // ch:P1-10 按本次实读长度 r 解析，不再按 buffer.Length（避免读到短帧/残留时把无效字节拼进 b）
                         for (int i = 0; i < r; i++)
@@ -77,7 +77,11 @@ namespace WindowsFormsApplication1
                     r = n;
                     if (buffer[0] == station && buffer[1] == 0X03)
                     {
-                        if (n == expectCount && !Crc16Ok(buffer, n))
+                        if (n != expectCount)
+                        {
+                            continue; // ch:R43 长度不符：短帧/粘包一律丢弃，继续等完整帧
+                        }
+                        if (!Crc16Ok(buffer, n))
                         {
                             LogCrcFailThrottled(station); // 坏帧不采信：继续等下一帧（下一次读会覆盖缓冲）
                             continue;

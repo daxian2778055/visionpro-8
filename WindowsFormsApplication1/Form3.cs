@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.ComponentModel;
 using System.Data;
@@ -166,9 +166,9 @@ namespace WindowsFormsApplication1
             textBox2.Text = wdini.ReadString("tcpsend", "send1", textBox2.Text);
             decimal devalue;
             decimal.TryParse(wdini.ReadString("modbustcp", "xie", "0"), out devalue);
-            numericUpDown18.Value = devalue;
+            numericUpDown18.Value = Math.Max(numericUpDown18.Minimum, Math.Min(numericUpDown18.Maximum, devalue)); // ch:R43 P2-4 夹取范围，防 ini 越界值让整个 Load 中断
             decimal.TryParse(wdini.ReadString("modbustcp", "du", "0"), out devalue);
-            numericUpDown1.Value = devalue;
+            numericUpDown1.Value = Math.Max(numericUpDown1.Minimum, Math.Min(numericUpDown1.Maximum, devalue));
             txtIp.Text = wdini.ReadString("modbustcp", "ip", txtIp.Text);
             txtPort.Text = wdini.ReadString("modbustcp", "port", txtPort.Text);
             textBox10.Text = wdini.ReadString("out0", "ok", textBox10.Text);
@@ -951,10 +951,12 @@ namespace WindowsFormsApplication1
                 }
                 catch (Exception ex)
                 {
-                    MsgErroeLog.WriteLog("异常:" + ex.Message);
-                    // ch:监听套接字被关闭（重新监听/退出）时结束监听线程，避免异常忙循环空转
-                    if (ex is ObjectDisposedException || ex is SocketException)
-                        break;
+                    MsgErroeLog.WriteLog("TCP监听异常:" + ex.Message);
+                    // ch:R43 P1-8 仅在监听套接字已被替换/关闭时退出；瞬时 SocketException 记录后退避继续监听，
+                    //   原实现对任意 SocketException 直接 break，一次网络抖动后服务器永久不再接受连接
+                    if (ex is ObjectDisposedException) break;
+                    if (socketWatch == null || socketWatch != this.socketWatch) break;
+                    try { Thread.Sleep(200); } catch { }
                 }
             }
         }
@@ -1387,6 +1389,7 @@ namespace WindowsFormsApplication1
             while (bAccpet)
             {
                 AcceptData();
+                try { Thread.Sleep(10); } catch { } // ch:R43 P2-8 原无间隔忙循环会与 UI 互相驱动打满 CPU
             }
         }
         private int _lastSerialErrLogMs = 0; // ch:R10-7 串口接收异常限流日志（5s 一条），原空 catch 使故障完全不可见
@@ -1405,7 +1408,11 @@ namespace WindowsFormsApplication1
             {
                 try
                 {
-                    strReceive =mdcan.port.ReadExisting();
+                    // ch:R43 P1-8 串口读与 Modbus 事务共用 PortLock：原 ReadExisting 无锁会偷走 PLC 响应字节
+                    lock (mdcan.PortLock)
+                    {
+                        strReceive = mdcan.port.ReadExisting();
+                    }
                     txtReceive.AppendText(strReceive);
                     if (qiehuan_fangshi == "Serial")
                     {
@@ -1722,7 +1729,7 @@ namespace WindowsFormsApplication1
             wdini.WriteString("path", "7", textBox16.Text);
             wdini.WriteString("path", "8", textBox17.Text);
             wdini.WriteString("modbustcp","xie", numericUpDown18.Value.ToString());
-            wdini.WriteString("modbustcp", "du", numericUpDown18.Value.ToString());
+            wdini.WriteString("modbustcp", "du", numericUpDown1.Value.ToString()); // ch:R43 P1-8 原误写成写地址 NUD18，重启后读地址被覆盖
             wdini.WriteString("serial", "strportName", strportName);
             wdini.WriteString("serial", "strbaudRate", strbaudRate);
             wdini.WriteString("serial", "strStopBits", strStopBits);

@@ -2217,10 +2217,19 @@ namespace WindowsFormsApplication1
             wdini.WriteString("path"+ "modbusrtu", "7", t26.Text);
             wdini.WriteString("path"+ "modbusrtu", "8", t27.Text);
         }
+        // ch:R43 P2-12 原实现每个寄存器 new Regex（20ms 轮询 × 数十通道），改 IndexOf 截取，语义不变、零正则编译
         public string GetMiddleValue(string str, string sta, string end)
         {
-            Regex rg = new Regex("(?<=(" + sta + "))[.\\s\\S]*?(?=(" + end + "))", RegexOptions.Multiline | RegexOptions.Singleline);
-            return rg.Match(str).Value;
+            if (string.IsNullOrEmpty(str) || string.IsNullOrEmpty(sta))
+                return "";
+            int i = str.IndexOf(sta, StringComparison.Ordinal);
+            if (i < 0)
+                return "";
+            i += sta.Length;
+            int j = string.IsNullOrEmpty(end) ? -1 : str.IndexOf(end, i, StringComparison.Ordinal);
+            if (j < 0)
+                return "";
+            return str.Substring(i, j - i);
         }
         private int _lastGridUiTick;
 
@@ -2292,49 +2301,53 @@ namespace WindowsFormsApplication1
 
                                                 xuanzhong_temp = int.Parse(par.Value[1]) - int.Parse(address_qishi.ToString()) + j;
                                                 // 读取short变量
-                                                var readRtu = busRtuClient.ReadInt16((int.Parse(par.Value[1]) + j).ToString());
+                                                OperateResult<short> readRtu = busRtuClient.ReadInt16((int.Parse(par.Value[1]) + j).ToString());
                                                 commFailed |= !readRtu.IsSuccess;
                                                 DemoUtils.ReadResultRender1(readRtu, (int.Parse(par.Value[1]) + j).ToString(), out fins_temp);
                                                 if (gridUi && xuanzhong_temp >= 0 && xuanzhong_temp < 50)
                                                 SetModbusGridValue(fins_data[int.Parse(xuanzhong_temp.ToString())][0], fins_data[int.Parse(xuanzhong_temp.ToString())][1], fins_temp);
+                                                if (!readRtu.IsSuccess) { commFailed = true; continue; } // ch:R43 P0-3 读失败串不拼进触发值
                                                 shuju_temp += GetMiddleValue(fins_temp, " ", "\r");
                                             }
                                             else if (par.Value[4] == "string")
                                             {
                                                 xuanzhong_temp = int.Parse(par.Value[1]) - int.Parse(address_qishi.ToString()) + j;
                                                 // 读取字符串
-                                                var readRtu = busRtuClient.ReadString((int.Parse(par.Value[1]) + j).ToString(), 1);
+                                                OperateResult<string> readRtu = busRtuClient.ReadString((int.Parse(par.Value[1]) + j).ToString(), 1);
                                                 commFailed |= !readRtu.IsSuccess;
                                                 DemoUtils.ReadResultRender1(readRtu, (int.Parse(par.Value[1]) + j).ToString(), out fins_temp);
                                                 if (gridUi && xuanzhong_temp >= 0 && xuanzhong_temp < 50)
                                                 SetModbusGridValue(fins_data[int.Parse(xuanzhong_temp.ToString())][0], fins_data[int.Parse(xuanzhong_temp.ToString())][1], fins_temp);
+                                                if (!readRtu.IsSuccess) { commFailed = true; continue; } // ch:R43 P0-3 读失败串不拼进触发值
                                                 shuju_temp += GetMiddleValue(fins_temp, " ", "\r");
                                             }
                                             else if (par.Value[4] == "long" && j % 2 == 0)
                                             {
                                                 xuanzhong_temp = int.Parse(par.Value[1]) - int.Parse(address_qishi.ToString()) + j;
                                                 // 读取字符串
-                                                var readRtu = busRtuClient.ReadInt32((int.Parse(par.Value[1]) + j).ToString());
+                                                OperateResult<int> readRtu = busRtuClient.ReadInt32((int.Parse(par.Value[1]) + j).ToString());
                                                 commFailed |= !readRtu.IsSuccess;
                                                 DemoUtils.ReadResultRender1(readRtu, (int.Parse(par.Value[1]) + j).ToString(), out fins_temp);
                                                 if (gridUi && xuanzhong_temp >= 0 && xuanzhong_temp < 50)
                                                 SetModbusGridValue(fins_data[int.Parse(xuanzhong_temp.ToString())][0], fins_data[int.Parse(xuanzhong_temp.ToString())][1], fins_temp);
+                                                if (!readRtu.IsSuccess) { commFailed = true; continue; } // ch:R43 P0-3 读失败串不拼进触发值
                                                 shuju_temp += GetMiddleValue(fins_temp, " ", "\r");
                                             }
                                             else if (par.Value[4] == "float" && j % 2 == 0)
                                             {
                                                 xuanzhong_temp = int.Parse(par.Value[1]) - int.Parse(address_qishi.ToString()) + j;
                                                 // 读取字符串
-                                                var readRtu = busRtuClient.ReadFloat((int.Parse(par.Value[1]) + j).ToString());
+                                                OperateResult<float> readRtu = busRtuClient.ReadFloat((int.Parse(par.Value[1]) + j).ToString());
                                                 commFailed |= !readRtu.IsSuccess;
                                                 DemoUtils.ReadResultRender1(readRtu, (int.Parse(par.Value[1]) + j).ToString(), out fins_temp);
                                                 if (gridUi && xuanzhong_temp >= 0 && xuanzhong_temp < 50)
                                                 SetModbusGridValue(fins_data[int.Parse(xuanzhong_temp.ToString())][0], fins_data[int.Parse(xuanzhong_temp.ToString())][1], fins_temp);
+                                                if (!readRtu.IsSuccess) { commFailed = true; continue; } // ch:R43 P0-3 读失败串不拼进触发值
                                                 shuju_temp += GetMiddleValue(fins_temp, " ", "\r");
                                             }
                                         }
                                         if (commFailed) TryAutoReconnectRtu(); // ch:检测到读取失败则触发（方法内部节流）断线自动重连
-                                        if (par.Value[3] == "触发")
+                                        if (!commFailed && par.Value[3] == "触发") // ch:R43 P0-3 读失败通道不得触发采图/方案切换
                                         {
                                             foreach (var pap in camera_dic)
                                             {
@@ -2363,7 +2376,15 @@ namespace WindowsFormsApplication1
                                                         {
                                                             if (shuju_temp != camera_dic[pap.Key][1])
                                                             {
-                                                                SelectionChangedEventArgs E = new SelectionChangedEventArgs(shuju_temp, pap.Key.ToString(), fins_zuhe[camera_dic[pap.Key][0]]);
+                                                                string zuhe;
+                                                                if (!fins_zuhe.TryGetValue(camera_dic[pap.Key][0], out zuhe))
+                                                                {
+                                                                    // ch:R43 P0-2 运行期改触发通道后新键不在装载期映射里：跳过本次触发
+                                                                    MsgErroeLog.WriteLog("modbusrtu 触发通道未登记组合映射 cam=" + pap.Key + " ch=" + camera_dic[pap.Key][0] + "，本次触发跳过");
+                                                                    camera_dic[pap.Key][1] = shuju_temp; // 标记已处理，避免同一坏配置每轮重复记日志
+                                                                    continue;
+                                                                }
+                                                                SelectionChangedEventArgs E = new SelectionChangedEventArgs(shuju_temp, pap.Key.ToString(), zuhe);
                                                                 getData(this, E);
                                                                 camera_dic[pap.Key][1] = shuju_temp; // ch:P2-⑥ 记录已处理触发值，防止 PLC 触发字保持期间重复触发采图
                                                             }
@@ -2614,6 +2635,7 @@ namespace WindowsFormsApplication1
                 {
                     if (!chushihua || !fins_en || fins_dic.Count == 0) return;
                     if (clearing) return;
+                    bool gridUi = AllowModbusGridRefresh(); // ch:R43 P2-9 写回回显 250ms 门控，避免每相机每帧投递 BeginInvoke 淹没 UI 队列
 
                     foreach (var pat in camera_dic)
                     {
@@ -2653,7 +2675,7 @@ namespace WindowsFormsApplication1
                                     patWrote = true; if (!writeOk) patWriteOk = false; // ch:P1-⑧ 跟踪写结果
                                     try
                                     {
-                                        if (this.IsHandleCreated)
+                                        if (gridUi && this.IsHandleCreated)
                                             this.BeginInvoke(new Action(() =>
                                             {
                                                 try
@@ -2684,7 +2706,7 @@ namespace WindowsFormsApplication1
                                     patWrote = true; if (!writeOk) patWriteOk = false; // ch:P1-⑧ 跟踪写结果
                                     try
                                     {
-                                        if (this.IsHandleCreated)
+                                        if (gridUi && this.IsHandleCreated)
                                             this.BeginInvoke(new Action(() =>
                                             {
                                                 try
@@ -2715,7 +2737,7 @@ namespace WindowsFormsApplication1
                                     patWrote = true; if (!writeOk) patWriteOk = false; // ch:P1-⑧ 跟踪写结果
                                     try
                                     {
-                                        if (this.IsHandleCreated)
+                                        if (gridUi && this.IsHandleCreated)
                                             this.BeginInvoke(new Action(() =>
                                             {
                                                 try
@@ -2750,7 +2772,7 @@ namespace WindowsFormsApplication1
                                     }
                                     try
                                     {
-                                        if (this.IsHandleCreated)
+                                        if (gridUi && this.IsHandleCreated)
                                             this.BeginInvoke(new Action(() =>
                                             {
                                                 try

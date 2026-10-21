@@ -1,4 +1,4 @@
-﻿using Cognex.VisionPro;
+using Cognex.VisionPro;
 using Cognex.VisionPro.CalibFix;
 using Cognex.VisionPro.ImageFile;
 using Cognex.VisionPro.QuickBuild;
@@ -19,8 +19,8 @@ namespace WindowsFormsApplication1
 {
     class Myjob
     {
-        public int trriger;
-        public int yun;
+        public volatile int trriger;
+        public volatile int yun;
         public CogJob job;
         public CogToolBlock block;
         public int sum;
@@ -35,7 +35,7 @@ namespace WindowsFormsApplication1
         public FileInfo fileng;
         public bool Color;
         public CogImageFileBMP Cogbmp;
-        public bool trrigerEn;
+        public volatile bool trrigerEn;
         public int out_end;
         public int trrigersum;
         public Bitmap img;
@@ -52,7 +52,7 @@ namespace WindowsFormsApplication1
         public int ng1;
         public double runtime;
         public int runcishu;
-        public int en;
+        public volatile int en;
         public string triggerMode;
         public string triggerZifu;
         public string jieshouZifu;
