@@ -9547,8 +9547,9 @@ namespace WindowsFormsApplication1
                 try { Invoke(new Action<string>(xinghao_qiehuan), a); }
                 catch (Exception ex)
                 {
+                    // ch:R43 N4 封送失败说明本次切换并未在 UI 线程执行，闩不是本次置上的；
+                    //   此时绝不能清 qiehuanzhong，否则会放行另一路正在进行的切换
                     MsgErroeLog.WriteLog("方案切换封送UI失败:" + ex.Message);
-                    Volatile.Write(ref qiehuanzhong, 0);
                 }
                 return;
             }

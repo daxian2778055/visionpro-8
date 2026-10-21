@@ -246,6 +246,7 @@ namespace WindowsFormsApplication1
             this.label7.Text = "数据位：端口未打开|";
             this.label8.Text = "停止位：端口未打开|";
             this.label9.Text = "校验: 端口未打开";
+            ValidateLoadTriggerUniqueness(false); // ch:R43 装载期只记日志，不弹窗阻塞启动
             Task.Run(() =>
             {
                 chushihua();
@@ -1022,58 +1023,86 @@ namespace WindowsFormsApplication1
         }
         private int qiehuan(string aa)
         {
-            if (textBox18.Text == aa)
+            // ch:R43 载图串冲突收口：同一触发串命中多路时拒绝切换（原实现总是第一路胜出，静默切错方案）
+            string[] keys = { textBox18.Text, textBox19.Text, textBox21.Text, textBox20.Text,
+                              textBox23.Text, textBox22.Text, textBox25.Text, textBox24.Text };
+            string[] paths = { textBox10.Text, textBox11.Text, textBox12.Text, textBox13.Text,
+                               textBox14.Text, textBox15.Text, textBox16.Text, textBox17.Text };
+            int hit = -1, hits = 0;
+            for (int i = 0; i < keys.Length; i++)
+            {
+                if (!string.IsNullOrEmpty(keys[i]) && keys[i] == aa)
+                {
+                    hits++;
+                    hit = i;
+                }
+            }
+            if (hits == 1)
             {
                 zifu = aa;
-                lujing = textBox10.Text;
+                lujing = paths[hit];
                 return 1;
             }
-          else  if (textBox19.Text == aa)
+            if (hits > 1)
+                LogTriggerConflictThrottled("载图串[" + aa + "]命中" + hits + "路，已拒绝切换（请检查配置重复）");
+            return 0;
+        }
+        private int _lastTriggerConflictLogMs = 0;
+        private void LogTriggerConflictThrottled(string msg)
+        {
+            int now = Environment.TickCount;
+            if (unchecked(now - _lastTriggerConflictLogMs) < 5000)
+                return;
+            _lastTriggerConflictLogMs = now;
+            MsgErroeLog.WriteLog(msg);
+        }
+        // ch:R43 载图串唯一性校验：重复时无法确定切哪个方案，保存直接拒绝；装载期只记日志不阻塞启动。
+        //   另检查与各相机方案 triggerZifu 的交叉冲突（可能是有意的“切方案+采图”，仅提示）。
+        private bool ValidateLoadTriggerUniqueness(bool showUi)
+        {
+            string[] keys = { textBox18.Text, textBox19.Text, textBox21.Text, textBox20.Text,
+                              textBox23.Text, textBox22.Text, textBox25.Text, textBox24.Text };
+            string[] labels = { "change/1", "change/2", "change/3", "change/4",
+                                "change/5", "change/6", "change/7", "change/8" };
+            Dictionary<string, string> seen = new Dictionary<string, string>();
+            List<string> dups = new List<string>();
+            for (int i = 0; i < keys.Length; i++)
             {
-                zifu = aa;
-                lujing = textBox11.Text;
-                return 1;
+                string k = keys[i];
+                if (string.IsNullOrEmpty(k))
+                    continue;
+                string prev;
+                if (seen.TryGetValue(k, out prev))
+                    dups.Add("[" + k + "] 同时配置在 " + prev + " 与 " + labels[i]);
+                else
+                    seen[k] = labels[i];
             }
-            else if (textBox21.Text == aa)
+            if (dups.Count > 0)
             {
-                zifu = aa;
-                lujing = textBox12.Text;
-                return 1;
+                string msg = "载图触发串重复，无法确定切换目标：" + string.Join("；", dups.ToArray());
+                MsgErroeLog.WriteLog(msg);
+                if (showUi)
+                    MessageBox.Show(msg + "\r\n\r\n请修改重复的载图串后再保存。", "载图串冲突", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                return false;
             }
-            else if (textBox20.Text == aa)
+            try
             {
-                zifu = aa;
-                lujing = textBox13.Text;
-                return 1;
+                Func<string[]> ext = framePatternsProvider;
+                if (ext != null)
+                {
+                    string[] more = ext();
+                    if (more != null)
+                    {
+                        foreach (string t in more)
+                        {
+                            if (!string.IsNullOrEmpty(t) && seen.ContainsKey(t))
+                                LogTriggerConflictThrottled("载图串[" + t + "]与相机方案 triggerZifu 相同：同一帧会同时触发方案切换与相机采图，请确认是否预期");
+                        }
+                    }
+                }
             }
-            else if (textBox23.Text == aa)
-            {
-                zifu = aa;
-                lujing = textBox14.Text;
-                return 1;
-            }
-            else if (textBox22.Text == aa)
-            {
-                zifu = aa;
-                lujing = textBox15.Text;
-                return 1;
-            }
-            else if (textBox25.Text == aa)
-            {
-                zifu = aa;
-                lujing = textBox16.Text;
-                return 1;
-            }
-            else if (textBox24.Text == aa)
-            {
-                zifu = aa;
-                lujing = textBox17.Text;
-                return 1;
-            }
-            else
-            {
-                return 0;
-            }
+            catch (Exception ex) { new ErrorLog().WriteLog(ex.ToString()); }
+            return true;
         }
         private void button3_Click(object sender, EventArgs e)
         {
@@ -1707,6 +1736,8 @@ namespace WindowsFormsApplication1
 
         private void button5_Click(object sender, EventArgs e)
         {
+            if (!ValidateLoadTriggerUniqueness(true)) // ch:R43 重复载图串拒绝保存，避免运行期静默切错方案
+                return;
             wdini.WriteString("modbustcp", "lunxun", lunxun.ToString());
             wdini.WriteString("modbustcp", "style", comboBox3.Text);
             wdini.WriteString("modbustcp", "gongnengma", comboBox4.Text);
