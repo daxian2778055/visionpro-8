@@ -423,10 +423,23 @@ namespace WindowsFormsApplication1
             omronFinsNet.Port = port;
             omronFinsNet.SA1 = SA1;
             omronFinsNet.DA2 = DA2;
-            omronFinsNet.ByteTransform.DataFormat = (HslCommunication.Core.DataFormat)comboBox1.SelectedItem;
+            // ch:R43 P2-13 下拉项为 null（ini 值非法/未匹配）时不再拆箱抛 NRE
+            HslCommunication.Core.DataFormat fmt = HslCommunication.Core.DataFormat.CDAB;
+            if (comboBox1.SelectedItem is HslCommunication.Core.DataFormat)
+                fmt = (HslCommunication.Core.DataFormat)comboBox1.SelectedItem;
+            omronFinsNet.ByteTransform.DataFormat = fmt;
 
             // OperateResult connect = OperateResult.CreateSuccessResult( ); 
-            OperateResult connect = omronFinsNet.ConnectServer( );
+            OperateResult connect;
+            try
+            {
+                connect = omronFinsNet.ConnectServer();
+            }
+            catch (Exception ex)
+            {
+                MsgErroeLog.WriteLog("Omron 连接异常:" + ex.Message);
+                return;
+            }
             if (connect.IsSuccess)
             {
                 MsgErroeLog.WriteLog( HslCommunication.StringResources.Language.ConnectedSuccess );
@@ -1050,10 +1063,19 @@ namespace WindowsFormsApplication1
        public bool [] fins_xie = new bool[] { false, false, false, false, false, false, false, false, false,false };
         private Thread fins_duxie;
         private volatile bool clearing = false; // ch:清除配置期间暂停轮询/输出，防止清除后被旧数据写回
+        // ch:R43 P2-12 原实现每个寄存器 new Regex（20ms 轮询 × 数十通道），改 IndexOf 截取，语义不变、零正则编译
         public string GetMiddleValue(string str, string sta, string end)
         {
-            Regex rg = new Regex("(?<=(" + sta + "))[.\\s\\S]*?(?=(" + end + "))", RegexOptions.Multiline | RegexOptions.Singleline);
-            return rg.Match(str).Value;
+            if (string.IsNullOrEmpty(str) || string.IsNullOrEmpty(sta))
+                return "";
+            int i = str.IndexOf(sta, StringComparison.Ordinal);
+            if (i < 0)
+                return "";
+            i += sta.Length;
+            int j = string.IsNullOrEmpty(end) ? -1 : str.IndexOf(end, i, StringComparison.Ordinal);
+            if (j < 0)
+                return "";
+            return str.Substring(i, j - i);
         }
         private int _lastGridUiTick;
 
@@ -1126,49 +1148,53 @@ namespace WindowsFormsApplication1
 
                                                 xuanzhong_temp = int.Parse(par.Value[1]) - int.Parse(address_qishi.ToString()) + j;
                                                 // 读取short变量
-                                                var readOmron = omronFinsNet.ReadInt16("D" + (int.Parse(par.Value[1]) + j).ToString());
+                                                OperateResult<short> readOmron = omronFinsNet.ReadInt16("D" + (int.Parse(par.Value[1]) + j).ToString());
                                                 commFailed |= !readOmron.IsSuccess;
                                                 DemoUtils.ReadResultRender1(readOmron, "D" + (int.Parse(par.Value[1]) + j).ToString(), out fins_temp);
                                                 if (gridUi && xuanzhong_temp >= 0 && xuanzhong_temp < 50)
                                                 SetModbusGridValue(fins_data[int.Parse(xuanzhong_temp.ToString())][0], fins_data[int.Parse(xuanzhong_temp.ToString())][1], fins_temp);
+                                                if (!readOmron.IsSuccess) { commFailed = true; continue; } // ch:R43 P0-3 读失败串不拼进触发值
                                                 shuju_temp += GetMiddleValue(fins_temp, " ", "\r");
                                             }
                                             else if (par.Value[4] == "string")
                                             {
                                                 xuanzhong_temp = int.Parse(par.Value[1]) - int.Parse(address_qishi.ToString()) + j;
                                                 // 读取字符串
-                                                var readOmron = omronFinsNet.ReadString("D" + (int.Parse(par.Value[1]) + j).ToString(), 1);
+                                                OperateResult<string> readOmron = omronFinsNet.ReadString("D" + (int.Parse(par.Value[1]) + j).ToString(), 1);
                                                 commFailed |= !readOmron.IsSuccess;
                                                 DemoUtils.ReadResultRender1(readOmron, "D" + (int.Parse(par.Value[1]) + j).ToString(), out fins_temp);
                                                 if (gridUi && xuanzhong_temp >= 0 && xuanzhong_temp < 50)
                                                 SetModbusGridValue(fins_data[int.Parse(xuanzhong_temp.ToString())][0], fins_data[int.Parse(xuanzhong_temp.ToString())][1], fins_temp);
+                                                if (!readOmron.IsSuccess) { commFailed = true; continue; } // ch:R43 P0-3 读失败串不拼进触发值
                                                 shuju_temp += GetMiddleValue(fins_temp, " ", "\r");
                                             }
                                             else if (par.Value[4] == "long" && j % 2 == 0)
                                             {
                                                 xuanzhong_temp = int.Parse(par.Value[1]) - int.Parse(address_qishi.ToString()) + j;
                                                 // 读取字符串
-                                                var readOmron = omronFinsNet.ReadInt32("D" + (int.Parse(par.Value[1]) + j).ToString());
+                                                OperateResult<int> readOmron = omronFinsNet.ReadInt32("D" + (int.Parse(par.Value[1]) + j).ToString());
                                                 commFailed |= !readOmron.IsSuccess;
                                                 DemoUtils.ReadResultRender1(readOmron, "D" + (int.Parse(par.Value[1]) + j).ToString(), out fins_temp);
                                                 if (gridUi && xuanzhong_temp >= 0 && xuanzhong_temp < 50)
                                                 SetModbusGridValue(fins_data[int.Parse(xuanzhong_temp.ToString())][0], fins_data[int.Parse(xuanzhong_temp.ToString())][1], fins_temp);
+                                                if (!readOmron.IsSuccess) { commFailed = true; continue; } // ch:R43 P0-3 读失败串不拼进触发值
                                                 shuju_temp += GetMiddleValue(fins_temp, " ", "\r");
                                             }
                                             else if (par.Value[4] == "float" && j % 2 == 0)
                                             {
                                                 xuanzhong_temp = int.Parse(par.Value[1]) - int.Parse(address_qishi.ToString()) + j;
                                                 // 读取字符串
-                                                var readOmron = omronFinsNet.ReadFloat("D" + (int.Parse(par.Value[1]) + j).ToString());
+                                                OperateResult<float> readOmron = omronFinsNet.ReadFloat("D" + (int.Parse(par.Value[1]) + j).ToString());
                                                 commFailed |= !readOmron.IsSuccess;
                                                 DemoUtils.ReadResultRender1(readOmron, "D" + (int.Parse(par.Value[1]) + j).ToString(), out fins_temp);
                                                 if (gridUi && xuanzhong_temp >= 0 && xuanzhong_temp < 50)
                                                 SetModbusGridValue(fins_data[int.Parse(xuanzhong_temp.ToString())][0], fins_data[int.Parse(xuanzhong_temp.ToString())][1], fins_temp);
+                                                if (!readOmron.IsSuccess) { commFailed = true; continue; } // ch:R43 P0-3 读失败串不拼进触发值
                                                 shuju_temp += GetMiddleValue(fins_temp, " ", "\r");
                                             }
                                         }
                                         if (commFailed) TryAutoReconnectOmron(); // ch:检测到读取失败则触发（方法内部节流）断线自动重连
-                                        if (par.Value[3] == "触发")
+                                        if (!commFailed && par.Value[3] == "触发") // ch:R43 P0-3 读失败通道不得触发采图/方案切换
                                         {
                                             foreach (var pap in camera_dic)
                                             {
@@ -1445,7 +1471,11 @@ namespace WindowsFormsApplication1
         //   ② 通道取"反馈通道"[3]（原实现误取触发通道[0] → 每秒把返回值写进触发寄存器，且破坏配对可写错地址段）
         public void SetCamera9PeriodicPending()
         {
-            lock (_omronIoLock)
+            // ch:R43 P1-6 本方法由 WinForms Timer 在 UI 线程每秒调用；写回线程可能正持锁做网络写（秒级），
+            //   原 lock 会让 UI 线程阻塞数秒。改为非阻塞尝试：拿不到锁就跳过本轮登记，下一拍再试。
+            if (!System.Threading.Monitor.TryEnter(_omronIoLock, 0))
+                return;
+            try
             {
                 if (camera_dic.ContainsKey(9) && camera_dic[9].Length > 5 && camera_dic[9][2] == "true")
                 {
@@ -1454,6 +1484,7 @@ namespace WindowsFormsApplication1
                     if (fins_xie.Length > 8) fins_xie[8] = true;
                 }
             }
+            finally { System.Threading.Monitor.Exit(_omronIoLock); }
         }
 
         private void timer2_Tick(object sender, EventArgs e)

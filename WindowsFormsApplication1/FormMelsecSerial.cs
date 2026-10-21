@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.ComponentModel;
 using System.Data;
@@ -123,6 +123,8 @@ namespace WindowsFormsApplication1
         {
             e.Cancel = true;
             this.Visible = false;
+            // ch:R43 P2-14 隐藏窗口时释放串口：原实现从不 Close，串口被本进程长期占用
+            try { melsecSerial?.Close(); } catch (Exception ex) { new ErrorLog().WriteLog(ex.ToString()); }
         }
         
         #region Connect And Close

@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.ComponentModel;
 using System.Data;
@@ -132,6 +132,7 @@ namespace WindowsFormsApplication1
         private volatile bool xieWuAddrFromZero = true;
         private volatile int xieWuDataFmt = 2;
         private int failCount = 0; // ch:连续读取失败计数（日志限流用）
+        private int _lastPollErrLogMs = 0; // ch:R43 P0-2 轮询异常日志 5s 限流，防持续性异常刷爆日志队列
         public delegate void GetSeletionData(object Sender, SelectionChangedEventArgs e);
         public event GetSeletionData getData;
         private int x = 999;
@@ -598,6 +599,13 @@ namespace WindowsFormsApplication1
         // ch:R31 Shown 事件：窗口完全显示后再启动轮询线程，避免 Load 期控件未就绪时后台线程读 UI 导致白屏/闪退
         private void FormModbus_Shown(object sender, EventArgs e)
         {
+            // ch:R43 P2-5 隐藏时 Join(200) 可能超时，旧线程仍在运行；原实现此处无条件 _pollingStop=false + 新起线程，
+            //   会把旧线程一起"复活"，每次开窗多一条轮询线程。旧线程还活着就让它继续（只清除停止标志），不新建。
+            if (_pollingThread != null && _pollingThread.IsAlive)
+            {
+                _pollingStop = false;
+                return;
+            }
             _pollingStop = false;
             _pollingThread = new Thread(PollingLoop) { IsBackground = true, Name = "ModbusTCP-Polling" };
             _pollingThread.Start();
@@ -619,9 +627,11 @@ namespace WindowsFormsApplication1
             try
             {
                 if (_pollingThread != null && _pollingThread.IsAlive)
-                    _pollingThread.Join(200); // 最多等 200ms
+                    _pollingThread.Join(1000); // ch:R43 P2-5 给当前网络读留出退出时间（原 200ms 过短）
             }
             catch { }
+            // ch:R43 P2-5 窗口隐藏后释放 TCP 连接：原实现只停线程，连接随进程存活
+            try { busTcpClient?.ConnectClose(); } catch (Exception ex) { new ErrorLog().WriteLog(ex.ToString()); }
         }
         
 
@@ -1445,10 +1455,19 @@ namespace WindowsFormsApplication1
                 }
             }
         }
+        // ch:R43 P2-12 原实现每个寄存器 new Regex（20ms 轮询 × 数十通道），改 IndexOf 截取，语义不变、零正则编译
         public string GetMiddleValue(string str, string sta, string end)
         {
-            Regex rg = new Regex("(?<=(" + sta + "))[.\\s\\S]*?(?=(" + end + "))", RegexOptions.Multiline | RegexOptions.Singleline);
-            return rg.Match(str).Value;
+            if (string.IsNullOrEmpty(str) || string.IsNullOrEmpty(sta))
+                return "";
+            int i = str.IndexOf(sta, StringComparison.Ordinal);
+            if (i < 0)
+                return "";
+            i += sta.Length;
+            int j = string.IsNullOrEmpty(end) ? -1 : str.IndexOf(end, i, StringComparison.Ordinal);
+            if (j < 0)
+                return "";
+            return str.Substring(i, j - i);
         }
         // ch:R31 替代原 Fins_duxie：1) 用 _pollingStop 标志优雅退出；2) 每轮循环头用 Invoke 缓存 UI 控件值，彻底消除跨线程读取导致的白屏/闪退
         private void PollingLoop()
@@ -1501,6 +1520,9 @@ namespace WindowsFormsApplication1
                 bool pollOn = cachedLunxunTime >= 1;
                 Thread.Sleep(pollOn ? (int)cachedLunxunTime : 50);
 
+                // ch:R43 P0-2 每轮整段异常装甲：原实现 lock 大段无 try，任一异常会让轮询线程永久退出且无日志
+                try
+                {
                 if (!_pollingStop && pollOn && cachedChushihua && cachedEn && cachedLunxunen && !cachedClearing)
                 {
                     lock (modbusIoLock)
@@ -1535,11 +1557,13 @@ namespace WindowsFormsApplication1
                         int xuanzhong_temp = 0;
                         string fins_temp = "";
                         string shuju_temp = "";
+                        bool anyCommFailed = false; // ch:R43 P0-3 本轮任一通道读失败即为 true，用于重连判定（替代原 Contains(":") 字符串嗅探）
                         if (cachedFinsDic.Count > 0)
                         {
                             foreach (var par in cachedFinsDic)
                             {
                                 shuju_temp = "";
+                                bool commFailed = false; // ch:R43 P0-3 本通道本轮是否读失败：失败串不得进入触发值/视觉输入
                                 int plen;
                                 if (!int.TryParse(par.Value[2], out plen)) continue;
                                 for (int j = 0; j < plen; j++)
@@ -1555,34 +1579,42 @@ namespace WindowsFormsApplication1
                                         FankuiDiagLogByKey("读回|" + addrRd, "反馈诊断 读回 addr=" + addrRd + " val=" + (rdR24.IsSuccess ? rdR24.Content.ToString() : "读失败"));
                                         if (gridUi && xuanzhong_temp >= 0 && xuanzhong_temp < 50 && fins_data.ContainsKey(xuanzhong_temp))
                                             SetModbusGridValue(fins_data[xuanzhong_temp][0], fins_data[xuanzhong_temp][1], fins_temp);
+                                        if (!rdR24.IsSuccess) { commFailed = true; continue; } // ch:R43 失败不拼值、不触发
                                         shuju_temp += GetMiddleValue(fins_temp, " ", "\r");
                                     }
                                     else if (par.Value[4] == "string")
                                     {
                                         xuanzhong_temp = addrBase - (int)cachedAddressQishi + j;
-                                        DemoUtils.ReadResultRender1(busTcpClient.ReadString((addrBase + j).ToString(), 1), (addrBase + j).ToString(), out fins_temp);
+                                        OperateResult<string> rdStr = busTcpClient.ReadString((addrBase + j).ToString(), 1);
+                                        DemoUtils.ReadResultRender1(rdStr, (addrBase + j).ToString(), out fins_temp);
                                         if (gridUi && xuanzhong_temp >= 0 && xuanzhong_temp < 50 && fins_data.ContainsKey(xuanzhong_temp))
                                             SetModbusGridValue(fins_data[xuanzhong_temp][0], fins_data[xuanzhong_temp][1], fins_temp);
+                                        if (!rdStr.IsSuccess) { commFailed = true; continue; } // ch:R43 失败不拼值、不触发
                                         shuju_temp += GetMiddleValue(fins_temp, " ", "\r");
                                     }
                                     else if (par.Value[4] == "long" && j % 2 == 0)
                                     {
                                         xuanzhong_temp = addrBase - (int)cachedAddressQishi + j;
-                                        DemoUtils.ReadResultRender1(busTcpClient.ReadInt32((addrBase + j).ToString()), (addrBase + j).ToString(), out fins_temp);
+                                        OperateResult<int> rdLong = busTcpClient.ReadInt32((addrBase + j).ToString());
+                                        DemoUtils.ReadResultRender1(rdLong, (addrBase + j).ToString(), out fins_temp);
                                         if (gridUi && xuanzhong_temp >= 0 && xuanzhong_temp < 50 && fins_data.ContainsKey(xuanzhong_temp))
                                             SetModbusGridValue(fins_data[xuanzhong_temp][0], fins_data[xuanzhong_temp][1], fins_temp);
+                                        if (!rdLong.IsSuccess) { commFailed = true; continue; } // ch:R43 失败不拼值、不触发
                                         shuju_temp += GetMiddleValue(fins_temp, " ", "\r");
                                     }
                                     else if (par.Value[4] == "float" && j % 2 == 0)
                                     {
                                         xuanzhong_temp = addrBase - (int)cachedAddressQishi + j;
-                                        DemoUtils.ReadResultRender1(busTcpClient.ReadFloat((addrBase + j).ToString()), (addrBase + j).ToString(), out fins_temp);
+                                        OperateResult<float> rdFloat = busTcpClient.ReadFloat((addrBase + j).ToString());
+                                        DemoUtils.ReadResultRender1(rdFloat, (addrBase + j).ToString(), out fins_temp);
                                         if (gridUi && xuanzhong_temp >= 0 && xuanzhong_temp < 50 && fins_data.ContainsKey(xuanzhong_temp))
                                             SetModbusGridValue(fins_data[xuanzhong_temp][0], fins_data[xuanzhong_temp][1], fins_temp);
+                                        if (!rdFloat.IsSuccess) { commFailed = true; continue; } // ch:R43 失败不拼值、不触发
                                         shuju_temp += GetMiddleValue(fins_temp, " ", "\r");
                                     }
                                 }
-                                if (par.Value[3] == "触发")
+                                if (commFailed) anyCommFailed = true; // ch:R43 任一通道读失败：本通道触发判定屏蔽，并登记重连
+                                if (!commFailed && par.Value[3] == "触发")
                                 {
                                     foreach (var pap in camera_dic)
                                     {
@@ -1610,7 +1642,15 @@ namespace WindowsFormsApplication1
                                                 {
                                                     if (shuju_temp != camera_dic[pap.Key][1])
                                                     {
-                                                        SelectionChangedEventArgs E = new SelectionChangedEventArgs(shuju_temp, pap.Key.ToString(), fins_zuhe[camera_dic[pap.Key][0]]);
+                                                        string zuhe;
+                                                        if (!fins_zuhe.TryGetValue(camera_dic[pap.Key][0], out zuhe))
+                                                        {
+                                                            // ch:R43 P0-2 运行期改触发通道后新键不在装载期映射里：跳过本次触发，不能让轮询线程因 KeyNotFound 退出
+                                                            MsgErroeLog.WriteLog("modbustcp 触发通道未登记组合映射 cam=" + pap.Key + " ch=" + camera_dic[pap.Key][0] + "，本次触发跳过");
+                                                            camera_dic[pap.Key][1] = shuju_temp; // 标记已处理，避免同一坏配置每 20ms 重复记日志
+                                                            continue;
+                                                        }
+                                                        SelectionChangedEventArgs E = new SelectionChangedEventArgs(shuju_temp, pap.Key.ToString(), zuhe);
                                                         getData(this, E);
                                                         camera_dic[pap.Key][1] = shuju_temp;
                                                     }
@@ -1622,35 +1662,49 @@ namespace WindowsFormsApplication1
                             }
                         }
 
-                        if (fins_temp.Contains(":"))
+                        if (anyCommFailed)
                         {
                             failCount++;
-                            if (failCount % 30 == 1)
-                                MsgErroeLog.WriteLog(fins_temp + "_modbustcp");
-                            // ch:读取失败自动用缓存配置重连
-                            try
+                            // ch:R43 重连节流：连续失败时首轮 + 每 30 轮重建一次，避免 PLC 长时间离线时每 20ms 建一次 TCP 连接
+                            if (failCount == 1 || failCount % 30 == 0)
                             {
-                                busTcpClient?.ConnectClose();
-                                busTcpClient = new ModbusTcpNet(cachedIp, cachedPort, cachedStation);
-                                busTcpClient.AddressStartWithZero = cachedAddrZero;
-                                busTcpClient.IsStringReverse = cachedStrReverse;
-                                busTcpClient.SetLoginAccount(cachedUser, cachedPwd);
-                                busTcpClient.ConnectServer();
-                                switch (cachedDataFmt)
+                                MsgErroeLog.WriteLog("modbustcp 读取失败(连续" + failCount + "轮)，重建连接");
+                                // ch:读取失败自动用缓存配置重连
+                                try
                                 {
-                                    case 0: busTcpClient.DataFormat = HslCommunication.Core.DataFormat.ABCD; break;
-                                    case 1: busTcpClient.DataFormat = HslCommunication.Core.DataFormat.BADC; break;
-                                    case 2: busTcpClient.DataFormat = HslCommunication.Core.DataFormat.CDAB; break;
-                                    case 3: busTcpClient.DataFormat = HslCommunication.Core.DataFormat.DCBA; break;
+                                    busTcpClient?.ConnectClose();
+                                    busTcpClient = new ModbusTcpNet(cachedIp, cachedPort, cachedStation);
+                                    busTcpClient.AddressStartWithZero = cachedAddrZero;
+                                    busTcpClient.IsStringReverse = cachedStrReverse;
+                                    busTcpClient.SetLoginAccount(cachedUser, cachedPwd);
+                                    busTcpClient.ConnectServer();
+                                    switch (cachedDataFmt)
+                                    {
+                                        case 0: busTcpClient.DataFormat = HslCommunication.Core.DataFormat.ABCD; break;
+                                        case 1: busTcpClient.DataFormat = HslCommunication.Core.DataFormat.BADC; break;
+                                        case 2: busTcpClient.DataFormat = HslCommunication.Core.DataFormat.CDAB; break;
+                                        case 3: busTcpClient.DataFormat = HslCommunication.Core.DataFormat.DCBA; break;
+                                    }
                                 }
+                                catch (Exception ex) { new ErrorLog().WriteLog(ex.ToString()); }
                             }
-                            catch (Exception ex) { new ErrorLog().WriteLog(ex.ToString()); }
                         }
                         else
                         {
                             failCount = 0;
                         }
                     } // ch:modbusIoLock
+                }
+                }
+                catch (Exception exPoll)
+                {
+                    int nowErr = Environment.TickCount;
+                    if (unchecked(nowErr - _lastPollErrLogMs) >= 5000)
+                    {
+                        _lastPollErrLogMs = nowErr;
+                        MsgErroeLog.WriteLog("ModbusTCP 轮询异常(本轮跳过):" + exPoll.Message);
+                    }
+                    try { Thread.Sleep(50); } catch { }
                 }
             }
         }        public void xie(string value)
@@ -2366,7 +2420,11 @@ namespace WindowsFormsApplication1
         //   ② 通道取"反馈通道"[3]（原实现误取触发通道[0] → 每秒把返回值写进触发寄存器，且破坏配对可写错地址段）
         public void SetCamera9PeriodicPending()
         {
-            lock (modbusIoLock)
+            // ch:R43 P1-6 本方法由 WinForms Timer 在 UI 线程每秒调用；写回线程可能正持锁做网络写（秒级），
+            //   原 lock 会让 UI 线程阻塞数秒。改为非阻塞尝试：拿不到锁就跳过本轮登记，下一拍再试。
+            if (!System.Threading.Monitor.TryEnter(modbusIoLock, 0))
+                return;
+            try
             {
                 if (camera_dic.ContainsKey(9) && camera_dic[9].Length > 5 && camera_dic[9][2] == "true")
                 {
@@ -2375,6 +2433,7 @@ namespace WindowsFormsApplication1
                     if (fins_xie.Length > 8) fins_xie[8] = true;
                 }
             }
+            finally { System.Threading.Monitor.Exit(modbusIoLock); }
         }
 
         private void timer2_Tick(object sender, EventArgs e)

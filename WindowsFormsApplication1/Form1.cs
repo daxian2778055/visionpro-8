@@ -1,4 +1,4 @@
-﻿using Cognex.VisionPro;
+using Cognex.VisionPro;
 using Cognex.VisionPro.ImageFile;
 using Cognex.VisionPro.QuickBuild;
 using Cognex.VisionPro.ToolBlock;
@@ -584,7 +584,7 @@ namespace WindowsFormsApplication1
         CogJobIndependent myIndependentJob7;
         CogJobIndependent myIndependentJob8;
         string path_1;
-        bool yunxing;
+        volatile bool yunxing;
         private string daoqi = "";
         int fff;
         int start1;
@@ -3272,7 +3272,8 @@ namespace WindowsFormsApplication1
                 listBox12.Items.Clear();
                 listBox13.Items.Clear();
                 ForceGongjuJiluOff();
-                myjob1.dlg.Dispose();
+                // ch:R43 P1-4 原在此 Dispose 复用的 dlg 实例，运行一次后 ShowPictureList 必抛 ObjectDisposedException；
+                //   对话框只在 InitializeJobManager 创建一次，改为窗体关闭时统一释放
                 // ch:倒序遍历关闭，配合 FormClosed 中的 frm6.Remove 避免集合修改导致跳项/越界
                 for (int i = frm6.Count - 1; i >= 0; i--)
                 {
@@ -4040,6 +4041,26 @@ namespace WindowsFormsApplication1
         int _lastGroupRunLogMs = 0;
         // ch:存图测试加载的 jpg/png 多为 32bpp，直接 new CogImage8Grey(Bitmap) 会失败并被吞掉，
         // ch:随后 Input 为空，方案 ToolBlock 脚本 GroupRun 空引用，界面线程上会弹窗。
+        // ch:R43 P2-4 统一取图赋值入口：在线帧与离线选图共用；离线 jpg/png 常见 32bpp，
+        //   直接 new CogImage8Grey 会失败导致 Input 为空/脚本空引用，必须走 CreateCogImageFromBitmap 的格式兼容路径
+        private bool SetBlockInputFromBitmap(Myjob job, Bitmap src, bool color)
+        {
+            if (job == null || src == null)
+                return false;
+            try
+            {
+                ICogImage img = CreateCogImageFromBitmap(src, color);
+                if (img == null)
+                    return false;
+                return SetBlockInputSafe(job, "Input", img);
+            }
+            catch (Exception ex)
+            {
+                MsgErroeLog.WriteLog("取图转换失败 cam=" + job.path_number + ":" + ex.Message);
+                return false;
+            }
+        }
+
         private ICogImage CreateCogImageFromBitmap(Bitmap src, bool color)
         {
             if (src == null)
@@ -4147,88 +4168,66 @@ namespace WindowsFormsApplication1
                     if (myjob.job.State == CogJobStateConstants.Stopped)
                     {
 
-                        if ((!myjob.trrigerEn) && (myjob.trriger == 0) || (myjob.trriger == 0 && myjob.trrigerEn))
+                        if (myjob.trriger == 0 || myjob.img != null) // ch:R43 P2-4 离线单图(trriger=1)必须进入执行分支
                         {
 
                             try
                             {
 
                                 #region 取图
+                            // ch:R43 P2-4 离线单图用选择文件，在线帧仍用相机槽位
+                            Bitmap offlineFrame = (myjob.trriger == 1) ? myjob.img : null;
                                 switch (myjob.path_number)
                                 {
                                     case "1":
-                                        if (bmp[0] != null)
+                                        if ((offlineFrame ?? bmp[0]) != null)
                                         {
-                                            if (myjob.Color)
-                                                inputAssignFailed |= !SetBlockInputSafe(myjob, "Input", new CogImage24PlanarColor(bmp[0])); // ch:R36 赋值失败置故障帧，不沿用旧图
-                                            else
-                                                inputAssignFailed |= !SetBlockInputSafe(myjob, "Input", new CogImage8Grey(bmp[0]));
+                                            inputAssignFailed |= !SetBlockInputFromBitmap(myjob, (offlineFrame ?? bmp[0]), myjob.Color); // ch:R43 P2-4 兼容离线 32bpp
                                             
 
                                         }
 
                                         break;
                                     case "2":
-                                        if (bmp[1] != null)
+                                        if ((offlineFrame ?? bmp[1]) != null)
                                         {
-                                            if (myjob.Color)
-                                                inputAssignFailed |= !SetBlockInputSafe(myjob, "Input", new CogImage24PlanarColor(bmp[1])); // ch:R36 赋值失败置故障帧，不沿用旧图
-                                            else
-                                                inputAssignFailed |= !SetBlockInputSafe(myjob, "Input", new CogImage8Grey(bmp[1]));
+                                            inputAssignFailed |= !SetBlockInputFromBitmap(myjob, (offlineFrame ?? bmp[1]), myjob.Color); // ch:R43 P2-4 兼容离线 32bpp
                                         }
                                         break;
                                     case "3":
-                                        if (bmp[2] != null)
+                                        if ((offlineFrame ?? bmp[2]) != null)
                                         {
-                                            if (myjob.Color)
-                                                inputAssignFailed |= !SetBlockInputSafe(myjob, "Input", new CogImage24PlanarColor(bmp[2])); // ch:R36 赋值失败置故障帧，不沿用旧图
-                                            else
-                                                inputAssignFailed |= !SetBlockInputSafe(myjob, "Input", new CogImage8Grey(bmp[2]));
+                                            inputAssignFailed |= !SetBlockInputFromBitmap(myjob, (offlineFrame ?? bmp[2]), myjob.Color); // ch:R43 P2-4 兼容离线 32bpp
                                         }
                                         break;
                                     case "4":
-                                        if (bmp[3] != null)
+                                        if ((offlineFrame ?? bmp[3]) != null)
                                         {
-                                            if (myjob.Color)
-                                                inputAssignFailed |= !SetBlockInputSafe(myjob, "Input", new CogImage24PlanarColor(bmp[3])); // ch:R36 赋值失败置故障帧，不沿用旧图
-                                            else
-                                                inputAssignFailed |= !SetBlockInputSafe(myjob, "Input", new CogImage8Grey(bmp[3]));
+                                            inputAssignFailed |= !SetBlockInputFromBitmap(myjob, (offlineFrame ?? bmp[3]), myjob.Color); // ch:R43 P2-4 兼容离线 32bpp
                                         }
                                         break;
                                     case "5":
-                                        if (bmp[4] != null)
+                                        if ((offlineFrame ?? bmp[4]) != null)
                                         {
-                                            if (myjob.Color)
-                                                inputAssignFailed |= !SetBlockInputSafe(myjob, "Input", new CogImage24PlanarColor(bmp[4])); // ch:R36 赋值失败置故障帧，不沿用旧图
-                                            else
-                                                inputAssignFailed |= !SetBlockInputSafe(myjob, "Input", new CogImage8Grey(bmp[4]));
+                                            inputAssignFailed |= !SetBlockInputFromBitmap(myjob, (offlineFrame ?? bmp[4]), myjob.Color); // ch:R43 P2-4 兼容离线 32bpp
                                         }
                                         break;
                                     case "6":
-                                        if (bmp[5] != null)
+                                        if ((offlineFrame ?? bmp[5]) != null)
                                         {
-                                            if (myjob.Color)
-                                                inputAssignFailed |= !SetBlockInputSafe(myjob, "Input", new CogImage24PlanarColor(bmp[5])); // ch:R36 赋值失败置故障帧，不沿用旧图
-                                            else
-                                                inputAssignFailed |= !SetBlockInputSafe(myjob, "Input", new CogImage8Grey(bmp[5]));
+                                            inputAssignFailed |= !SetBlockInputFromBitmap(myjob, (offlineFrame ?? bmp[5]), myjob.Color); // ch:R43 P2-4 兼容离线 32bpp
                                         }
                                         break;
                                     case "7":
-                                        if (bmp[6] != null)
+                                        if ((offlineFrame ?? bmp[6]) != null)
                                         {
-                                            if (myjob.Color)
-                                                inputAssignFailed |= !SetBlockInputSafe(myjob, "Input", new CogImage24PlanarColor(bmp[6])); // ch:R36 赋值失败置故障帧，不沿用旧图
-                                            else
-                                                inputAssignFailed |= !SetBlockInputSafe(myjob, "Input", new CogImage8Grey(bmp[6]));
+                                            inputAssignFailed |= !SetBlockInputFromBitmap(myjob, (offlineFrame ?? bmp[6]), myjob.Color); // ch:R43 P2-4 兼容离线 32bpp
                                         }
                                         break;
                                     case "8":
-                                        if (bmp[7] != null)
+                                        if ((offlineFrame ?? bmp[7]) != null)
                                         {
-                                            if (myjob.Color)
-                                                inputAssignFailed |= !SetBlockInputSafe(myjob, "Input", new CogImage24PlanarColor(bmp[7])); // ch:R36 赋值失败置故障帧，不沿用旧图
-                                            else
-                                                inputAssignFailed |= !SetBlockInputSafe(myjob, "Input", new CogImage8Grey(bmp[7]));
+                                            inputAssignFailed |= !SetBlockInputFromBitmap(myjob, (offlineFrame ?? bmp[7]), myjob.Color); // ch:R43 P2-4 兼容离线 32bpp
                                         }
                                         break;
                                 }
@@ -4942,10 +4941,9 @@ namespace WindowsFormsApplication1
                                    }
                                });
                             }
-                            if (myjob.trrigerEn == true)
-                            {
-                                temptime = DateTime.Now.ToString("HH:mm:ss"); // ch:P1 原 ToLongTimeString() 在 en-US 等区域带 "PM"，后续 int.Parse 会抛异常导致存图静默失败
-                            }
+                            // ch:R43 P1-1 每帧无条件生成时间戳：原实现只在 trrigerEn=true 时赋值，连续运行(trrigerEn=false)下
+                            //   temptime 恒为空串，cuntu_fangfa 解析必抛异常被吞，表现为"配了存图但一张都没有"
+                            temptime = DateTime.Now.ToString("HH:mm:ss");
                             #region 总数计算
                             switch (myjob.path_number)
                             {
@@ -5005,35 +5003,35 @@ namespace WindowsFormsApplication1
                                         switch (myjob.path_number)
                                         {
                                             case "1":
-                                                myjob1.oksum++;
+                                                System.Threading.Interlocked.Increment(ref myjob1.oksum); // ch:R43 P2-1 原 ++ 在线程池并发任务中丢计数
                                                 // myjob.oksum++;
                                                 break;
                                             case "2":
-                                                myjob2.oksum++;
+                                                System.Threading.Interlocked.Increment(ref myjob2.oksum); // ch:R43 P2-1 原 ++ 在线程池并发任务中丢计数
                                                 //myjob.oksum++;
                                                 break;
                                             case "3":
-                                                myjob3.oksum++;
+                                                System.Threading.Interlocked.Increment(ref myjob3.oksum); // ch:R43 P2-1 原 ++ 在线程池并发任务中丢计数
                                                 //  myjob.oksum++;
                                                 break;
                                             case "4":
-                                                myjob4.oksum++;
+                                                System.Threading.Interlocked.Increment(ref myjob4.oksum); // ch:R43 P2-1 原 ++ 在线程池并发任务中丢计数
                                                 // myjob.oksum++;
                                                 break;
                                             case "5":
-                                                myjob5.oksum++;
+                                                System.Threading.Interlocked.Increment(ref myjob5.oksum); // ch:R43 P2-1 原 ++ 在线程池并发任务中丢计数
                                                 // myjob.oksum++;
                                                 break;
                                             case "6":
-                                                myjob6.oksum++;
+                                                System.Threading.Interlocked.Increment(ref myjob6.oksum); // ch:R43 P2-1 原 ++ 在线程池并发任务中丢计数
                                                 // myjob.oksum++;
                                                 break;
                                             case "7":
-                                                myjob7.oksum++;
+                                                System.Threading.Interlocked.Increment(ref myjob7.oksum); // ch:R43 P2-1 原 ++ 在线程池并发任务中丢计数
                                                 //  myjob.oksum++;
                                                 break;
                                             case "8":
-                                                myjob8.oksum++;
+                                                System.Threading.Interlocked.Increment(ref myjob8.oksum); // ch:R43 P2-1 原 ++ 在线程池并发任务中丢计数
                                                 // myjob.oksum++;
                                                 break;
                                         }
@@ -6139,6 +6137,18 @@ namespace WindowsFormsApplication1
             StopOneIoPulse(myjob8);
         }
 
+        // ch:R43 P1-5 演示/离线列表演示的"停止"入口专用：生产运行中不得关闭全局 IO 脉冲使能，
+        //   否则误点一次演示停止就会让 8 路 OK/NG 拦截信号静默停发，直到下次点"运行"。
+        private void StopAllIoPulsesFromDemoStop()
+        {
+            if (yunxing)
+            {
+                MsgErroeLog.WriteLog("运行中点击演示停止：已忽略，不关闭全局 IO 脉冲（请先停止生产运行）");
+                return;
+            }
+            StopAllIoPulses(); // 真正停用（仅演示态可达）
+        }
+
         private void StopOneIoPulse(Myjob job)
         {
             if (job == null)
@@ -6411,6 +6421,7 @@ namespace WindowsFormsApplication1
         }
         private void Form1_FormClosed(object sender, FormClosedEventArgs e)
         {
+            try { if (myjob1 != null && myjob1.dlg != null) { myjob1.dlg.Dispose(); myjob1.dlg = null; } } catch (Exception ex) { new ErrorLog().WriteLog(ex.ToString()); }
             try { if (frm3 != null) frm3.CloseResources(); } catch (Exception ex) { new ErrorLog().WriteLog(ex.ToString()); }
             // ch:兜底释放相机句柄（正常已由 bnClose_Click 释放；此处覆盖异常/未走关闭按钮的场景）。
             //   避免仅靠 Environment.Exit 强杀导致 GigE 会话残留，下次打开报 0x80000203。
@@ -6436,7 +6447,7 @@ namespace WindowsFormsApplication1
                     {
                         if (m_MyCamera[i] == null)
                             continue;
-                        try { m_MyCamera[i].MV_CC_StopGrabbing_NET(); } catch (Exception exInner) { new ErrorLog().WriteLog(exInner.ToString()); }
+                        try { StopGrabbingSafe(i); } catch (Exception exInner) { new ErrorLog().WriteLog(exInner.ToString()); }
                         try { m_MyCamera[i].Dispose(); } catch (Exception exInner) { new ErrorLog().WriteLog(exInner.ToString()); }
                         m_MyCamera[i] = null;
                     }
@@ -6761,7 +6772,7 @@ namespace WindowsFormsApplication1
                                 // ch:先停止采集并关闭旧句柄，再重新打开，避免句柄冲突
                                 try
                                 {
-                                    m_MyCamera[0].MV_CC_StopGrabbing_NET();
+                                    StopGrabbingSafe(0);
                                     m_MyCamera[0].MV_CC_CloseDevice_NET();
                                     m_MyCamera[0].MV_CC_DestroyDevice_NET();
                                 }
@@ -6814,7 +6825,7 @@ namespace WindowsFormsApplication1
                                 // ch:先停止采集并关闭旧句柄，再重新打开，避免句柄冲突
                                 try
                                 {
-                                    m_MyCamera[1].MV_CC_StopGrabbing_NET();
+                                    StopGrabbingSafe(1);
                                     m_MyCamera[1].MV_CC_CloseDevice_NET();
                                     m_MyCamera[1].MV_CC_DestroyDevice_NET();
                                 }
@@ -6867,7 +6878,7 @@ namespace WindowsFormsApplication1
                                 // ch:先停止采集并关闭旧句柄，再重新打开，避免句柄冲突
                                 try
                                 {
-                                    m_MyCamera[2].MV_CC_StopGrabbing_NET();
+                                    StopGrabbingSafe(2);
                                     m_MyCamera[2].MV_CC_CloseDevice_NET();
                                     m_MyCamera[2].MV_CC_DestroyDevice_NET();
                                 }
@@ -6921,7 +6932,7 @@ namespace WindowsFormsApplication1
                                 // ch:先停止采集并关闭旧句柄，再重新打开，避免句柄冲突
                                 try
                                 {
-                                    m_MyCamera[3].MV_CC_StopGrabbing_NET();
+                                    StopGrabbingSafe(3);
                                     m_MyCamera[3].MV_CC_CloseDevice_NET();
                                     m_MyCamera[3].MV_CC_DestroyDevice_NET();
                                 }
@@ -6973,7 +6984,7 @@ namespace WindowsFormsApplication1
                                 // ch:先停止采集并关闭旧句柄，再重新打开，避免句柄冲突
                                 try
                                 {
-                                    m_MyCamera[4].MV_CC_StopGrabbing_NET();
+                                    StopGrabbingSafe(4);
                                     m_MyCamera[4].MV_CC_CloseDevice_NET();
                                     m_MyCamera[4].MV_CC_DestroyDevice_NET();
                                 }
@@ -7025,7 +7036,7 @@ namespace WindowsFormsApplication1
                                 // ch:先停止采集并关闭旧句柄，再重新打开，避免句柄冲突
                                 try
                                 {
-                                    m_MyCamera[5].MV_CC_StopGrabbing_NET();
+                                    StopGrabbingSafe(5);
                                     m_MyCamera[5].MV_CC_CloseDevice_NET();
                                     m_MyCamera[5].MV_CC_DestroyDevice_NET();
                                 }
@@ -7077,7 +7088,7 @@ namespace WindowsFormsApplication1
                                 // ch:先停止采集并关闭旧句柄，再重新打开，避免句柄冲突
                                 try
                                 {
-                                    m_MyCamera[6].MV_CC_StopGrabbing_NET();
+                                    StopGrabbingSafe(6);
                                     m_MyCamera[6].MV_CC_CloseDevice_NET();
                                     m_MyCamera[6].MV_CC_DestroyDevice_NET();
                                 }
@@ -7129,7 +7140,7 @@ namespace WindowsFormsApplication1
                                 // ch:先停止采集并关闭旧句柄，再重新打开，避免句柄冲突
                                 try
                                 {
-                                    m_MyCamera[7].MV_CC_StopGrabbing_NET();
+                                    StopGrabbingSafe(7);
                                     m_MyCamera[7].MV_CC_CloseDevice_NET();
                                     m_MyCamera[7].MV_CC_DestroyDevice_NET();
                                 }
@@ -7369,9 +7380,7 @@ namespace WindowsFormsApplication1
             {
                 myjob1.jieshouZifu = myjob1.triggerZifu;
                 // ch:触发命令 | en:Trigger command
-                int nRet = MyCamera.MV_E_PARAMETER;
-                if (m_MyCamera[0] != null)
-                    nRet = m_MyCamera[0].MV_CC_SetCommandValue_NET("TriggerSoftware");
+                int nRet = TriggerSoftwareSafe(0); // ch:R43 P0-1 统一持每相机锁：防与断线重连 Destroy/Create 并发使用同一句柄
                 if (MyCamera.MV_OK != nRet)
                 {
                     MsgErroeLog.WriteLog("Trigger Software Fail!---" + nRet);
@@ -7381,9 +7390,7 @@ namespace WindowsFormsApplication1
             {
                 myjob2.jieshouZifu = myjob2.triggerZifu;
                 // ch:触发命令 | en:Trigger command
-                int nRet = MyCamera.MV_E_PARAMETER;
-                if (m_MyCamera[1] != null)
-                    nRet = m_MyCamera[1].MV_CC_SetCommandValue_NET("TriggerSoftware");
+                int nRet = TriggerSoftwareSafe(1); // ch:R43 P0-1 统一持每相机锁：防与断线重连 Destroy/Create 并发使用同一句柄
                 if (MyCamera.MV_OK != nRet)
                 {
                     MsgErroeLog.WriteLog("Trigger Software Fail!---" + nRet);
@@ -7393,9 +7400,7 @@ namespace WindowsFormsApplication1
             {
                 myjob3.jieshouZifu = myjob3.triggerZifu;
                 // ch:触发命令 | en:Trigger command
-                int nRet = MyCamera.MV_E_PARAMETER;
-                if (m_MyCamera[2] != null)
-                    nRet = m_MyCamera[2].MV_CC_SetCommandValue_NET("TriggerSoftware");
+                int nRet = TriggerSoftwareSafe(2); // ch:R43 P0-1 统一持每相机锁：防与断线重连 Destroy/Create 并发使用同一句柄
                 if (MyCamera.MV_OK != nRet)
                 {
                     MsgErroeLog.WriteLog("Trigger Software Fail!---" + nRet);
@@ -7405,9 +7410,7 @@ namespace WindowsFormsApplication1
             {
                 myjob4.jieshouZifu = myjob4.triggerZifu;
                 // ch:触发命令 | en:Trigger command
-                int nRet = MyCamera.MV_E_PARAMETER;
-                if (m_MyCamera[3] != null)
-                    nRet = m_MyCamera[3].MV_CC_SetCommandValue_NET("TriggerSoftware");
+                int nRet = TriggerSoftwareSafe(3); // ch:R43 P0-1 统一持每相机锁：防与断线重连 Destroy/Create 并发使用同一句柄
                 if (MyCamera.MV_OK != nRet)
                 {
                     MsgErroeLog.WriteLog("Trigger Software Fail!---" + nRet);
@@ -7417,9 +7420,7 @@ namespace WindowsFormsApplication1
             {
                 myjob5.jieshouZifu = myjob5.triggerZifu;
                 // ch:触发命令 | en:Trigger command
-                int nRet = MyCamera.MV_E_PARAMETER;
-                if (m_MyCamera[4] != null)
-                    nRet = m_MyCamera[4].MV_CC_SetCommandValue_NET("TriggerSoftware");
+                int nRet = TriggerSoftwareSafe(4); // ch:R43 P0-1 统一持每相机锁：防与断线重连 Destroy/Create 并发使用同一句柄
                 if (MyCamera.MV_OK != nRet)
                 {
                     MsgErroeLog.WriteLog("Trigger Software Fail!---" + nRet);
@@ -7429,9 +7430,7 @@ namespace WindowsFormsApplication1
             {
                 myjob6.jieshouZifu = myjob6.triggerZifu;
                 // ch:触发命令 | en:Trigger command
-                int nRet = MyCamera.MV_E_PARAMETER;
-                if (m_MyCamera[5] != null)
-                    nRet = m_MyCamera[5].MV_CC_SetCommandValue_NET("TriggerSoftware");
+                int nRet = TriggerSoftwareSafe(5); // ch:R43 P0-1 统一持每相机锁：防与断线重连 Destroy/Create 并发使用同一句柄
                 if (MyCamera.MV_OK != nRet)
                 {
                     MsgErroeLog.WriteLog("Trigger Software Fail!---" + nRet);
@@ -7441,9 +7440,7 @@ namespace WindowsFormsApplication1
             {
                 myjob7.jieshouZifu = myjob7.triggerZifu;
                 // ch:触发命令 | en:Trigger command
-                int nRet = MyCamera.MV_E_PARAMETER;
-                if (m_MyCamera[6] != null)
-                    nRet = m_MyCamera[6].MV_CC_SetCommandValue_NET("TriggerSoftware");
+                int nRet = TriggerSoftwareSafe(6); // ch:R43 P0-1 统一持每相机锁：防与断线重连 Destroy/Create 并发使用同一句柄
                 if (MyCamera.MV_OK != nRet)
                 {
                     MsgErroeLog.WriteLog("Trigger Software Fail!---" + nRet);
@@ -7453,9 +7450,7 @@ namespace WindowsFormsApplication1
             {
                 myjob8.jieshouZifu = myjob8.triggerZifu;
                 // ch:触发命令 | en:Trigger command
-                int nRet = MyCamera.MV_E_PARAMETER;
-                if (m_MyCamera[7] != null)
-                    nRet = m_MyCamera[7].MV_CC_SetCommandValue_NET("TriggerSoftware");
+                int nRet = TriggerSoftwareSafe(7); // ch:R43 P0-1 统一持每相机锁：防与断线重连 Destroy/Create 并发使用同一句柄
                 if (MyCamera.MV_OK != nRet)
                 {
                     MsgErroeLog.WriteLog("Trigger Software Fail!---" + nRet);
@@ -7478,9 +7473,7 @@ namespace WindowsFormsApplication1
                 {
                     myjob1.jieshouZifu = myjob1.triggerZifu;
                     // ch:触发命令 | en:Trigger command
-                    int nRet = MyCamera.MV_E_PARAMETER;
-                    if (m_MyCamera[0] != null)
-                        nRet = m_MyCamera[0].MV_CC_SetCommandValue_NET("TriggerSoftware");
+                    int nRet = TriggerSoftwareSafe(0); // ch:R43 P0-1 统一持每相机锁：防与断线重连 Destroy/Create 并发使用同一句柄
                     if (MyCamera.MV_OK != nRet)
                     {
                         MsgErroeLog.WriteLog("Trigger Software Fail!---" + nRet);
@@ -7503,9 +7496,7 @@ namespace WindowsFormsApplication1
                 {
                     myjob2.jieshouZifu = e.Selection;
                     // ch:触发命令 | en:Trigger command
-                    int nRet = MyCamera.MV_E_PARAMETER;
-                    if (m_MyCamera[1] != null)
-                        nRet = m_MyCamera[1].MV_CC_SetCommandValue_NET("TriggerSoftware");
+                    int nRet = TriggerSoftwareSafe(1); // ch:R43 P0-1 统一持每相机锁：防与断线重连 Destroy/Create 并发使用同一句柄
                     if (MyCamera.MV_OK != nRet)
                     {
                         MsgErroeLog.WriteLog("Trigger Software Fail!---" + nRet);
@@ -7527,9 +7518,7 @@ namespace WindowsFormsApplication1
                 {
                     myjob3.jieshouZifu = e.Selection;
                     // ch:触发命令 | en:Trigger command
-                    int nRet = MyCamera.MV_E_PARAMETER;
-                    if (m_MyCamera[2] != null)
-                        nRet = m_MyCamera[2].MV_CC_SetCommandValue_NET("TriggerSoftware");
+                    int nRet = TriggerSoftwareSafe(2); // ch:R43 P0-1 统一持每相机锁：防与断线重连 Destroy/Create 并发使用同一句柄
                     if (MyCamera.MV_OK != nRet)
                     {
                         MsgErroeLog.WriteLog("Trigger Software Fail!---" + nRet);
@@ -7552,9 +7541,7 @@ namespace WindowsFormsApplication1
 
                     myjob4.jieshouZifu = e.Selection;
                     // ch:触发命令 | en:Trigger command
-                    int nRet = MyCamera.MV_E_PARAMETER;
-                    if (m_MyCamera[3] != null)
-                        nRet = m_MyCamera[3].MV_CC_SetCommandValue_NET("TriggerSoftware");
+                    int nRet = TriggerSoftwareSafe(3); // ch:R43 P0-1 统一持每相机锁：防与断线重连 Destroy/Create 并发使用同一句柄
                     if (MyCamera.MV_OK != nRet)
                     {
                         MsgErroeLog.WriteLog("Trigger Software Fail!---" + nRet);
@@ -7577,9 +7564,7 @@ namespace WindowsFormsApplication1
 
                     myjob5.jieshouZifu = e.Selection;
                     // ch:触发命令 | en:Trigger command
-                    int nRet = MyCamera.MV_E_PARAMETER;
-                    if (m_MyCamera[4] != null)
-                        nRet = m_MyCamera[4].MV_CC_SetCommandValue_NET("TriggerSoftware");
+                    int nRet = TriggerSoftwareSafe(4); // ch:R43 P0-1 统一持每相机锁：防与断线重连 Destroy/Create 并发使用同一句柄
                     if (MyCamera.MV_OK != nRet)
                     {
                         MsgErroeLog.WriteLog("Trigger Software Fail!---" + nRet);
@@ -7602,9 +7587,7 @@ namespace WindowsFormsApplication1
 
                     myjob6.jieshouZifu = e.Selection;
                     // ch:触发命令 | en:Trigger command
-                    int nRet = MyCamera.MV_E_PARAMETER;
-                    if (m_MyCamera[5] != null)
-                        nRet = m_MyCamera[5].MV_CC_SetCommandValue_NET("TriggerSoftware");
+                    int nRet = TriggerSoftwareSafe(5); // ch:R43 P0-1 统一持每相机锁：防与断线重连 Destroy/Create 并发使用同一句柄
                     if (MyCamera.MV_OK != nRet)
                     {
                         MsgErroeLog.WriteLog("Trigger Software Fail!---" + nRet);
@@ -7627,9 +7610,7 @@ namespace WindowsFormsApplication1
 
                     myjob7.jieshouZifu = e.Selection;
                     // ch:触发命令 | en:Trigger command
-                    int nRet = MyCamera.MV_E_PARAMETER;
-                    if (m_MyCamera[6] != null)
-                        nRet = m_MyCamera[6].MV_CC_SetCommandValue_NET("TriggerSoftware");
+                    int nRet = TriggerSoftwareSafe(6); // ch:R43 P0-1 统一持每相机锁：防与断线重连 Destroy/Create 并发使用同一句柄
                     if (MyCamera.MV_OK != nRet)
                     {
                         MsgErroeLog.WriteLog("Trigger Software Fail!---" + nRet);
@@ -7652,9 +7633,7 @@ namespace WindowsFormsApplication1
 
                     myjob8.jieshouZifu = e.Selection;
                     // ch:触发命令 | en:Trigger command
-                    int nRet = MyCamera.MV_E_PARAMETER;
-                    if (m_MyCamera[7] != null)
-                        nRet = m_MyCamera[7].MV_CC_SetCommandValue_NET("TriggerSoftware");
+                    int nRet = TriggerSoftwareSafe(7); // ch:R43 P0-1 统一持每相机锁：防与断线重连 Destroy/Create 并发使用同一句柄
                     if (MyCamera.MV_OK != nRet)
                     {
                         MsgErroeLog.WriteLog("Trigger Software Fail!---" + nRet);
@@ -7719,9 +7698,7 @@ namespace WindowsFormsApplication1
                     {
                         myjob1.jieshouZifu = myjob1.triggerZifu;
                         // ch:触发命令 | en:Trigger command
-                        int nRet = MyCamera.MV_E_PARAMETER;
-                        if (m_MyCamera[0] != null)
-                            nRet = m_MyCamera[0].MV_CC_SetCommandValue_NET("TriggerSoftware");
+                        int nRet = TriggerSoftwareSafe(0); // ch:R43 P0-1 统一持每相机锁：防与断线重连 Destroy/Create 并发使用同一句柄
                         if (MyCamera.MV_OK != nRet)
                         {
                             MsgErroeLog.WriteLog("Trigger Software Fail!---" + nRet);
@@ -7744,9 +7721,7 @@ namespace WindowsFormsApplication1
                     {
                         myjob2.jieshouZifu = e.Selection;
                         // ch:触发命令 | en:Trigger command
-                        int nRet = MyCamera.MV_E_PARAMETER;
-                        if (m_MyCamera[1] != null)
-                            nRet = m_MyCamera[1].MV_CC_SetCommandValue_NET("TriggerSoftware");
+                        int nRet = TriggerSoftwareSafe(1); // ch:R43 P0-1 统一持每相机锁：防与断线重连 Destroy/Create 并发使用同一句柄
                         if (MyCamera.MV_OK != nRet)
                         {
                             MsgErroeLog.WriteLog("Trigger Software Fail!---" + nRet);
@@ -7768,9 +7743,7 @@ namespace WindowsFormsApplication1
                     {
                         myjob3.jieshouZifu = e.Selection;
                         // ch:触发命令 | en:Trigger command
-                        int nRet = MyCamera.MV_E_PARAMETER;
-                        if (m_MyCamera[2] != null)
-                            nRet = m_MyCamera[2].MV_CC_SetCommandValue_NET("TriggerSoftware");
+                        int nRet = TriggerSoftwareSafe(2); // ch:R43 P0-1 统一持每相机锁：防与断线重连 Destroy/Create 并发使用同一句柄
                         if (MyCamera.MV_OK != nRet)
                         {
                             MsgErroeLog.WriteLog("Trigger Software Fail!---" + nRet);
@@ -7793,9 +7766,7 @@ namespace WindowsFormsApplication1
 
                         myjob4.jieshouZifu = e.Selection;
                         // ch:触发命令 | en:Trigger command
-                        int nRet = MyCamera.MV_E_PARAMETER;
-                        if (m_MyCamera[3] != null)
-                            nRet = m_MyCamera[3].MV_CC_SetCommandValue_NET("TriggerSoftware");
+                        int nRet = TriggerSoftwareSafe(3); // ch:R43 P0-1 统一持每相机锁：防与断线重连 Destroy/Create 并发使用同一句柄
                         if (MyCamera.MV_OK != nRet)
                         {
                             MsgErroeLog.WriteLog("Trigger Software Fail!---" + nRet);
@@ -7818,9 +7789,7 @@ namespace WindowsFormsApplication1
 
                         myjob5.jieshouZifu = e.Selection;
                         // ch:触发命令 | en:Trigger command
-                        int nRet = MyCamera.MV_E_PARAMETER;
-                        if (m_MyCamera[4] != null)
-                            nRet = m_MyCamera[4].MV_CC_SetCommandValue_NET("TriggerSoftware");
+                        int nRet = TriggerSoftwareSafe(4); // ch:R43 P0-1 统一持每相机锁：防与断线重连 Destroy/Create 并发使用同一句柄
                         if (MyCamera.MV_OK != nRet)
                         {
                             MsgErroeLog.WriteLog("Trigger Software Fail!---" + nRet);
@@ -7843,9 +7812,7 @@ namespace WindowsFormsApplication1
 
                         myjob6.jieshouZifu = e.Selection;
                         // ch:触发命令 | en:Trigger command
-                        int nRet = MyCamera.MV_E_PARAMETER;
-                        if (m_MyCamera[5] != null)
-                            nRet = m_MyCamera[5].MV_CC_SetCommandValue_NET("TriggerSoftware");
+                        int nRet = TriggerSoftwareSafe(5); // ch:R43 P0-1 统一持每相机锁：防与断线重连 Destroy/Create 并发使用同一句柄
                         if (MyCamera.MV_OK != nRet)
                         {
                             MsgErroeLog.WriteLog("Trigger Software Fail!---" + nRet);
@@ -7868,9 +7835,7 @@ namespace WindowsFormsApplication1
 
                         myjob7.jieshouZifu = e.Selection;
                         // ch:触发命令 | en:Trigger command
-                        int nRet = MyCamera.MV_E_PARAMETER;
-                        if (m_MyCamera[6] != null)
-                            nRet = m_MyCamera[6].MV_CC_SetCommandValue_NET("TriggerSoftware");
+                        int nRet = TriggerSoftwareSafe(6); // ch:R43 P0-1 统一持每相机锁：防与断线重连 Destroy/Create 并发使用同一句柄
                         if (MyCamera.MV_OK != nRet)
                         {
                             MsgErroeLog.WriteLog("Trigger Software Fail!---" + nRet);
@@ -7893,9 +7858,7 @@ namespace WindowsFormsApplication1
 
                         myjob8.jieshouZifu = e.Selection;
                         // ch:触发命令 | en:Trigger command
-                        int nRet = MyCamera.MV_E_PARAMETER;
-                        if (m_MyCamera[7] != null)
-                            nRet = m_MyCamera[7].MV_CC_SetCommandValue_NET("TriggerSoftware");
+                        int nRet = TriggerSoftwareSafe(7); // ch:R43 P0-1 统一持每相机锁：防与断线重连 Destroy/Create 并发使用同一句柄
                         if (MyCamera.MV_OK != nRet)
                         {
                             MsgErroeLog.WriteLog("Trigger Software Fail!---" + nRet);
@@ -7961,9 +7924,7 @@ namespace WindowsFormsApplication1
                     {
                         myjob1.jieshouZifu = myjob1.triggerZifu;
                         // ch:触发命令 | en:Trigger command
-                        int nRet = MyCamera.MV_E_PARAMETER;
-                        if (m_MyCamera[0] != null)
-                            nRet = m_MyCamera[0].MV_CC_SetCommandValue_NET("TriggerSoftware");
+                        int nRet = TriggerSoftwareSafe(0); // ch:R43 P0-1 统一持每相机锁：防与断线重连 Destroy/Create 并发使用同一句柄
                         if (MyCamera.MV_OK != nRet)
                         {
                             MsgErroeLog.WriteLog("Trigger Software Fail!---" + nRet);
@@ -7986,9 +7947,7 @@ namespace WindowsFormsApplication1
                     {
                         myjob2.jieshouZifu = e.Selection;
                         // ch:触发命令 | en:Trigger command
-                        int nRet = MyCamera.MV_E_PARAMETER;
-                        if (m_MyCamera[1] != null)
-                            nRet = m_MyCamera[1].MV_CC_SetCommandValue_NET("TriggerSoftware");
+                        int nRet = TriggerSoftwareSafe(1); // ch:R43 P0-1 统一持每相机锁：防与断线重连 Destroy/Create 并发使用同一句柄
                         if (MyCamera.MV_OK != nRet)
                         {
                             MsgErroeLog.WriteLog("Trigger Software Fail!---" + nRet);
@@ -8010,9 +7969,7 @@ namespace WindowsFormsApplication1
                     {
                         myjob3.jieshouZifu = e.Selection;
                         // ch:触发命令 | en:Trigger command
-                        int nRet = MyCamera.MV_E_PARAMETER;
-                        if (m_MyCamera[2] != null)
-                            nRet = m_MyCamera[2].MV_CC_SetCommandValue_NET("TriggerSoftware");
+                        int nRet = TriggerSoftwareSafe(2); // ch:R43 P0-1 统一持每相机锁：防与断线重连 Destroy/Create 并发使用同一句柄
                         if (MyCamera.MV_OK != nRet)
                         {
                             MsgErroeLog.WriteLog("Trigger Software Fail!---" + nRet);
@@ -8035,9 +7992,7 @@ namespace WindowsFormsApplication1
 
                         myjob4.jieshouZifu = e.Selection;
                         // ch:触发命令 | en:Trigger command
-                        int nRet = MyCamera.MV_E_PARAMETER;
-                        if (m_MyCamera[3] != null)
-                            nRet = m_MyCamera[3].MV_CC_SetCommandValue_NET("TriggerSoftware");
+                        int nRet = TriggerSoftwareSafe(3); // ch:R43 P0-1 统一持每相机锁：防与断线重连 Destroy/Create 并发使用同一句柄
                         if (MyCamera.MV_OK != nRet)
                         {
                             MsgErroeLog.WriteLog("Trigger Software Fail!---" + nRet);
@@ -8060,9 +8015,7 @@ namespace WindowsFormsApplication1
 
                         myjob5.jieshouZifu = e.Selection;
                         // ch:触发命令 | en:Trigger command
-                        int nRet = MyCamera.MV_E_PARAMETER;
-                        if (m_MyCamera[4] != null)
-                            nRet = m_MyCamera[4].MV_CC_SetCommandValue_NET("TriggerSoftware");
+                        int nRet = TriggerSoftwareSafe(4); // ch:R43 P0-1 统一持每相机锁：防与断线重连 Destroy/Create 并发使用同一句柄
                         if (MyCamera.MV_OK != nRet)
                         {
                             MsgErroeLog.WriteLog("Trigger Software Fail!---" + nRet);
@@ -8085,9 +8038,7 @@ namespace WindowsFormsApplication1
 
                         myjob6.jieshouZifu = e.Selection;
                         // ch:触发命令 | en:Trigger command
-                        int nRet = MyCamera.MV_E_PARAMETER;
-                        if (m_MyCamera[5] != null)
-                            nRet = m_MyCamera[5].MV_CC_SetCommandValue_NET("TriggerSoftware");
+                        int nRet = TriggerSoftwareSafe(5); // ch:R43 P0-1 统一持每相机锁：防与断线重连 Destroy/Create 并发使用同一句柄
                         if (MyCamera.MV_OK != nRet)
                         {
                             MsgErroeLog.WriteLog("Trigger Software Fail!---" + nRet);
@@ -8110,9 +8061,7 @@ namespace WindowsFormsApplication1
 
                         myjob7.jieshouZifu = e.Selection;
                         // ch:触发命令 | en:Trigger command
-                        int nRet = MyCamera.MV_E_PARAMETER;
-                        if (m_MyCamera[6] != null)
-                            nRet = m_MyCamera[6].MV_CC_SetCommandValue_NET("TriggerSoftware");
+                        int nRet = TriggerSoftwareSafe(6); // ch:R43 P0-1 统一持每相机锁：防与断线重连 Destroy/Create 并发使用同一句柄
                         if (MyCamera.MV_OK != nRet)
                         {
                             MsgErroeLog.WriteLog("Trigger Software Fail!---" + nRet);
@@ -8135,9 +8084,7 @@ namespace WindowsFormsApplication1
 
                         myjob8.jieshouZifu = e.Selection;
                         // ch:触发命令 | en:Trigger command
-                        int nRet = MyCamera.MV_E_PARAMETER;
-                        if (m_MyCamera[7] != null)
-                            nRet = m_MyCamera[7].MV_CC_SetCommandValue_NET("TriggerSoftware");
+                        int nRet = TriggerSoftwareSafe(7); // ch:R43 P0-1 统一持每相机锁：防与断线重连 Destroy/Create 并发使用同一句柄
                         if (MyCamera.MV_OK != nRet)
                         {
                             MsgErroeLog.WriteLog("Trigger Software Fail!---" + nRet);
@@ -8273,8 +8220,7 @@ namespace WindowsFormsApplication1
                 if (yunxing == false)
                 {
                     _ioPulseEnabled = true;
-                    myjob1.trriger = 1;
-                    getrecord(myjob1);
+                    RunOfflineDetection(myjob1);
                 }
             }
             catch (Exception ex) { MsgErroeLog.WriteLog("异常:" + ex.Message); }
@@ -8301,20 +8247,30 @@ namespace WindowsFormsApplication1
                 else
                 {
                     myjob1.img = new Bitmap(item.filePath);
-                    if (myjob1.trriger == 0)
-                    {
-                        myjob1.trriger = 1;
-                        // ch:P2 离线单图检测移后台：getrecord 含 Run/IO/存图，UI 线程直接跑会冻结界面（实时链路本就跑在检测线程）
-                        Task.Run(() => { try { getrecord(myjob1); } catch (Exception ex) { MsgErroeLog.WriteLog("离线单图检测异常:" + ex.Message); } });
-                    }
+                    RunOfflineDetection(myjob1);
                     _ioPulseEnabled = true;
                     trriger1_temp = 1;
-                    timer7.Interval = int.Parse(textBox6.Text);
+                    timer7.Interval = ParseIntervalOrDefault(textBox6.Text, timer7.Interval);
                     timer7.Enabled = true;
                 }
             }
             // picture_trigger(listBox4,ref timer7, textBox6,ref myjob1, out int trriger1_temp);
         }
+        // ch:R43 P2-4 离线单图统一入口：置位+后台执行+异常复位；UI 线程只负责选图，不再直接跑 block.Run
+        private void RunOfflineDetection(Myjob job)
+        {
+            // ch:R43 P2-4 未使能/未加载方案的相机不置位，避免 getrecord 外层条件不成立时 trriger 永久卡 1
+            if (job == null || yunxing || job.trriger != 0 || job.en != 1 || job.block == null)
+                return;
+            job.trriger = 1;
+            Task.Run(() =>
+            {
+                try { getrecord(job); }
+                catch (Exception ex) { MsgErroeLog.WriteLog("离线单图检测异常 cam=" + job.path_number + ":" + ex.Message); }
+                finally { job.trriger = 0; } // ch:R43 兜底复位：getrecord 未进入执行分支时也不会卡住后续选图
+            });
+        }
+
         private void picture_trigger(ListBox list, ref System.Windows.Forms.Timer tim, TextBox text, ref Myjob myjob, out int trriger_temp)
         {
             trriger_temp = 0;
@@ -8328,15 +8284,9 @@ namespace WindowsFormsApplication1
                 else
                 {
                     myjob.img = new Bitmap(item.filePath);
-                    if (myjob.trriger == 0)
-                    {
-                        myjob.trriger = 1;
-                        // ch:P2 离线单图检测移后台：getrecord 含 Run/IO/存图，UI 线程直接跑会冻结界面（ref 参数不能进 lambda，先取本地副本）
-                        Myjob jobLocal = myjob;
-                        Task.Run(() => { try { getrecord(jobLocal); } catch (Exception ex) { MsgErroeLog.WriteLog("离线单图检测异常:" + ex.Message); } });
-                    }
+                    RunOfflineDetection(myjob);
                     trriger_temp = 1;
-                    tim.Interval = int.Parse(text.Text);
+                    tim.Interval = ParseIntervalOrDefault(text.Text, tim.Interval);
                     tim.Enabled = true;
                 }
             }
@@ -8628,6 +8578,15 @@ namespace WindowsFormsApplication1
             catch (Exception ex) { MsgErroeLog.WriteLog("复位IO输出异常:" + ex.Message); }
         }
 
+        // ch:R43 P1-8 定时器间隔输入统一解析：空串/非数字/<=0 不再抛未处理异常，非法时保留当前间隔
+        private int ParseIntervalOrDefault(string text, int fallback)
+        {
+            int v;
+            if (!int.TryParse((text ?? "").Trim(), out v))
+                return fallback;
+            return v < 1 ? 1 : v;
+        }
+
         // ch:安全 BeginInvoke（参考正常版本）：窗口销毁/释放期间静默忽略，避免抛异常
         private void SafeBeginInvoke(Action action)
         {
@@ -8662,7 +8621,7 @@ namespace WindowsFormsApplication1
                     m_bGrabbing1 = false;
                     // m_hReceiveThread.Join();
                     // ch:停止采集 | en:Stop Grabbing
-                    int nRet = m_MyCamera[0].MV_CC_StopGrabbing_NET();
+                    int nRet = StopGrabbingSafe(0);
                     if (nRet != MyCamera.MV_OK)
                     {
                         MsgErroeLog.WriteLog("停止采集失败:" + nRet);
@@ -8696,7 +8655,7 @@ namespace WindowsFormsApplication1
                     // ch:标志位设为false | en:Set flag bit false
                     m_bGrabbing2 = false;
                     // ch:停止采集 | en:Stop Grabbing
-                    int nRet = m_MyCamera[1].MV_CC_StopGrabbing_NET();
+                    int nRet = StopGrabbingSafe(1);
                     if (nRet != MyCamera.MV_OK)
                     {
                         MsgErroeLog.WriteLog("停止采集失败:" + nRet);
@@ -8731,7 +8690,7 @@ namespace WindowsFormsApplication1
                     // ch:标志位设为false | en:Set flag bit false
                     m_bGrabbing3 = false;
                     // ch:停止采集 | en:Stop Grabbing
-                    int nRet = m_MyCamera[2].MV_CC_StopGrabbing_NET();
+                    int nRet = StopGrabbingSafe(2);
                     if (nRet != MyCamera.MV_OK)
                     {
                         MsgErroeLog.WriteLog("停止采集失败:" + nRet);
@@ -8766,7 +8725,7 @@ namespace WindowsFormsApplication1
                     // ch:标志位设为false | en:Set flag bit false
                     m_bGrabbing4 = false;
                     // ch:停止采集 | en:Stop Grabbing
-                    int nRet = m_MyCamera[3].MV_CC_StopGrabbing_NET();
+                    int nRet = StopGrabbingSafe(3);
                     if (nRet != MyCamera.MV_OK)
                     {
                         MsgErroeLog.WriteLog("停止采集失败:" + nRet);
@@ -8801,7 +8760,7 @@ namespace WindowsFormsApplication1
                     // ch:标志位设为false | en:Set flag bit false
                     m_bGrabbing5 = false;
                     // ch:停止采集 | en:Stop Grabbing
-                    int nRet = m_MyCamera[4].MV_CC_StopGrabbing_NET();
+                    int nRet = StopGrabbingSafe(4);
                     if (nRet != MyCamera.MV_OK)
                     {
                         MsgErroeLog.WriteLog("停止采集失败:" + nRet);
@@ -8836,7 +8795,7 @@ namespace WindowsFormsApplication1
                     // ch:标志位设为false | en:Set flag bit false
                     m_bGrabbing6 = false;
                     // ch:停止采集 | en:Stop Grabbing
-                    int nRet = m_MyCamera[5].MV_CC_StopGrabbing_NET();
+                    int nRet = StopGrabbingSafe(5);
                     if (nRet != MyCamera.MV_OK)
                     {
                         MsgErroeLog.WriteLog("停止采集失败:" + nRet);
@@ -8871,7 +8830,7 @@ namespace WindowsFormsApplication1
                     // ch:标志位设为false | en:Set flag bit false
                     m_bGrabbing7 = false;
                     // ch:停止采集 | en:Stop Grabbing
-                    int nRet = m_MyCamera[6].MV_CC_StopGrabbing_NET();
+                    int nRet = StopGrabbingSafe(6);
                     if (nRet != MyCamera.MV_OK)
                     {
                         MsgErroeLog.WriteLog("停止采集失败:" + nRet);
@@ -8906,7 +8865,7 @@ namespace WindowsFormsApplication1
                     // ch:标志位设为false | en:Set flag bit false
                     m_bGrabbing8 = false;
                     // ch:停止采集 | en:Stop Grabbing
-                    int nRet = m_MyCamera[7].MV_CC_StopGrabbing_NET();
+                    int nRet = StopGrabbingSafe(7);
                     if (nRet != MyCamera.MV_OK)
                     {
                         MsgErroeLog.WriteLog("停止采集失败:" + nRet);
@@ -9492,14 +9451,14 @@ namespace WindowsFormsApplication1
             OpenFileDialog openFileDialog = new OpenFileDialog();
             openFileDialog.Filter = "VP vpp File|*.vpp*";
             DialogResult openFileRes = openFileDialog.ShowDialog();
+            string selectedPath = ""; // ch:R43 P2-11 只作局部路径：排空通过前不提交 path_1/label75，切换中止不污染当前方案
             if (DialogResult.OK == openFileRes)
             {
-                label75.Text = openFileDialog.FileName.Split('\\').Last();
-                path_1 = openFileDialog.FileName;
+                selectedPath = openFileDialog.FileName;
                 try
                 {
-                    wenjianjia = Path.GetDirectoryName(path_1);
-                    MsgErroeLog.WriteLog("方案文件夹:" + wenjianjia);
+                    string selectedDir = Path.GetDirectoryName(selectedPath);
+                    MsgErroeLog.WriteLog("方案文件夹:" + selectedDir);
                 }
                 catch (Exception ex)
                 {
@@ -9511,7 +9470,7 @@ namespace WindowsFormsApplication1
             StreamReader sr = null;
             try
             {
-                sr = new StreamReader(Path.GetDirectoryName(path_1) + "\\Menu.ini");
+                sr = new StreamReader(Path.GetDirectoryName(selectedPath) + "\\Menu.ini");
                 int i = 0;
                 while (sr.Peek() >= 0)
                 {
@@ -9525,7 +9484,7 @@ namespace WindowsFormsApplication1
                     FileStream stream = null;
                     try
                     {
-                        stream = File.Open(Path.GetDirectoryName(path_1) + "\\Menu.ini", FileMode.OpenOrCreate, FileAccess.Write);
+                        stream = File.Open(Path.GetDirectoryName(selectedPath) + "\\Menu.ini", FileMode.OpenOrCreate, FileAccess.Write);
                         stream.Seek(0, SeekOrigin.Begin);
                         stream.SetLength(0);
                         stream.Flush();
@@ -9548,14 +9507,14 @@ namespace WindowsFormsApplication1
                 catch (Exception ex) { MsgErroeLog.WriteLog("异常:" + ex.Message); }
 
             };
-            if (this.设置ToolStripMenuItem.DropDownItems[this.设置ToolStripMenuItem.DropDownItems.Count - 1].Text != path_1)
+            if (this.设置ToolStripMenuItem.DropDownItems[this.设置ToolStripMenuItem.DropDownItems.Count - 1].Text != selectedPath)
             {
-                StreamWriter s = new StreamWriter(Path.GetDirectoryName(path_1) + "\\Menu.ini", true);
-                s.WriteLine(path_1);
+                StreamWriter s = new StreamWriter(Path.GetDirectoryName(selectedPath) + "\\Menu.ini", true);
+                s.WriteLine(selectedPath);
                 s.Flush();
                 s.Close();
             }
-            xinghao_qiehuan("");
+            xinghao_qiehuan(selectedPath);
         }
         int qiehuanzhong = 1;
         private int _detectingCount = 0; // ch:正在执行 block.Run 的检测帧数（参考正常版本，切换方案排空等待用，Interlocked 操作）
@@ -9581,6 +9540,18 @@ namespace WindowsFormsApplication1
         private static readonly long[] _lastProcMs = new long[8];  // ch:每相机上次开始处理的时刻(ms)，封程限速用
         private void xinghao_qiehuan(string a)
         {
+            // ch:R43 P1-2 三条通讯通道在 Task.Run 里调用本方法：DeviceListAcq/bnClose_Click 等会直接操作
+            //   WinForms 集合与控件，必须先整体封送到 UI 线程（原实现被 CheckForIllegalCrossThreadCalls=false 掩盖）。
+            if (InvokeRequired)
+            {
+                try { Invoke(new Action<string>(xinghao_qiehuan), a); }
+                catch (Exception ex)
+                {
+                    MsgErroeLog.WriteLog("方案切换封送UI失败:" + ex.Message);
+                    Volatile.Write(ref qiehuanzhong, 0);
+                }
+                return;
+            }
             // ch:P2 方案切换闩改原子 check-then-set：原 if(==0){=1;} 是 TOCTOU——
             //   三条通讯通道的 cam10 事件可各自通过外层预筛(==0)后同时进到这里，导致两个 xinghao_qiehuan 并发做 Shutdown/重载。
             //   权威闩由 CompareExchange 把守；外层 7463/7700/7937 的 ==0 仅作预筛，保持不变。
@@ -9613,8 +9584,8 @@ namespace WindowsFormsApplication1
                     int bbtemp = 7368;
                     try
                     {
-                        listBox2.Visible = false;
-                        listBox2.Items.Clear();
+                        // ch:R43 P1-2 listBox2 属 UI 集合：后台 Task 内必须同步封送，避免与 UI 线程枚举/重绘并发
+                        this.Invoke(new Action(() => { listBox2.Visible = false; listBox2.Items.Clear(); }));
                         // ch:排空：等待正在执行的检测帧（block.Run）结束，防止 Shutdown 与 Run 并发（参考正常版本）
                         // ch:R36 两段式排空；ch:R38 H2 二级仍超时（累计 15s）时不再强拆——中止本次切换：不 Shutdown、不加载新方案，
                         //   旧方案保持装载（Shutdown 与在途 Run 并发是崩溃级风险，宁可让操作员重启软件）
@@ -9695,12 +9666,15 @@ namespace WindowsFormsApplication1
                             try { if (myjob1.Cogbmp != null) myjob1.Cogbmp.Close(); } catch (Exception ex) { new ErrorLog().WriteLog(ex.ToString()); }
                             myjob1.Cogbmp = new CogImageFileBMP();
                             myIndependentJob.RealTimeQueueFlush();
-                            listBox2.Items.Add("产品类型:相机1");
-                            listBox2.Items.Add("检测数:");
-                            listBox2.Items.Add("OK数:");
-                            listBox2.Items.Add("NG数:");
-                            listBox2.Items.Add("合格率:");
-                            listBox2.Items.Add("~~~~~~~~~");
+                            this.Invoke(new Action(() =>
+                            {
+                                listBox2.Items.Add("产品类型:相机1");
+                                listBox2.Items.Add("检测数:");
+                                listBox2.Items.Add("OK数:");
+                                listBox2.Items.Add("NG数:");
+                                listBox2.Items.Add("合格率:");
+                                listBox2.Items.Add("~~~~~~~~~");
+                            }));
 
                             group_1 = myjob1.job.VisionTool as CogToolGroup;
                             block_1 = group_1.Tools["CogToolBlock1"] as CogToolBlock;
@@ -10073,6 +10047,9 @@ namespace WindowsFormsApplication1
                         //CogFrameGrabberGigEs mf2 = new CogFrameGrabberGigEs();//获取已连接相机列表
                         // if (mf2.Count == 0)
                         //    MessageBox.Show("没有连接到相机！");
+                        // ch:R43 P1-2 打开设备/下发参数/启动运行整段都操作 WinForms 控件与相机状态，统一封送 UI 线程执行
+                        this.Invoke(new Action(() =>
+                        {
                         bnOpen_Click(null, null);
 
                         //this.FormBorderStyle = FormBorderStyle.FixedSingle;
@@ -10170,6 +10147,7 @@ namespace WindowsFormsApplication1
                         comboBox38_TextChanged(null, null);
 
                         button1_Click(null, null);
+                        })); // ch:R43 P1-2 UI 封送段结束
                         Volatile.Write(ref qiehuanzhong, 0); // ch:P2 统一 Volatile 族
                         // display();
                     }
@@ -10266,14 +10244,14 @@ namespace WindowsFormsApplication1
         {
             trriger1_temp = 0;
             timer7.Enabled = false;
-            StopAllIoPulses();
+            StopAllIoPulsesFromDemoStop(); // ch:R43 P1-5 运行中不关闭全局脉冲
         }
 
         private void textBox6_TextChanged(object sender, EventArgs e)
         {
             try
             {
-                timer7.Interval = int.Parse(textBox6.Text);
+                timer7.Interval = ParseIntervalOrDefault(textBox6.Text, timer7.Interval);
             }
             catch (Exception ex) { MsgErroeLog.WriteLog("异常:" + ex.Message); }
         }
@@ -10327,7 +10305,7 @@ namespace WindowsFormsApplication1
         {
             trriger2_temp = 0;
             timer8.Enabled = false;
-            StopAllIoPulses();
+            StopAllIoPulsesFromDemoStop(); // ch:R43 P1-5 运行中不关闭全局脉冲
         }
 
 
@@ -10354,14 +10332,14 @@ namespace WindowsFormsApplication1
         {
             trriger3_temp = 0;
             timer10.Enabled = false;
-            StopAllIoPulses();
+            StopAllIoPulsesFromDemoStop(); // ch:R43 P1-5 运行中不关闭全局脉冲
         }
 
         private void button18_Click(object sender, EventArgs e)
         {
             trriger4_temp = 0;
             timer11.Enabled = false;
-            StopAllIoPulses();
+            StopAllIoPulsesFromDemoStop(); // ch:R43 P1-5 运行中不关闭全局脉冲
         }
 
         private void timer11_Tick(object sender, EventArgs e)
@@ -10714,7 +10692,7 @@ namespace WindowsFormsApplication1
                                 // ch:相机已打开过，先停流关闭销毁，避免重复打开同一声明 | en:Close old handle first
                                 try
                                 {
-                                    m_MyCamera[int.Parse(nnn)].MV_CC_StopGrabbing_NET();
+                                    StopGrabbingSafe(int.Parse(nnn));
                                     m_MyCamera[int.Parse(nnn)].MV_CC_CloseDevice_NET();
                                     m_MyCamera[int.Parse(nnn)].MV_CC_DestroyDevice_NET();
                                 }
@@ -12139,6 +12117,7 @@ namespace WindowsFormsApplication1
         //    外部清理（bnClose/切换）用 ReleaseBmpSlot，在途帧跳过，由在途流程结束时自行释放。
         private readonly object[] _bmpLocks = new object[8] { new object(), new object(), new object(), new object(), new object(), new object(), new object(), new object() };
         private readonly int[] _bmpInFlight = new int[8];
+        private readonly int[] _cbActive = new int[8]; // ch:R43 P0-1 正在执行的取流回调数：关闭/释放前等其归零，避免用已销毁的 SDK 帧缓冲
 
         private void ReleaseBmpSlotInternal(int idx, bool isOwner)
         {
@@ -12653,6 +12632,7 @@ namespace WindowsFormsApplication1
                 if (nIndex < 0 || nIndex > 7)
                     return;
                 perfIdx = nIndex;
+                System.Threading.Interlocked.Increment(ref _cbActive[nIndex]); // ch:R43 P0-1 登记回调在途，关闭路径据此等待
                 ++m_nFrames[nIndex];
                 if (bmp[nIndex] != null || System.Threading.Volatile.Read(ref _detectBusy[nIndex]) != 0)
                 {
@@ -12711,6 +12691,15 @@ namespace WindowsFormsApplication1
                         m_stFrameInfo[nIndex] = pFrameInfo;
                         m_stFrameInfo[nIndex].enPixelType = MyCamera.MvGvspPixelType.PixelType_Gvsp_Mono8;
                         m_stFrameInfo[nIndex].nFrameLen = (uint)pFrameInfo.nWidth * pFrameInfo.nHeight;
+                        // ch:R43 P0-1 Bitmap 构造+登记必须在 m_BufForSaveImageLock 内完成：
+                        //   原实现在锁外构造、锁内才置 _bmpInFlight，关闭路径可在"拷贝完成→置在途标志"之间 FreeHGlobal，
+                        //   随后 Bitmap 包装已释放的原生内存 → 关窗/切换时偶发 GDI+ AV
+                        Bitmap tmpBmp = new Bitmap(pFrameInfo.nWidth, pFrameInfo.nHeight, pFrameInfo.nWidth * 1, PixelFormat.Format8bppIndexed, pData);
+                        ColorPalette cp = tmpBmp.Palette;
+                        for (int i = 0; i < 256; i++)
+                            cp.Entries[i] = Color.FromArgb(i, i, i);
+                        tmpBmp.Palette = cp;
+                        lock (_bmpLocks[nIndex]) { bmp[nIndex] = tmpBmp; _bmpInFlight[nIndex] = 1; }
                     }
                 }
                 else if (IsColorData(pFrameInfo.enPixelType))
@@ -12741,34 +12730,23 @@ namespace WindowsFormsApplication1
                         // ch:P2-13 彩色缓冲恒为 BGR8（BGR8 直出；RGB8/其余格式均经 ConvertToRGB 转 BGR8），存图一律按 BGR8 落库
                             m_stFrameInfo[nIndex].enPixelType = MyCamera.MvGvspPixelType.PixelType_Gvsp_BGR8_Packed;
                         m_stFrameInfo[nIndex].nFrameLen = (uint)pFrameInfo.nWidth * pFrameInfo.nHeight * 3;
+                        // ch:R43 P0-1 同上：构造与登记都在 m_BufForSaveImageLock 内，消除关闭释放缓冲的 TOCTOU
+                        try
+                        {
+                            Bitmap tmpBmp = new Bitmap(pFrameInfo.nWidth, pFrameInfo.nHeight, pFrameInfo.nWidth * 3, PixelFormat.Format24bppRgb, pData);
+                            lock (_bmpLocks[nIndex]) { bmp[nIndex] = tmpBmp; _bmpInFlight[nIndex] = 1; }
+                        }
+                        catch (Exception ex)
+                        {
+                            MsgErroeLog.WriteLog("Bitmap 构造失败 相机" + (nIndex + 1) + ":" + ex.Message);
+                            return;
+                        }
                     }
                 }
                 else
                 {
                     MsgErroeLog.WriteLog("No such pixel type!");
                     return;
-                }
-                // ch:Bitmap 构造完整后再在锁内登记（旧实现先赋值再设调色板，窗口期可被其他线程 Dispose）
-                if (IsMonoData(pFrameInfo.enPixelType))
-                {
-                    Bitmap tmpBmp = new Bitmap(pFrameInfo.nWidth, pFrameInfo.nHeight, pFrameInfo.nWidth * 1, PixelFormat.Format8bppIndexed, pData);
-                    ColorPalette cp = tmpBmp.Palette;
-                    for (int i = 0; i < 256; i++)
-                        cp.Entries[i] = Color.FromArgb(i, i, i);
-                    tmpBmp.Palette = cp;
-                    lock (_bmpLocks[nIndex]) { bmp[nIndex] = tmpBmp; _bmpInFlight[nIndex] = 1; }
-                }
-                else
-                {
-                    try
-                    {
-                        Bitmap tmpBmp = new Bitmap(pFrameInfo.nWidth, pFrameInfo.nHeight, pFrameInfo.nWidth * 3, PixelFormat.Format24bppRgb, pData);
-                        lock (_bmpLocks[nIndex]) { bmp[nIndex] = tmpBmp; _bmpInFlight[nIndex] = 1; }
-                    }
-                    catch
-                    {
-                        MsgErroeLog.WriteLog("Write File Fail!");
-                    }
                 }
                 if (bmp[nIndex] != null)
                 {
@@ -12816,6 +12794,7 @@ namespace WindowsFormsApplication1
                     System.Threading.Interlocked.Add(ref _perfCbTicks[perfIdx],
                         System.Diagnostics.Stopwatch.GetTimestamp() - perfT0);
                     _perfCbCount[perfIdx]++;
+                    System.Threading.Interlocked.Decrement(ref _cbActive[perfIdx]); // ch:R43 P0-1 回调出栈
                 }
                 PerfReportIfNeeded();
             }
@@ -13124,8 +13103,16 @@ namespace WindowsFormsApplication1
                 m_bGrabbing1 = false;
                 //  m_hReceiveThread.Join();
 
+                // ch:R43 P1-8 相机未打开时不再走 SDK 调用弹"停止失败"框（原实现 NRE 被裸 catch 吞掉、按钮态错乱）
+                if (m_MyCamera[0] == null)
+                {
+                    MsgErroeLog.WriteLog("相机1未打开，忽略停止采集");
+                    bnStartGrab1.Enabled = true;
+                    bnStopGrab1.Enabled = false;
+                    return;
+                }
                 // ch:停止采集 | en:Stop Grabbing
-                int nRet = m_MyCamera[0].MV_CC_StopGrabbing_NET();
+                int nRet = StopGrabbingSafe(0);
                 if (nRet != MyCamera.MV_OK)
                 {
                     ShowErrorMsg("Stop Grabbing Fail!", nRet);
@@ -13133,9 +13120,11 @@ namespace WindowsFormsApplication1
                 bnStartGrab1.Enabled = true;
                 bnStopGrab1.Enabled = false;
             }
-            catch
+            catch (Exception ex)
             {
-                MsgErroeLog.WriteLog("相机1停止采集");
+                bnStartGrab1.Enabled = true; // ch:R43 异常也复位按钮态，避免"无法再次开始采集"
+                bnStopGrab1.Enabled = false;
+                MsgErroeLog.WriteLog("相机1停止采集异常:" + ex.Message);
             }
         }
 
@@ -13182,7 +13171,20 @@ namespace WindowsFormsApplication1
                     {
                         if (m_MyCamera[i] != null)
                         {
-                            int r1 = m_MyCamera[i].MV_CC_StopGrabbing_NET();
+                            int r1 = StopGrabbingSafe(i);
+                            // ch:R43 P0-1 StopGrabbing 返回不保证回调已出栈：等本相机回调归零后再 Close/Destroy，
+                            //   否则回调可能仍在使用 SDK 帧缓冲/私有 HGlobal
+                            int cbWait = 0;
+                            while (System.Threading.Volatile.Read(ref _cbActive[i]) != 0 && cbWait < 200)
+                            {
+                                Thread.Sleep(10);
+                                cbWait++;
+                            }
+                            if (System.Threading.Volatile.Read(ref _cbActive[i]) != 0)
+                            {
+                                MsgErroeLog.WriteLog("关闭相机" + (i + 1) + "：回调2秒未退出，跳过 Close/Destroy 以避免释放中崩溃");
+                                continue;
+                            }
                             int r2 = m_MyCamera[i].MV_CC_CloseDevice_NET();
                             int r3 = m_MyCamera[i].MV_CC_DestroyDevice_NET();
                             m_MyCamera[i] = null; // ch:释放后置空，防止悬垂引用；日志记录释放结果便于排查
@@ -13218,7 +13220,8 @@ namespace WindowsFormsApplication1
                     // ch:P0-2 必须持 bufLock：回调热路径在同一锁下向该缓冲 CopyMemory，StopGrabbing 返回不保证回调已出栈
                     lock (m_BufForSaveImageLock[i])
                     {
-                        if (m_pSaveImageBuf[i] != IntPtr.Zero && System.Threading.Volatile.Read(ref _bmpInFlight[i]) == 0)
+                        if (m_pSaveImageBuf[i] != IntPtr.Zero && System.Threading.Volatile.Read(ref _bmpInFlight[i]) == 0
+                            && System.Threading.Volatile.Read(ref _cbActive[i]) == 0) // ch:R43 P0-1 回调在途也不释放
                         {
                             Marshal.FreeHGlobal(m_pSaveImageBuf[i]);
                             m_pSaveImageBuf[i] = IntPtr.Zero;
@@ -13349,6 +13352,33 @@ namespace WindowsFormsApplication1
             catch (Exception ex) { MsgErroeLog.WriteLog("异常:" + ex.Message); }
         }
 
+        // ch:R43 P0-1 通讯触发统一入口：null 复核与 SDK 调用都在每相机锁内，
+        //   与 timer2 断线重连的 Stop/Close/Destroy/Create 互斥，避免同一句柄被并发使用导致原生崩溃。
+        private int TriggerSoftwareSafe(int idx)
+        {
+            if (idx < 0 || idx > 7)
+                return MyCamera.MV_E_PARAMETER;
+            lock (_cameraLocks[idx])
+            {
+                if (m_MyCamera[idx] == null)
+                    return MyCamera.MV_E_PARAMETER;
+                return m_MyCamera[idx].MV_CC_SetCommandValue_NET("TriggerSoftware");
+            }
+        }
+
+        // ch:R43 P1-3 停止采集统一入口：持每相机锁，与断线重连/关闭路径互斥。
+        private int StopGrabbingSafe(int idx)
+        {
+            if (idx < 0 || idx > 7)
+                return MyCamera.MV_E_PARAMETER;
+            lock (_cameraLocks[idx])
+            {
+                if (m_MyCamera[idx] == null)
+                    return MyCamera.MV_E_PARAMETER;
+                return m_MyCamera[idx].MV_CC_StopGrabbing_NET();
+            }
+        }
+
         // ch:软触发统一入口：先校验相机已打开且正在采集中，再发触发命令；
         // ch:失败时给出可读提示（0x80000203=MV_E_ENDPOINT_INVALID 端点错误：常见为相机与电脑跨网段、会话残留或相机未处于触发模式/未采流）
         private void TriggerCamera(int idx)
@@ -13375,7 +13405,7 @@ namespace WindowsFormsApplication1
                 MessageBox.Show("相机" + (idx + 1) + "未开始采集，请先启动采集再触发", "提示", MessageBoxButtons.OK, MessageBoxIcon.Warning);
                 return;
             }
-            int nRet = m_MyCamera[idx].MV_CC_SetCommandValue_NET("TriggerSoftware");
+            int nRet = TriggerSoftwareSafe(idx); // ch:R43 P0-1 与其他触发入口共用持锁封装，防与后台重连并发
             if (nRet != MyCamera.MV_OK)
             {
                 if (nRet == MyCamera.MV_E_ACCESS_DENIED)
@@ -13727,33 +13757,32 @@ namespace WindowsFormsApplication1
         // ch:点击保存图片按钮 | en:Click on Save Image Button
         private void bnSaveBmp_Click(object sender, EventArgs e)
         {
-            for (int i = 0; i < m_nCanOpenDeviceNum; ++i)
+            for (int i = 0; i < 8; ++i)
             {
+                // ch:R43 P2-6 原按 m_nCanOpenDeviceNum 遍历却按槽位取设备：部分相机未打开时 i 可能指向 null 槽位，
+                //   或把 A 相机的缓冲存成 B 相机文件。改为固定 8 槽位并逐槽判空/判缓冲。
+                if (m_MyCamera[i] == null)
+                    continue;
                 MyCamera.MV_SAVE_IMG_TO_FILE_PARAM stSaveParam = new MyCamera.MV_SAVE_IMG_TO_FILE_PARAM();
                 lock (m_BufForSaveImageLock[i])
                 {
-                    //if (m_stFrameInfo[i].nFrameLen == 0)
-                    //{
-                    //    richTextBox.Text += String.Format("No.{0} save image failed! No data!\r\n", (i + 1).ToString());
-                    //    continue;
-                    //}
+                    if (m_pSaveImageBuf[i] == IntPtr.Zero || m_stFrameInfo[i].nFrameLen == 0 || m_stFrameInfo[i].nWidth == 0 || m_stFrameInfo[i].nHeight == 0)
+                    {
+                        MsgErroeLog.WriteLog("保存图片跳过：相机" + (i + 1) + " 无有效帧缓冲");
+                        continue;
+                    }
                     stSaveParam.enImageType = MyCamera.MV_SAVE_IAMGE_TYPE.MV_Image_Bmp;
                     stSaveParam.enPixelType = m_stFrameInfo[i].enPixelType;
                     stSaveParam.pData = m_pSaveImageBuf[i];
                     stSaveParam.nDataLen = m_stFrameInfo[i].nFrameLen;
                     stSaveParam.nHeight = m_stFrameInfo[i].nHeight;
                     stSaveParam.nWidth = m_stFrameInfo[i].nWidth;
-                    stSaveParam.pImagePath = "Dev" + i.ToString() + "_Image_w" + stSaveParam.nWidth.ToString() + "_h" + stSaveParam.nHeight.ToString() + "_fn" + m_stFrameInfo[i].nFrameNum.ToString() + ".bmp";
-                    //stSaveParam.nQuality = 80;//存Jpeg时有效
+                    // ch:R43 P2-6 文件名加时间戳：原仅用帧号，跨天/重启后同帧号直接覆盖旧图
+                    stSaveParam.pImagePath = "Dev" + (i + 1).ToString() + "_" + DateTime.Now.ToString("yyyyMMdd_HHmmss_fff")
+                        + "_w" + stSaveParam.nWidth.ToString() + "_h" + stSaveParam.nHeight.ToString() + "_fn" + m_stFrameInfo[i].nFrameNum.ToString() + ".bmp";
                     int nRet = m_MyCamera[i].MV_CC_SaveImageToFile_NET(ref stSaveParam);
-                    //if (MyCamera.MV_OK != nRet)
-                    //{
-                    //    richTextBox.Text += String.Format("No.{0} save image failed! nRet=0x{1}\r\n", (i + 1).ToString(), nRet.ToString("X"));
-                    //}
-                    //else
-                    //{
-                    //    richTextBox.Text += String.Format("No.{0} save image Succeed!\r\n", (i + 1).ToString());
-                    //}
+                    if (MyCamera.MV_OK != nRet)
+                        MsgErroeLog.WriteLog("保存图片失败 相机" + (i + 1) + " nRet=0x" + nRet.ToString("X8") + " path=" + stSaveParam.pImagePath);
                 }
             }
         }
@@ -13783,12 +13812,11 @@ namespace WindowsFormsApplication1
                     myjob2.img = new Bitmap(item.filePath);
                     if (myjob2.trriger == 0)
                     {
-                        myjob2.trriger = 1;
-                        getrecord(myjob2);
+                        RunOfflineDetection(myjob2);
                     }
                     _ioPulseEnabled = true;
                     trriger2_temp = 1;
-                    timer8.Interval = int.Parse(textBox9.Text);
+                    timer8.Interval = ParseIntervalOrDefault(textBox9.Text, timer8.Interval);
                     timer8.Enabled = true;
                 }
             }
@@ -13800,7 +13828,7 @@ namespace WindowsFormsApplication1
         {
             trriger2_temp = 0;
             timer8.Enabled = false;
-            StopAllIoPulses();
+            StopAllIoPulsesFromDemoStop(); // ch:R43 P1-5 运行中不关闭全局脉冲
         }
 
         private void comboBox4_SelectedIndexChanged_1(object sender, EventArgs e)
@@ -13866,8 +13894,7 @@ namespace WindowsFormsApplication1
                 {
                     if (myjob2.trriger == 0)
                     {
-                        myjob2.trriger = 1;
-                        getrecord(myjob2);
+                        RunOfflineDetection(myjob2);
                     }
                 }
             }
@@ -14027,7 +14054,7 @@ namespace WindowsFormsApplication1
                     // ch:标志位设为false | en:Set flag bit false
                     m_bGrabbing2 = false;
                     // ch:停止采集 | en:Stop Grabbing
-                    int nRet = m_MyCamera[1].MV_CC_StopGrabbing_NET();
+                    int nRet = StopGrabbingSafe(1);
                     if (nRet != MyCamera.MV_OK)
                     {
                         MsgErroeLog.WriteLog("停止采集失败:" + nRet);
@@ -14145,12 +14172,11 @@ namespace WindowsFormsApplication1
                     myjob3.img = new Bitmap(item.filePath);
                     if (myjob3.trriger == 0)
                     {
-                        myjob3.trriger = 1;
-                        getrecord(myjob3);
+                        RunOfflineDetection(myjob3);
                     }
                     _ioPulseEnabled = true;
                     trriger3_temp = 1;
-                    timer11.Interval = int.Parse(textBox11.Text);
+                    timer11.Interval = ParseIntervalOrDefault(textBox11.Text, timer11.Interval);
                     timer11.Enabled = true;
                 }
             }
@@ -14171,12 +14197,11 @@ namespace WindowsFormsApplication1
                     myjob4.img = new Bitmap(item.filePath);
                     if (myjob4.trriger == 0)
                     {
-                        myjob4.trriger = 1;
-                        getrecord(myjob4);
+                        RunOfflineDetection(myjob4);
                     }
                     _ioPulseEnabled = true;
                     trriger4_temp = 1;
-                    timer12.Interval = int.Parse(textBox16.Text);
+                    timer12.Interval = ParseIntervalOrDefault(textBox16.Text, timer12.Interval);
                     timer12.Enabled = true;
                 }
             }
@@ -14208,14 +14233,14 @@ namespace WindowsFormsApplication1
         {
             trriger3_temp = 0;
             timer11.Enabled = false;
-            StopAllIoPulses();
+            StopAllIoPulsesFromDemoStop(); // ch:R43 P1-5 运行中不关闭全局脉冲
         }
 
         private void button37_Click(object sender, EventArgs e)
         {
             trriger4_temp = 0;
             timer12.Enabled = false;
-            StopAllIoPulses();
+            StopAllIoPulsesFromDemoStop(); // ch:R43 P1-5 运行中不关闭全局脉冲
         }
 
         private void comboBox5_SelectedIndexChanged(object sender, EventArgs e)
@@ -14323,8 +14348,7 @@ namespace WindowsFormsApplication1
                 {
                     if (myjob3.trriger == 0)
                     {
-                        myjob3.trriger = 1;
-                        getrecord(myjob3);
+                        RunOfflineDetection(myjob3);
                     }
                 }
             }
@@ -14342,8 +14366,7 @@ namespace WindowsFormsApplication1
                 {
                     if (myjob4.trriger == 0)
                     {
-                        myjob4.trriger = 1;
-                        getrecord(myjob4);
+                        RunOfflineDetection(myjob4);
                     }
                 }
             }
@@ -14593,7 +14616,7 @@ namespace WindowsFormsApplication1
                     // ch:标志位设为false | en:Set flag bit false
                     m_bGrabbing3 = false;
                     // ch:停止采集 | en:Stop Grabbing
-                    int nRet = m_MyCamera[2].MV_CC_StopGrabbing_NET();
+                    int nRet = StopGrabbingSafe(2);
                     if (nRet != MyCamera.MV_OK)
                     {
                         MsgErroeLog.WriteLog("停止采集失败:" + nRet);
@@ -14615,7 +14638,7 @@ namespace WindowsFormsApplication1
                     // ch:标志位设为false | en:Set flag bit false
                     m_bGrabbing4 = false;
                     // ch:停止采集 | en:Stop Grabbing
-                    int nRet = m_MyCamera[3].MV_CC_StopGrabbing_NET();
+                    int nRet = StopGrabbingSafe(3);
                     if (nRet != MyCamera.MV_OK)
                     {
                         MsgErroeLog.WriteLog("停止采集失败:" + nRet);
@@ -14698,7 +14721,8 @@ namespace WindowsFormsApplication1
             {
                 try
                 {
-                    string[] time111 = listBox1.SelectedItem.ToString().Split(':');
+                    // ch:R43 P1-8 原复制粘贴读 listBox1（相机1）选中项，相机3 打开的是相机1 的图
+                    string[] time111 = listBox7.SelectedItem.ToString().Split(':');
                     int ttt1 = int.Parse(time111[0] + time111[1] + time111[2]);
                     string ttt2 = time111[3];
                     int ttt3 = int.Parse(time111[4]);
@@ -14721,7 +14745,8 @@ namespace WindowsFormsApplication1
             {
                 try
                 {
-                    string[] time111 = listBox1.SelectedItem.ToString().Split(':');
+                    // ch:R43 P1-8 原复制粘贴读 listBox1（相机1）选中项，相机4 打开的是相机1 的图
+                    string[] time111 = listBox6.SelectedItem.ToString().Split(':');
                     int ttt1 = int.Parse(time111[0] + time111[1] + time111[2]);
                     string ttt2 = time111[3];
                     int ttt3 = int.Parse(time111[4]);
@@ -16338,45 +16363,45 @@ namespace WindowsFormsApplication1
         {
             try
             {
-                string[] time111 = temptime.Split(':');
-                int ttt1 = int.Parse(time111[0] + time111[1] + time111[2]);
-                if (FileLength < zhangshu || cuntu == 1)
+                // ch:R43 P1-1 时间戳解析失败不再静默吞成"存图方法"：连续运行原 temptime 为空串，整帧图丢失
+                string[] time111 = (temptime ?? "").Split(':');
+                int ttt1;
+                if (time111.Length < 3 || !int.TryParse(time111[0] + time111[1] + time111[2], out ttt1))
                 {
-                    // myjob3.number = 1;
-                    // ch:同一相机相邻帧的存图任务并发（Task.Run 不保序）会争用同一个 CogImageFileBMP，加锁串行化
-                    lock (cogbmp)
+                    MsgErroeLog.WriteLog("存图时间戳无效(" + (temptime ?? "null") + ")，本帧跳过存图 cam=" + JobNumber);
+                    return;
+                }
+                // ch:R43 P2-2 判定/扫描/删除/写入整体串行：同相机相邻帧存图任务并发时会争用同一"最旧文件"，
+                //   原实现在锁外删除，第二个任务删除失败后本帧图直接丢失
+                lock (cogbmp)
+                {
+                    if (FileLength < zhangshu || cuntu == 1)
                     {
                         cogbmp.Open(Jobpath + day1 + "\\" + cuowuma + ttt1 + "#" + JobNumber + ".bmp", CogImageFileModeConstants.Write);
                         cogbmp.Append(cogimage);
                         cogbmp.Close();
                     }
-                }
-                else
-                {
-
-                    double dt2 = 0;
-                    double dt3 = 0;
-                    string ffff = "f";
-                    DateTime dt1;
-                    foreach (string f in Directory.GetFileSystemEntries(Jobpath + day1))
+                    else
                     {
-                        if (File.Exists(f))
+                        double dt2 = 0;
+                        double dt3 = 0;
+                        string ffff = "f";
+                        foreach (string f in Directory.GetFileSystemEntries(Jobpath + day1))
                         {
-                            dt1 = Directory.GetCreationTime(f);
-                            dt2 = DateTime.Now.Subtract(dt1).TotalMinutes;
-                            if (dt2 > dt3)
+                            if (File.Exists(f))
                             {
-                                dt3 = dt2;
-                                ffff = f;
+                                DateTime dt1 = Directory.GetCreationTime(f);
+                                dt2 = DateTime.Now.Subtract(dt1).TotalMinutes;
+                                if (dt2 > dt3)
+                                {
+                                    dt3 = dt2;
+                                    ffff = f;
+                                }
                             }
                         }
-                    }
-                    //如果有子文件删除文件
-                    if (ffff != "f")
-                        File.Delete(ffff);
-                    // ch:同一相机相邻帧的存图任务并发（Task.Run 不保序）会争用同一个 CogImageFileBMP，加锁串行化
-                    lock (cogbmp)
-                    {
+                        //如果有子文件删除文件
+                        if (ffff != "f")
+                            File.Delete(ffff);
                         cogbmp.Open(Jobpath + day1 + "\\" + cuowuma + ttt1 + "#" + JobNumber + ".bmp", CogImageFileModeConstants.Write);
                         cogbmp.Append(cogimage);
                         cogbmp.Close();
@@ -16865,12 +16890,11 @@ namespace WindowsFormsApplication1
                     myjob5.img = new Bitmap(item.filePath);
                     if (myjob5.trriger == 0)
                     {
-                        myjob5.trriger = 1;
-                        getrecord(myjob5);
+                        RunOfflineDetection(myjob5);
                     }
                     _ioPulseEnabled = true;
                     trriger5_temp = 1;
-                    timer13.Interval = int.Parse(textBox21.Text);
+                    timer13.Interval = ParseIntervalOrDefault(textBox21.Text, timer13.Interval);
                     timer13.Enabled = true;
                 }
             }
@@ -16891,12 +16915,11 @@ namespace WindowsFormsApplication1
                     myjob6.img = new Bitmap(item.filePath);
                     if (myjob6.trriger == 0)
                     {
-                        myjob6.trriger = 1;
-                        getrecord(myjob6);
+                        RunOfflineDetection(myjob6);
                     }
                     _ioPulseEnabled = true;
                     trriger6_temp = 1;
-                    timer14.Interval = int.Parse(textBox27.Text);
+                    timer14.Interval = ParseIntervalOrDefault(textBox27.Text, timer14.Interval);
                     timer14.Enabled = true;
                 }
             }
@@ -16917,12 +16940,11 @@ namespace WindowsFormsApplication1
                     myjob7.img = new Bitmap(item.filePath);
                     if (myjob7.trriger == 0)
                     {
-                        myjob7.trriger = 1;
-                        getrecord(myjob7);
+                        RunOfflineDetection(myjob7);
                     }
                     _ioPulseEnabled = true;
                     trriger7_temp = 1;
-                    timer15.Interval = int.Parse(textBox33.Text);
+                    timer15.Interval = ParseIntervalOrDefault(textBox33.Text, timer15.Interval);
                     timer15.Enabled = true;
                 }
             }
@@ -16943,12 +16965,11 @@ namespace WindowsFormsApplication1
                     myjob8.img = new Bitmap(item.filePath);
                     if (myjob8.trriger == 0)
                     {
-                        myjob8.trriger = 1;
-                        getrecord(myjob8);
+                        RunOfflineDetection(myjob8);
                     }
                     _ioPulseEnabled = true;
                     trriger8_temp = 1;
-                    timer16.Interval = int.Parse(textBox39.Text);
+                    timer16.Interval = ParseIntervalOrDefault(textBox39.Text, timer16.Interval);
                     timer16.Enabled = true;
                 }
             }
@@ -16958,28 +16979,28 @@ namespace WindowsFormsApplication1
         {
             trriger5_temp = 0;
             timer13.Enabled = false;
-            StopAllIoPulses();
+            StopAllIoPulsesFromDemoStop(); // ch:R43 P1-5 运行中不关闭全局脉冲
         }
 
         private void button52_Click(object sender, EventArgs e)
         {
             trriger6_temp = 0;
             timer14.Enabled = false;
-            StopAllIoPulses();
+            StopAllIoPulsesFromDemoStop(); // ch:R43 P1-5 运行中不关闭全局脉冲
         }
 
         private void button65_Click(object sender, EventArgs e)
         {
             trriger7_temp = 0;
             timer15.Enabled = false;
-            StopAllIoPulses();
+            StopAllIoPulsesFromDemoStop(); // ch:R43 P1-5 运行中不关闭全局脉冲
         }
 
         private void button78_Click(object sender, EventArgs e)
         {
             trriger8_temp = 0;
             timer16.Enabled = false;
-            StopAllIoPulses();
+            StopAllIoPulsesFromDemoStop(); // ch:R43 P1-5 运行中不关闭全局脉冲
         }
 
         private void comboBox25_SelectedIndexChanged(object sender, EventArgs e)
@@ -17180,8 +17201,7 @@ namespace WindowsFormsApplication1
                 if (yunxing == false)
                 {
                     _ioPulseEnabled = true;
-                    myjob5.trriger = 1;
-                    getrecord(myjob5);
+                    RunOfflineDetection(myjob5);
                 }
             }
             catch (Exception ex) { MsgErroeLog.WriteLog("异常:" + ex.Message); }
@@ -17198,8 +17218,7 @@ namespace WindowsFormsApplication1
                 {
                     if (myjob6.trriger == 0)
                     {
-                        myjob6.trriger = 1;
-                        getrecord(myjob6);
+                        RunOfflineDetection(myjob6);
                     }
                 }
             }
@@ -17217,8 +17236,7 @@ namespace WindowsFormsApplication1
                 {
                     if (myjob7.trriger == 0)
                     {
-                        myjob7.trriger = 1;
-                        getrecord(myjob7);
+                        RunOfflineDetection(myjob7);
                     }
                 }
             }
@@ -17236,8 +17254,7 @@ namespace WindowsFormsApplication1
                 {
                     if (myjob8.trriger == 0)
                     {
-                        myjob8.trriger = 1;
-                        getrecord(myjob8);
+                        RunOfflineDetection(myjob8);
                     }
                 }
             }
@@ -17897,7 +17914,7 @@ namespace WindowsFormsApplication1
                     // ch:标志位设为false | en:Set flag bit false
                     m_bGrabbing5 = false;
                     // ch:停止采集 | en:Stop Grabbing
-                    int nRet = m_MyCamera[4].MV_CC_StopGrabbing_NET();
+                    int nRet = StopGrabbingSafe(4);
                     if (nRet != MyCamera.MV_OK)
                     {
                         MsgErroeLog.WriteLog("停止采集失败:" + nRet);
@@ -17919,7 +17936,7 @@ namespace WindowsFormsApplication1
                     // ch:标志位设为false | en:Set flag bit false
                     m_bGrabbing6 = false;
                     // ch:停止采集 | en:Stop Grabbing
-                    int nRet = m_MyCamera[5].MV_CC_StopGrabbing_NET();
+                    int nRet = StopGrabbingSafe(5);
                     if (nRet != MyCamera.MV_OK)
                     {
                         MsgErroeLog.WriteLog("停止采集失败:" + nRet);
@@ -17941,7 +17958,7 @@ namespace WindowsFormsApplication1
                     // ch:标志位设为false | en:Set flag bit false
                     m_bGrabbing7 = false;
                     // ch:停止采集 | en:Stop Grabbing
-                    int nRet = m_MyCamera[6].MV_CC_StopGrabbing_NET();
+                    int nRet = StopGrabbingSafe(6);
                     if (nRet != MyCamera.MV_OK)
                     {
                         MsgErroeLog.WriteLog("停止采集失败:" + nRet);
@@ -17963,7 +17980,7 @@ namespace WindowsFormsApplication1
                     // ch:标志位设为false | en:Set flag bit false
                     m_bGrabbing8 = false;
                     // ch:停止采集 | en:Stop Grabbing
-                    int nRet = m_MyCamera[7].MV_CC_StopGrabbing_NET();
+                    int nRet = StopGrabbingSafe(7);
                     if (nRet != MyCamera.MV_OK)
                     {
                         MsgErroeLog.WriteLog("停止采集失败:" + nRet);
@@ -18779,7 +18796,7 @@ namespace WindowsFormsApplication1
             {
                 try
                 {
-                    myjob1.block = (CogToolBlock)CogSerializer.LoadObjectFromFile(wenjianjia + "\\1\\" + comboBox7.SelectedItem.ToString());
+                    lock (myjob1.blockLock) { myjob1.block = (CogToolBlock)CogSerializer.LoadObjectFromFile(wenjianjia + "\\1\\" + comboBox7.SelectedItem.ToString()); } // ch:R43 P2-3 替换指针与 Run 串行
                     canshuIni.WriteString("camera1", "fen", comboBox7.SelectedItem.ToString());
                     MessageBox.Show("切换流程1:" + comboBox7.SelectedItem.ToString() + "成功");
                     sync_job_meta(myjob1);
@@ -18838,7 +18855,7 @@ namespace WindowsFormsApplication1
             {
                 try
                 {
-                    myjob2.block = (CogToolBlock)CogSerializer.LoadObjectFromFile(wenjianjia + "\\2\\" + comboBox9.SelectedItem.ToString());
+                    lock (myjob2.blockLock) { myjob2.block = (CogToolBlock)CogSerializer.LoadObjectFromFile(wenjianjia + "\\2\\" + comboBox9.SelectedItem.ToString()); } // ch:R43 P2-3 替换指针与 Run 串行
                     canshuIni.WriteString("camera2", "fen", comboBox9.SelectedItem.ToString());
                     MessageBox.Show("切换流程2:" + comboBox9.SelectedItem.ToString() + "成功");
                     sync_job_meta(myjob2);
@@ -18857,7 +18874,7 @@ namespace WindowsFormsApplication1
             {
                 try
                 {
-                    myjob3.block = (CogToolBlock)CogSerializer.LoadObjectFromFile(wenjianjia + "\\3\\" + comboBox10.SelectedItem.ToString());
+                    lock (myjob3.blockLock) { myjob3.block = (CogToolBlock)CogSerializer.LoadObjectFromFile(wenjianjia + "\\3\\" + comboBox10.SelectedItem.ToString()); } // ch:R43 P2-3 替换指针与 Run 串行
                     canshuIni.WriteString("camera3", "fen", comboBox10.SelectedItem.ToString());
                     MessageBox.Show("切换流程3:" + comboBox10.SelectedItem.ToString() + "成功");
                     sync_job_meta(myjob3);
@@ -18876,7 +18893,7 @@ namespace WindowsFormsApplication1
             {
                 try
                 {
-                    myjob4.block = (CogToolBlock)CogSerializer.LoadObjectFromFile(wenjianjia + "\\4\\" + comboBox11.SelectedItem.ToString());
+                    lock (myjob4.blockLock) { myjob4.block = (CogToolBlock)CogSerializer.LoadObjectFromFile(wenjianjia + "\\4\\" + comboBox11.SelectedItem.ToString()); } // ch:R43 P2-3 替换指针与 Run 串行
                     canshuIni.WriteString("camera4", "fen", comboBox11.SelectedItem.ToString());
                     MessageBox.Show("切换流程4:" + comboBox11.SelectedItem.ToString() + "成功");
                     sync_job_meta(myjob4);
@@ -18895,7 +18912,7 @@ namespace WindowsFormsApplication1
             {
                 try
                 {
-                    myjob5.block = (CogToolBlock)CogSerializer.LoadObjectFromFile(wenjianjia + "\\5\\" + comboBox12.SelectedItem.ToString());
+                    lock (myjob5.blockLock) { myjob5.block = (CogToolBlock)CogSerializer.LoadObjectFromFile(wenjianjia + "\\5\\" + comboBox12.SelectedItem.ToString()); } // ch:R43 P2-3 替换指针与 Run 串行
                     canshuIni.WriteString("camera5", "fen", comboBox12.SelectedItem.ToString());
                     MessageBox.Show("切换流程5:" + comboBox12.SelectedItem.ToString() + "成功");
                     sync_job_meta(myjob5);
@@ -18914,7 +18931,7 @@ namespace WindowsFormsApplication1
             {
                 try
                 {
-                    myjob6.block = (CogToolBlock)CogSerializer.LoadObjectFromFile(wenjianjia + "\\6\\" + comboBox13.SelectedItem.ToString());
+                    lock (myjob6.blockLock) { myjob6.block = (CogToolBlock)CogSerializer.LoadObjectFromFile(wenjianjia + "\\6\\" + comboBox13.SelectedItem.ToString()); } // ch:R43 P2-3 替换指针与 Run 串行
                     canshuIni.WriteString("camera6", "fen", comboBox13.SelectedItem.ToString());
                     MessageBox.Show("切换流程6:" + comboBox13.SelectedItem.ToString() + "成功");
                     sync_job_meta(myjob6);
@@ -18933,7 +18950,7 @@ namespace WindowsFormsApplication1
             {
                 try
                 {
-                    myjob7.block = (CogToolBlock)CogSerializer.LoadObjectFromFile(wenjianjia + "\\7\\" + comboBox14.SelectedItem.ToString());
+                    lock (myjob7.blockLock) { myjob7.block = (CogToolBlock)CogSerializer.LoadObjectFromFile(wenjianjia + "\\7\\" + comboBox14.SelectedItem.ToString()); } // ch:R43 P2-3 替换指针与 Run 串行
                     canshuIni.WriteString("camera7", "fen", comboBox14.SelectedItem.ToString());
                     MessageBox.Show("切换流程7:" + comboBox14.SelectedItem.ToString() + "成功");
                     sync_job_meta(myjob7);
@@ -18952,7 +18969,7 @@ namespace WindowsFormsApplication1
             {
                 try
                 {
-                    myjob8.block = (CogToolBlock)CogSerializer.LoadObjectFromFile(wenjianjia + "\\8\\" + comboBox15.SelectedItem.ToString());
+                    lock (myjob8.blockLock) { myjob8.block = (CogToolBlock)CogSerializer.LoadObjectFromFile(wenjianjia + "\\8\\" + comboBox15.SelectedItem.ToString()); } // ch:R43 P2-3 替换指针与 Run 串行
                     canshuIni.WriteString("camera8", "fen", comboBox15.SelectedItem.ToString());
                     MessageBox.Show("切换流程8:" + comboBox15.SelectedItem.ToString() + "成功");
                     sync_job_meta(myjob8);
@@ -18976,7 +18993,7 @@ namespace WindowsFormsApplication1
             {
                 if (manager1.JobCount > 0)
                 {
-                    textBox13.Text = myjob1.block.Inputs[comboBox16.Text].Value.ToString();
+                    lock (myjob1.blockLock) { textBox13.Text = myjob1.block.Inputs[comboBox16.Text].Value.ToString(); } // ch:R43 P2-10 与 Run 串行
                 }
             }
             catch (Exception ex)
@@ -18992,9 +19009,10 @@ namespace WindowsFormsApplication1
                 if (manager1.JobCount > 0)
                 {
                     comboBox16.Items.Clear();
-                    for (int i = 0; i < myjob1.block.Inputs.Count; i++)
+                    lock (myjob1.blockLock)
                     {
-                        comboBox16.Items.Add(myjob1.block.Inputs[i].Name);
+                        for (int i = 0; i < myjob1.block.Inputs.Count; i++)
+                            comboBox16.Items.Add(myjob1.block.Inputs[i].Name);
                     }
                 }
             }
@@ -19025,7 +19043,7 @@ namespace WindowsFormsApplication1
             {
                 if (manager1.JobCount > 7)
                 {
-                    textBox35.Text = myjob8.block.Inputs[comboBox26.Text].Value.ToString();
+                    lock (myjob8.blockLock) { textBox35.Text = myjob8.block.Inputs[comboBox26.Text].Value.ToString(); } // ch:R43 P2-10 与 Run 串行
                 }
             }
             catch (Exception ex)
@@ -19041,9 +19059,10 @@ namespace WindowsFormsApplication1
                 if (manager1.JobCount > 7)
                 {
                     comboBox26.Items.Clear();
-                    for (int i = 0; i < myjob8.block.Inputs.Count; i++)
+                    lock (myjob8.blockLock)
                     {
-                        comboBox26.Items.Add(myjob8.block.Inputs[i].Name);
+                        for (int i = 0; i < myjob8.block.Inputs.Count; i++)
+                            comboBox26.Items.Add(myjob8.block.Inputs[i].Name);
                     }
                 }
             }
@@ -19075,7 +19094,7 @@ namespace WindowsFormsApplication1
             {
                 if (manager1.JobCount > 1)
                 {
-                    textBox23.Text = myjob2.block.Inputs[comboBox17.Text].Value.ToString();
+                    lock (myjob2.blockLock) { textBox23.Text = myjob2.block.Inputs[comboBox17.Text].Value.ToString(); } // ch:R43 P2-10 与 Run 串行
                 }
             }
             catch (Exception ex)
@@ -19107,9 +19126,10 @@ namespace WindowsFormsApplication1
                 if (manager1.JobCount > 1)
                 {
                     comboBox17.Items.Clear();
-                    for (int i = 0; i < myjob2.block.Inputs.Count; i++)
+                    lock (myjob2.blockLock)
                     {
-                        comboBox17.Items.Add(myjob2.block.Inputs[i].Name);
+                        for (int i = 0; i < myjob2.block.Inputs.Count; i++)
+                            comboBox17.Items.Add(myjob2.block.Inputs[i].Name);
                     }
                 }
             }
@@ -19126,9 +19146,10 @@ namespace WindowsFormsApplication1
                 if (manager1.JobCount > 2)
                 {
                     comboBox18.Items.Clear();
-                    for (int i = 0; i < myjob3.block.Inputs.Count; i++)
+                    lock (myjob3.blockLock)
                     {
-                        comboBox18.Items.Add(myjob3.block.Inputs[i].Name);
+                        for (int i = 0; i < myjob3.block.Inputs.Count; i++)
+                            comboBox18.Items.Add(myjob3.block.Inputs[i].Name);
                     }
                 }
             }
@@ -19145,9 +19166,10 @@ namespace WindowsFormsApplication1
                 if (manager1.JobCount > 3)
                 {
                     comboBox19.Items.Clear();
-                    for (int i = 0; i < myjob4.block.Inputs.Count; i++)
+                    lock (myjob4.blockLock)
                     {
-                        comboBox19.Items.Add(myjob4.block.Inputs[i].Name);
+                        for (int i = 0; i < myjob4.block.Inputs.Count; i++)
+                            comboBox19.Items.Add(myjob4.block.Inputs[i].Name);
                     }
                 }
             }
@@ -19164,9 +19186,10 @@ namespace WindowsFormsApplication1
                 if (manager1.JobCount > 4)
                 {
                     comboBox20.Items.Clear();
-                    for (int i = 0; i < myjob5.block.Inputs.Count; i++)
+                    lock (myjob5.blockLock)
                     {
-                        comboBox20.Items.Add(myjob5.block.Inputs[i].Name);
+                        for (int i = 0; i < myjob5.block.Inputs.Count; i++)
+                            comboBox20.Items.Add(myjob5.block.Inputs[i].Name);
                     }
                 }
             }
@@ -19183,9 +19206,10 @@ namespace WindowsFormsApplication1
                 if (manager1.JobCount > 5)
                 {
                     comboBox23.Items.Clear();
-                    for (int i = 0; i < myjob6.block.Inputs.Count; i++)
+                    lock (myjob6.blockLock)
                     {
-                        comboBox23.Items.Add(myjob6.block.Inputs[i].Name);
+                        for (int i = 0; i < myjob6.block.Inputs.Count; i++)
+                            comboBox23.Items.Add(myjob6.block.Inputs[i].Name);
                     }
                 }
             }
@@ -19202,9 +19226,10 @@ namespace WindowsFormsApplication1
                 if (manager1.JobCount > 6)
                 {
                     comboBox24.Items.Clear();
-                    for (int i = 0; i < myjob7.block.Inputs.Count; i++)
+                    lock (myjob7.blockLock)
                     {
-                        comboBox24.Items.Add(myjob7.block.Inputs[i].Name);
+                        for (int i = 0; i < myjob7.block.Inputs.Count; i++)
+                            comboBox24.Items.Add(myjob7.block.Inputs[i].Name);
                     }
                 }
             }
@@ -19300,7 +19325,7 @@ namespace WindowsFormsApplication1
             {
                 if (manager1.JobCount > 2)
                 {
-                    textBox24.Text = myjob3.block.Inputs[comboBox18.Text].Value.ToString();
+                    lock (myjob3.blockLock) { textBox24.Text = myjob3.block.Inputs[comboBox18.Text].Value.ToString(); } // ch:R43 P2-10 与 Run 串行
                 }
             }
             catch (Exception ex)
@@ -19315,7 +19340,7 @@ namespace WindowsFormsApplication1
             {
                 if (manager1.JobCount > 3)
                 {
-                    textBox25.Text = myjob4.block.Inputs[comboBox19.Text].Value.ToString();
+                    lock (myjob4.blockLock) { textBox25.Text = myjob4.block.Inputs[comboBox19.Text].Value.ToString(); } // ch:R43 P2-10 与 Run 串行
                 }
             }
             catch (Exception ex)
@@ -19330,7 +19355,7 @@ namespace WindowsFormsApplication1
             {
                 if (manager1.JobCount > 4)
                 {
-                    textBox29.Text = myjob5.block.Inputs[comboBox20.Text].Value.ToString();
+                    lock (myjob5.blockLock) { textBox29.Text = myjob5.block.Inputs[comboBox20.Text].Value.ToString(); } // ch:R43 P2-10 与 Run 串行
                 }
             }
             catch (Exception ex)
@@ -19345,7 +19370,7 @@ namespace WindowsFormsApplication1
             {
                 if (manager1.JobCount > 5)
                 {
-                    textBox30.Text = myjob6.block.Inputs[comboBox23.Text].Value.ToString();
+                    lock (myjob6.blockLock) { textBox30.Text = myjob6.block.Inputs[comboBox23.Text].Value.ToString(); } // ch:R43 P2-10 与 Run 串行
                 }
             }
             catch (Exception ex)
@@ -19360,7 +19385,7 @@ namespace WindowsFormsApplication1
             {
                 if (manager1.JobCount > 6)
                 {
-                    textBox31.Text = myjob7.block.Inputs[comboBox24.Text].Value.ToString();
+                    lock (myjob7.blockLock) { textBox31.Text = myjob7.block.Inputs[comboBox24.Text].Value.ToString(); } // ch:R43 P2-10 与 Run 串行
                 }
             }
             catch (Exception ex)

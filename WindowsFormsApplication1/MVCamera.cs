@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Text;
@@ -142,7 +142,12 @@ namespace MvCamCtrl.NET
             try
             {
                 if (IntPtr.Zero != handle)
-                    MV_CC_DestroyDevice_NET();
+                {
+                    // ch:R43 P2-7 兜底释放补全 Stop→Close→Destroy：原只 DestroyHandle，GigE 会话可能残留（0x80000203 来源之一）
+                    try { MV_CC_StopGrabbing_NET(); } catch (Exception) { }
+                    try { MV_CC_CloseDevice_NET(); } catch (Exception) { }
+                    MV_CC_DestroyDevice_NET(); // 成功时才在内部清 handle
+                }
             }
             catch (Exception)
             {
@@ -150,7 +155,6 @@ namespace MvCamCtrl.NET
             }
             finally
             {
-                handle = IntPtr.Zero;
                 _disposed = true;
             }
         }
@@ -203,7 +207,9 @@ namespace MvCamCtrl.NET
         public Int32 MV_CC_DestroyDevice_NET()
         {
             Int32 nRet = MV_CC_DestroyHandle(handle);
-            handle = IntPtr.Zero;
+            // ch:R43 P2-7 仅成功才清句柄：原实现失败也清零，SDK 侧句柄/会话就此成为孤儿，再也无法释放
+            if (nRet == MV_OK)
+                handle = IntPtr.Zero;
             return nRet;
         }
 
