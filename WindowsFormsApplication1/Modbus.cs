@@ -52,6 +52,12 @@ namespace WindowsFormsApplication1
                 }
                 if ((buffer[1] & 0x80) != 0)
                 {
+                    // ch:R43 N5 异常响应同样已读满 5 字节，先校验 CRC 再识别，避免坏帧被当成合法异常码
+                    if (!Crc16Ok(buffer, frameLen))
+                    {
+                        LogCrcFailThrottled(station);
+                        return 0;
+                    }
                     LogFrameMismatchThrottled(station, frameLen, buffer[1], "从站异常响应");
                     return 0;
                 }
@@ -112,21 +118,31 @@ namespace WindowsFormsApplication1
                 return -1;
             byte func = buffer[1];
             int total;
+            int nextIndex; // ch:R43 N5 续读起点：FC03 已填到 [2]，其余功能码只填到 [1]
             if ((func & 0x80) != 0)
+            {
                 total = 5;
+                nextIndex = 2;
+            }
             else if (func == 0x03)
             {
                 if (!ReadExact(buffer, 2, 1))
                     return -1;
                 total = 3 + buffer[2] + 2;
+                nextIndex = 3;
             }
             else if (func == 0x06 || func == 0x10)
+            {
                 total = 8;
+                nextIndex = 2;
+            }
             else
                 return -1;
             if (total < 5 || total > maxLen)
                 return -1;
-            if (!ReadExact(buffer, 3, total - 3))
+            // ch:R43 N5 从“已填入的下一字节”续读：FC06/FC10(8字节)与异常响应(5字节)必须从下标2读 total-2，
+            //   原实现统一从下标3读 total-3 会少读1字节，CRC 必失败且串口残留本帧最后一字节导致后续失步
+            if (!ReadExact(buffer, nextIndex, total - nextIndex))
                 return -1;
             return total;
         }
