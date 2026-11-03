@@ -60,11 +60,11 @@ public class SchemeMatcherTests
     [Fact]
     public void MaxScales_HundredRowTable_LastRowHits()
     {
-        // 100 路量级：末行唯一命中要能取到（为表格化 UI 放开数量前钉住行为）
-        string[] keys = new string[SchemeMatcher.MaxSchemes];
+        // 100 路量级：末行唯一命中要能取到（上限常量单一事实源=SchemeStore.MaxSchemes）
+        string[] keys = new string[SchemeStore.MaxSchemes];
         for (int i = 0; i < keys.Length; i++) keys[i] = "S" + i;
         int hits;
-        Assert.Equal(SchemeMatcher.MaxSchemes - 1, SchemeMatcher.Match(keys, "S99", out hits));
+        Assert.Equal(SchemeStore.MaxSchemes - 1, SchemeMatcher.Match(keys, "S99", out hits));
         Assert.Equal(1, hits);
     }
 

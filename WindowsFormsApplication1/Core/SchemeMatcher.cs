@@ -8,12 +8,10 @@ namespace WindowsFormsApplication1
     ///   - 精确等值匹配，配置为空的载图串不参与（旧 if 链在"配置文本框为空且输入为空串"时会误命中第一路）；
     ///   - 仅唯一命中生效；同一输入命中多路 = 配置冲突，拒绝切换并回报命中数
     ///     （旧 if 链先到先得，串重复时静默切到错误方案）；
-    ///   - 表长任意；方案数量上限由配置侧把关（MaxSchemes=100，本轮 8 固定控件，表格化 UI 后放开）。
+    ///   - 表长任意；方案数量上限单一事实源在 SchemeStore.MaxSchemes=100（本匹配器不设常量，避免两处手工同步）。
     /// </summary>
     public static class SchemeMatcher
     {
-        /// <summary>ch:R12 方案数上限（100 量级；防配置异常时每次匹配遍历过大）。</summary>
-        public const int MaxSchemes = 100;
         public const int NoHit = -1;
         public const int Conflict = -2;
 

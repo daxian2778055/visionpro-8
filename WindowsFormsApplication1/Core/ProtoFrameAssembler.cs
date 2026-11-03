@@ -16,8 +16,10 @@ namespace WindowsFormsApplication1
     /// </summary>
     public class ProtoFrameAssembler
     {
-        /// <summary>ch:R42 触发串数量上限（防配置异常时每次收包遍历过大）。</summary>
-        public const int MaxPatterns = 64;
+        /// <summary>ch:R42 触发串数量上限（防配置异常时每次收包遍历过大）。
+        ///   ch:R13-2 64→128：方案表扩容至 100 路后，集合=方案表全部载图串(≤100)+各相机方案触发串(8)，
+        ///   原 64 会把第 56 条以后的载图串静默排除在组帧外——拆包场景下这些方案的触发必丢。</summary>
+        public const int MaxPatterns = 128;
 
         private readonly List<byte> _buf = new List<byte>();
 

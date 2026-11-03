@@ -6,21 +6,28 @@ namespace WindowsFormsApplication1
     /// <summary>
     /// ch:R12 方案表数据层（纯托管，无 WinForms/ini 依赖，Tests 直链同源回归）。
     ///   四条通讯通道各自持有一份：载图串→方案路径的 N 行映射表（上限 100，默认 8=历史行为）。
-    ///   ini 无 scheme_count 键时按老 8 键读取（现场 test.ini 原样兼容）；有则按 1..count 循环。
-    ///   匹配方（qiehuan 轮询/接收线程）读 KeysArray/PathsArray 快照——数组发布后不再改动，
-    ///   volatile 引用整体替换，轮询线程无需再逐控件跨线程取 Text（100 行时也不放大）。
+    ///   ini 无 count 键时按老 8 键读取（现场 test.ini 原样兼容）；有则按 1..count 循环。
+    ///   ch:R13-1 匹配方读的是「单一 volatile 快照」：keys/paths 打包在同一不可变对象里一次取回，
+    ///   杜绝"旧 keys + 新 paths"撕裂（缩表时 paths[hit] 越界、中间行变更时静默切错路径）。
     /// </summary>
     public class SchemeStore
     {
         public const int MaxSchemes = 100;
         public const int LegacyRows = 8;
 
-        private readonly object _sync = new object();
-        private List<string[]> _rows = new List<string[]>(); // [载图串, 方案路径]
-        private volatile string[] _keys = new string[0];
-        private volatile string[] _paths = new string[0];
+        /// <summary>ch:R13-1 配对快照：发布后内容不再改动，读取方一次引用即得配套 keys/paths。</summary>
+        private sealed class Snapshot
+        {
+            public readonly string[] Keys;
+            public readonly string[] Paths;
+            public Snapshot(string[] keys, string[] paths) { Keys = keys; Paths = paths; }
+        }
 
-        /// <summary>ini scheme_count 解析：缺失/非法→8（老行为），合法值夹取 [0,100]。</summary>
+        private readonly object _sync = new object();
+        private List<string[]> _rows = new List<string[]>();
+        private volatile Snapshot _snap = new Snapshot(new string[0], new string[0]);
+
+        /// <summary>ini count 键解析：缺失/非法→8（老行为），合法值夹取 [0,100]。</summary>
         public static int ResolveCount(string rawCount)
         {
             if (string.IsNullOrEmpty(rawCount))
@@ -47,8 +54,8 @@ namespace WindowsFormsApplication1
             SetRows(rows);
         }
 
-        /// <summary>整表替换并重建匹配快照（超过 100 行的部分截断并回报被弃行数由调用方决定）。</summary>
-        public void SetRows(List<string[]> rows)
+        /// <summary>整表替换并发布新快照；返回因超过 100 行上限被丢弃的行数。</summary>
+        public int SetRows(List<string[]> rows)
         {
             List<string[]> copy = new List<string[]>();
             if (rows != null)
@@ -69,9 +76,9 @@ namespace WindowsFormsApplication1
             lock (_sync)
             {
                 _rows = copy;
-                _paths = paths;
-                _keys = keys; // volatile 最后发布：快照可见时 keys/paths 已配套
+                _snap = new Snapshot(keys, paths); // ch:R13-1 单引用发布，keys/paths 永不撕裂
             }
+            return rows == null ? 0 : Math.Max(0, rows.Count - MaxSchemes);
         }
 
         /// <summary>行副本（供 UI/保存合并用）。</summary>
@@ -86,19 +93,36 @@ namespace WindowsFormsApplication1
             }
         }
 
-        public string[] KeysArray() { return _keys; }
-        public string[] PathsArray() { return _paths; }
+        /// <summary>
+        /// ch:R13-1 匹配唯一入口：一次取快照做精确匹配。
+        /// 返回 true=唯一命中（path 即该行方案路径）；hits&gt;1=配置冲突；hits==0=未命中。
+        /// </summary>
+        public bool TryResolve(string input, out string path, out int hits)
+        {
+            Snapshot s = _snap;
+            int hit = SchemeMatcher.Match(s.Keys, input, out hits);
+            path = hit >= 0 ? s.Paths[hit] : null;
+            return hit >= 0;
+        }
 
-        /// <summary>去掉表尾连续空行；全空返回空表。</summary>
+        /// <summary>ch:R13-2 组帧/粘包诊断用键引用（与 TryResolve 同一快照，成对读路径请走 TryResolve）。</summary>
+        public string[] KeysArray() { return _snap.Keys; }
+
+        /// <summary>去掉表尾连续空行（null 行按空行处理）；全空返回空表。</summary>
         public static List<string[]> TrimTrailingEmpty(List<string[]> rows)
         {
             if (rows == null) return new List<string[]>();
             List<string[]> copy = new List<string[]>();
             for (int i = 0; i < rows.Count; i++)
                 copy.Add(rows[i]);
-            while (copy.Count > 0 && string.IsNullOrEmpty(copy[copy.Count - 1][0]) && string.IsNullOrEmpty(copy[copy.Count - 1][1]))
+            while (copy.Count > 0 && RowIsEmpty(copy[copy.Count - 1]))
                 copy.RemoveAt(copy.Count - 1);
             return copy;
+        }
+
+        private static bool RowIsEmpty(string[] r)
+        {
+            return r == null || (string.IsNullOrEmpty(r[0]) && string.IsNullOrEmpty(r[1]));
         }
 
         /// <summary>

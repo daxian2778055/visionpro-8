@@ -49,6 +49,7 @@ namespace WindowsFormsApplication1
             _grid.Columns.Add(colPath);
             _grid.CellValueChanged += Grid_CellChanged;
             _grid.CurrentCellDirtyStateChanged += Grid_DirtyFlush;
+            _grid.CellContentDoubleClick += Grid_Browse; // ch:R13-3 双击路径列=浏览 vpp（第 9..100 行也有入口）
 
             var bottom = new FlowLayoutPanel();
             bottom.Dock = DockStyle.Bottom;
@@ -96,7 +97,7 @@ namespace WindowsFormsApplication1
             {
                 _suppress = false;
             }
-            UpdateInfo(rows);
+            UpdateInfo(SchemeStore.TrimTrailingEmpty(rows)); // ch:R13-3 计数按"有效行"口径，与保存裁剪一致
         }
 
         /// <summary>保存用：网格内容为准，去表尾空行、上限 100。</summary>
@@ -105,14 +106,29 @@ namespace WindowsFormsApplication1
             return SchemeStore.TrimTrailingEmpty(ReadGridRows());
         }
 
+        /// <summary>ch:R13-3 双击"方案路径"列弹 vpp 选择框；写回单元格后经 Grid_CellChanged 正常同步链落库。</summary>
+        private void Grid_Browse(object sender, DataGridViewCellEventArgs e)
+        {
+            if (e.RowIndex < 0 || e.ColumnIndex != 1) return;
+            using (OpenFileDialog dlg = new OpenFileDialog())
+            {
+                dlg.Filter = "VP vpp File|*.vpp*";
+                try { dlg.FileName = Convert.ToString(_grid[e.ColumnIndex, e.RowIndex].Value ?? ""); } catch (Exception) { }
+                Form host = FindForm();
+                if (dlg.ShowDialog(host) != DialogResult.OK) return;
+                _grid[e.ColumnIndex, e.RowIndex].Value = dlg.FileName; // 触发 CellValueChanged → store/文本框同步
+            }
+        }
+
         private void Boxes_TextChanged(object sender, EventArgs e)
         {
             if (_suppress) return;
             List<string[]> rows = ReadGridRows();
             for (int i = 0; i < SchemeStore.LegacyRows && i < rows.Count; i++)
             {
-                rows[i][0] = _zifuBoxes[i].Text;
-                rows[i][1] = _pathBoxes[i].Text;
+                // ch:R13-3 null 控件跳过（与构造期判空订阅同一契约）：保留原值而非抹成空串
+                if (_zifuBoxes[i] != null) rows[i][0] = _zifuBoxes[i].Text;
+                if (_pathBoxes[i] != null) rows[i][1] = _pathBoxes[i].Text;
             }
             rows = SchemeStore.TrimTrailingEmpty(rows);
             _store.SetRows(rows);

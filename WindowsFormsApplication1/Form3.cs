@@ -64,14 +64,6 @@ namespace WindowsFormsApplication1
         int ngs;
         int oksmonitor;
         int ngsmonitor;
-        string out0ok;
-        string out1ok;
-        string out2ok;
-        string out3ok;
-        string out0ng;
-        string out1ng;
-        string out2ng;
-        string out3ng;
         int jinzhi;
         public string zifu;
         public string lujing;
@@ -97,7 +89,7 @@ namespace WindowsFormsApplication1
             try
             {
                 mdcan.port= new SerialPort();
-                // ch:R12 方案表：按 scheme_count（缺省=老 8 行）装载 N 行进 store，前 8 行由面板同步到文本框。
+                // ch:R12 方案表：按 count 键（缺省=老 8 行）装载 N 行进 store，前 8 行由面板同步到文本框。
                 //   注意：本通道与 Omron 共用 "change"/"path" 两段（历史设计，配置即共享；count 同段共享）。
                 _schemes.LoadFrom(i => wdini.ReadString("change", i.ToString(), ""),
                                   i => wdini.ReadString("path", i.ToString(), ""),
@@ -160,22 +152,8 @@ namespace WindowsFormsApplication1
             numericUpDown1.Value = Math.Max(numericUpDown1.Minimum, Math.Min(numericUpDown1.Maximum, devalue));
             txtIp.Text = wdini.ReadString("modbustcp", "ip", txtIp.Text);
             txtPort.Text = wdini.ReadString("modbustcp", "port", txtPort.Text);
-            textBox10.Text = wdini.ReadString("out0", "ok", textBox10.Text);
-            textBox11.Text = wdini.ReadString("out1", "ok", textBox11.Text);
-            textBox12.Text = wdini.ReadString("out2", "ok", textBox12.Text);
-            textBox13.Text = wdini.ReadString("out3", "ok", textBox13.Text);
-            textBox14.Text = wdini.ReadString("out0", "ng", textBox14.Text);
-            textBox15.Text = wdini.ReadString("out1", "ng", textBox15.Text);
-            textBox16.Text = wdini.ReadString("out2", "ng", textBox16.Text);
-            textBox17.Text = wdini.ReadString("out3", "ng", textBox17.Text);
-            out0ok = textBox10.Text;
-            out1ok = textBox11.Text;
-            out2ok = textBox12.Text;
-            out3ok = textBox13.Text;
-            out0ng = textBox14.Text;
-            out1ng = textBox15.Text;
-            out2ng = textBox16.Text;
-            out3ng = textBox17.Text;
+            // ch:R13-3 删除 out0..out3 的 ok/ng 装载与字段：textBox10..17 的真实语义是方案表 path/1..8，
+            //   原装载在其后追加执行会用历史 out* 段值覆盖方案路径（现场 ini 若残留 OK/NG 串→切方案必 File.Exists 失败）。
             comboBox3.Text = wdini.ReadString("modbustcp", "style","float").Replace("\0", "");
             comboBox4.Text = wdini.ReadString("modbustcp", "gongnengma", "06").Replace("\0", "");
             comboBox5.Text = wdini.ReadString("modbustcp", "serial", "无协议").Replace("\0", "");
@@ -668,7 +646,7 @@ namespace WindowsFormsApplication1
             catch (Exception ex) { new ErrorLog().WriteLog(ex.ToString()); }
         }
 
-        // ch:P2 粘包/拆包可观测性：现场协议是"8 条精确匹配的触发串"，无分隔符/无长度前缀，
+        // ch:P2 粘包/拆包可观测性：现场协议是"N 条精确匹配的触发串"（ch:R13-2 起含方案表全部载图串），无分隔符/无长度前缀，
         //   因此报文被 TCP 合并（如 "A1B1"）或拆开时，qiehuan 与后续 DataChange 都匹配不上 → 静默无动作，
         //   这是最难排查的失败模式。这里只在"段内包含某条已配置触发串、但整段不等于它"时记一条限流日志
         //   （正常报文不触发），用于现场判断是否需要与对端约定组帧。
@@ -676,8 +654,7 @@ namespace WindowsFormsApplication1
         private void NoteProtoFrameAnomaly(string s)
         {
             if (string.IsNullOrEmpty(s)) return;
-            string[] cfg = new string[] { textBox18.Text, textBox19.Text, textBox21.Text, textBox20.Text,
-                                          textBox23.Text, textBox22.Text, textBox25.Text, textBox24.Text };
+            string[] cfg = _schemes.KeysArray(); // ch:R13-2 改用方案表快照（R12 扩容后 9..100 行也纳入诊断；不再读控件）
             string hit = null;
             foreach (string t in cfg)
             {
@@ -691,17 +668,29 @@ namespace WindowsFormsApplication1
                 + s.Replace("\r", "\\r").Replace("\n", "\\n").Replace("\0", "\\0") + "] 长度=" + s.Length
                 + "；若频繁出现请与对端确认是否分段/合并发送或需要约定组帧");
         }
-        // ch:R42 收包组帧用触发串集合：Form3 本地 8 条载图串 + Form1 经 framePatternsProvider 提供的
-        //   各相机方案 triggerZifu（vpp 输入，Form3 拿不到）。每次收包现取现用（运行中可能改配置），数量很小；
-        //   与 NoteProtoFrameAnomaly 一样在通讯线程读 textBox，属既有做法（CheckForIllegalCrossThreadCalls=false）。
+        // ch:R42 收包组帧用触发串集合：方案表全部载图串（ch:R13-2 由 8 条扩到 ≤100 条，取 SchemeStore 快照，
+        //   不再读控件） + Form1 经 framePatternsProvider 提供的各相机方案 triggerZifu（vpp 输入，Form3 拿不到）。
+        //   载图串部分按快照数组引用缓存字节编码：仅改表时重建，100 行时不再每次 Receive 重编 100 个 GBK 串；
+        //   缓存字段若被客户端/服务端两个接收线程并发写坏最多少缓存一次重建，无正确性影响。
         public Func<string[]> framePatternsProvider;
+        private string[] _frameOwnKeysRef;
+        private List<byte[]> _frameOwnBytesCache;
+        private HashSet<string> _frameOwnSeenCache;
+        private int _frameOverflowLoggedMs = 0;
         private List<byte[]> BuildFramePatterns()
         {
-            List<byte[]> list = new List<byte[]>();
-            HashSet<string> seen = new HashSet<string>();
-            string[] own = new string[] { textBox18.Text, textBox19.Text, textBox21.Text, textBox20.Text,
-                                          textBox23.Text, textBox22.Text, textBox25.Text, textBox24.Text };
-            foreach (string t in own) AddFramePattern(list, seen, t);
+            string[] own = _schemes.KeysArray();
+            if (!ReferenceEquals(own, _frameOwnKeysRef))
+            {
+                List<byte[]> built = new List<byte[]>();
+                HashSet<string> seenB = new HashSet<string>();
+                for (int i = 0; i < own.Length; i++) AddFramePattern(built, seenB, own[i]);
+                _frameOwnKeysRef = own;
+                _frameOwnBytesCache = built;
+                _frameOwnSeenCache = seenB;
+            }
+            List<byte[]> list = new List<byte[]>(_frameOwnBytesCache);
+            HashSet<string> seen = new HashSet<string>(_frameOwnSeenCache);
             try
             {
                 Func<string[]> ext = framePatternsProvider;
@@ -717,7 +706,18 @@ namespace WindowsFormsApplication1
         }
         private void AddFramePattern(List<byte[]> list, HashSet<string> seen, string t)
         {
-            if (string.IsNullOrEmpty(t) || list.Count >= ProtoFrameAssembler.MaxPatterns) return;
+            if (string.IsNullOrEmpty(t)) return;
+            if (list.Count >= ProtoFrameAssembler.MaxPatterns)
+            {
+                // ch:R13-2 原静默丢弃：108 条(100 方案+8 相机)内不会触发，一旦配置异常超限要留线索而不是无声少挂一条
+                int now = Environment.TickCount;
+                if (unchecked(now - _frameOverflowLoggedMs) >= 5000)
+                {
+                    _frameOverflowLoggedMs = now;
+                    MsgErroeLog.WriteLog("组帧触发串集合已达上限 " + ProtoFrameAssembler.MaxPatterns + "，多余串未加入组帧（配置异常，请检查方案表/触发串数量）");
+                }
+                return;
+            }
             if (!seen.Add(t)) return;
             list.Add(_protoEncoding.GetBytes(t));
         }
@@ -1014,17 +1014,16 @@ namespace WindowsFormsApplication1
         {
             // ch:R43 载图串冲突收口：同一触发串命中多路时拒绝切换（原实现总是第一路胜出，静默切错方案）
             // ch:R12 匹配走 SchemeStore 快照（≤100 行）：接收线程不再逐控件跨线程取 Text；空串不参与、多命中冲突拒绝。
-            string[] keys = _schemes.KeysArray();
-            string[] paths = _schemes.PathsArray();
+            // ch:R12 匹配走 SchemeStore（≤100 行）；ch:R13-1 改 TryResolve 一次取配对快照，接收线程不再逐控件跨线程取 Text
             int hits;
-            int hit = SchemeMatcher.Match(keys, aa, out hits);
-            if (hit >= 0)
+            string schemePath;
+            if (_schemes.TryResolve(aa, out schemePath, out hits))
             {
                 zifu = aa;
-                lujing = paths[hit];
+                lujing = schemePath;
                 return 1;
             }
-            if (hit == SchemeMatcher.Conflict)
+            if (hits > 1)
                 LogTriggerConflictThrottled("载图串[" + aa + "]命中" + hits + "路，已拒绝切换（请检查配置重复）");
             return 0;
         }
@@ -1797,14 +1796,7 @@ namespace WindowsFormsApplication1
             wdini.WriteString("tcpsend", "send1", textBox2.Text);
             wdini.WriteString("tcpclient", "port2", textBox5.Text);
             wdini.WriteString("tcpclient", "ip2", textBox6.Text);
-            wdini.WriteString("out0", "ok", textBox10.Text);
-            wdini.WriteString("out1", "ok", textBox11.Text);
-            wdini.WriteString("out2", "ok", textBox12.Text);
-            wdini.WriteString("out3", "ok", textBox13.Text);
-            wdini.WriteString("out0", "ng", textBox14.Text);
-            wdini.WriteString("out1", "ng", textBox15.Text);
-            wdini.WriteString("out2", "ng", textBox16.Text);
-            wdini.WriteString("out3", "ng", textBox17.Text);
+            // ch:R13-3 原此处的 out0..out3 ok/ng 写回已删除（键无任何消费者，留着只会把方案路径抄进死键）
             if(checkBox1.CheckState==CheckState.Checked)
             wdini.WriteString("jinzhi", "16en", "true");
             else

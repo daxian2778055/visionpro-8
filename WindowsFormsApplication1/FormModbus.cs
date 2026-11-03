@@ -467,7 +467,7 @@ namespace WindowsFormsApplication1
             if (camera_dic[10][2] == "true")
                 checkBox12.CheckState = CheckState.Checked;
 
-            // ch:R12 方案表：按 scheme_count（缺省=老 8 行）装载 N 行进 store，前 8 行由面板同步到文本框，
+            // ch:R12 方案表：按 count 键（缺省=老 8 行）装载 N 行进 store，前 8 行由面板同步到文本框，
             //   第 9..100 行在"方案表"选项卡编辑；qiehuan 读 store 快照，轮询线程不再逐控件取 Text。
             _schemes.LoadFrom(i => wdini.ReadString("change_modbustcp", i.ToString(), ""),
                               i => wdini.ReadString("path_modbustcp", i.ToString(), ""),
@@ -2382,17 +2382,16 @@ namespace WindowsFormsApplication1
         {
             // ch:R12 匹配走 SchemeStore 快照（≤100 行）：轮询线程不再逐控件跨线程取 Text；
             //   空串不参与、多命中冲突拒绝并记日志（原 if 链先到先得，静默切错方案）。
-            string[] keys = _schemes.KeysArray();
-            string[] paths = _schemes.PathsArray();
+            // ch:R13-1 TryResolve 一次取配对快照（原两次数组读在并发改表时可"旧 keys+新 paths"撕裂→越界/错路径）
             int hits;
-            int hit = SchemeMatcher.Match(keys, aa, out hits);
-            if (hit >= 0)
+            string schemePath;
+            if (_schemes.TryResolve(aa, out schemePath, out hits))
             {
                 zifu = aa;
-                lujing = paths[hit];
+                lujing = schemePath;
                 return 1;
             }
-            if (hit == SchemeMatcher.Conflict)
+            if (hits > 1)
                 LogSchemeConflictThrottled("方案切换:载图串[" + aa + "]命中" + hits + "路，已拒绝切换（请检查配置重复）");
             return 0;
         }
@@ -3357,12 +3356,14 @@ namespace WindowsFormsApplication1
                 return;
             }
             _schemes.SetRows(schemeRows);
-            wdini.WriteString("change_modbustcp", "count", schemeRows.Count.ToString());
+            // ch:R13-3 四窗体统一"先写 1..N 行、最后写 count"：半程断电时旧 count 仍生效，
+            //   扩容的新行不会读到写了一半的脏值；超出新 count 的旧键留在 ini 但读取端按 count 截断，不会被复活。
             for (int i = 0; i < schemeRows.Count; i++)
             {
                 wdini.WriteString("change_modbustcp", (i + 1).ToString(), schemeRows[i][0]);
                 wdini.WriteString("path_modbustcp", (i + 1).ToString(), schemeRows[i][1]);
             }
+            wdini.WriteString("change_modbustcp", "count", schemeRows.Count.ToString());
         }
 
         private void textBox1_TextChanged(object sender, EventArgs e)

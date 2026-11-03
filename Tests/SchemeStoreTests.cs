@@ -33,7 +33,9 @@ public class SchemeStoreTests
         store.LoadFrom(i => "K" + i, i => "P" + i, "");
         Assert.Equal(8, store.KeysArray().Length);
         Assert.Equal("K1", store.KeysArray()[0]);
-        Assert.Equal("P8", store.PathsArray()[7]);
+        int h; string p;
+        Assert.True(store.TryResolve("K8", out p, out h));
+        Assert.Equal("P8", p);
     }
 
     [Fact]
@@ -41,8 +43,10 @@ public class SchemeStoreTests
     {
         var store = new SchemeStore();
         store.LoadFrom(i => "K" + i, i => "P" + i, "12");
-        Assert.Equal(12, store.PathsArray().Length);
-        Assert.Equal("K12", store.KeysArray()[11]);
+        Assert.Equal(12, store.KeysArray().Length);
+        int h; string p;
+        Assert.True(store.TryResolve("K12", out p, out h));
+        Assert.Equal("P12", p);
     }
 
     [Fact]
@@ -99,5 +103,52 @@ public class SchemeStoreTests
         int hits;
         Assert.Equal(SchemeMatcher.NoHit, SchemeMatcher.Match(store.KeysArray(), "OLD", out hits));
         Assert.Equal(0, SchemeMatcher.Match(store.KeysArray(), "NEW", out hits));
+    }
+
+    [Fact]
+    public void TryResolve_PairedSnapshot_UnderConcurrentResizes()
+    {
+        // ch:R13-1 回归钉：100 行↔8 行整表改写与解析并发时，keys/paths 必须始终配对——
+        //   旧实现分两个 volatile 数组发布，读侧可"旧 keys+新 paths"→ paths[hit] 越界或错路径
+        var store = new SchemeStore();
+        var big = new List<string[]>();
+        for (int i = 0; i < SchemeStore.MaxSchemes; i++) big.Add(new[] { "K" + i, "P" + i });
+        var small = new List<string[]>();
+        for (int i = 0; i < SchemeStore.LegacyRows; i++) small.Add(new[] { "K" + i, "P" + i });
+        store.SetRows(big);
+
+        var stop = new int[1];
+        var writer = new System.Threading.Thread(() =>
+        {
+            var rng = new Random(20261103);
+            while (System.Threading.Interlocked.CompareExchange(ref stop[0], 0, 0) == 0)
+                store.SetRows(rng.Next(2) == 0 ? big : small);
+        }) { IsBackground = true };
+        writer.Start();
+
+        var ex = Record.Exception(() =>
+        {
+            for (int n = 0; n < 200000; n++)
+            {
+                int h; string p;
+                if (store.TryResolve("K99", out p, out h))
+                    Assert.Equal("P99", p); // 命中了就必须是配对的第 99 行路径
+                if (store.TryResolve("K7", out p, out h))
+                    Assert.Equal("P7", p);
+            }
+        });
+        System.Threading.Interlocked.Exchange(ref stop[0], 1);
+        writer.Join(2000);
+        Assert.Null(ex);
+    }
+
+    [Fact]
+    public void TrimTrailingEmpty_NullRows_TreatedAsEmpty()
+    {
+        // ch:R13-3 null 行契约对齐 SetRows/FindDuplicates：不得 NRE
+        var rows = new List<string[]> { new[] { "A", "1" }, null, new[] { "", "" } };
+        var trimmed = SchemeStore.TrimTrailingEmpty(rows);
+        Assert.Equal(1, trimmed.Count);
+        Assert.Null(SchemeStore.FindDuplicates(new List<string[]> { null, new[] { "B", "" }, null }));
     }
 }

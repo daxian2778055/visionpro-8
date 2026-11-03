@@ -369,7 +369,7 @@ namespace WindowsFormsApplication1
             if (camera_dic[10][2] == "true")
                 c12.CheckState = CheckState.Checked;
 
-            // ch:R12 方案表：按 scheme_count（缺省=老 8 行）装载 N 行进 store，前 8 行由面板同步到文本框
+            // ch:R12 方案表：按 count 键（缺省=老 8 行）装载 N 行进 store，前 8 行由面板同步到文本框
             _schemes.LoadFrom(i => wdini.ReadString("change" + "modbusrtu", i.ToString(), ""),
                               i => wdini.ReadString("path" + "modbusrtu", i.ToString(), ""),
                               wdini.ReadString("change" + "modbusrtu", "count", ""));
@@ -2199,12 +2199,13 @@ namespace WindowsFormsApplication1
                 return;
             }
             _schemes.SetRows(schemeRows);
-            wdini.WriteString("change" + "modbusrtu", "count", schemeRows.Count.ToString());
+            // ch:R13-3 统一"先写 1..N 行、最后写 count"（半程断电时旧 count 生效，超新 count 的旧键不会被读到）
             for (int i = 0; i < schemeRows.Count; i++)
             {
                 wdini.WriteString("change" + "modbusrtu", (i + 1).ToString(), schemeRows[i][0]);
                 wdini.WriteString("path" + "modbusrtu", (i + 1).ToString(), schemeRows[i][1]);
             }
+            wdini.WriteString("change" + "modbusrtu", "count", schemeRows.Count.ToString());
         }
         private SchemeStore _schemes = new SchemeStore(); // ch:R12 方案表数据层（≤100 行，qiehuan 读其快照）
         private SchemeTablePanel _schemePanel;
@@ -2838,17 +2839,16 @@ namespace WindowsFormsApplication1
         private int qiehuan(string aa)
         {
             // ch:R12 匹配走 SchemeStore 快照（≤100 行）：轮询线程不再逐控件跨线程取 Text；空串不参与、多命中冲突拒绝。
-            string[] keys = _schemes.KeysArray();
-            string[] paths = _schemes.PathsArray();
+            // ch:R13-1 TryResolve 一次取配对快照（原两次数组读在并发改表时可"旧 keys+新 paths"撕裂→越界/错路径）
             int hits;
-            int hit = SchemeMatcher.Match(keys, aa, out hits);
-            if (hit >= 0)
+            string schemePath;
+            if (_schemes.TryResolve(aa, out schemePath, out hits))
             {
                 zifu = aa;
-                lujing = paths[hit];
+                lujing = schemePath;
                 return 1;
             }
-            if (hit == SchemeMatcher.Conflict)
+            if (hits > 1)
                 LogSchemeConflictThrottled("方案切换:载图串[" + aa + "]命中" + hits + "路，已拒绝切换（请检查配置重复）");
             return 0;
         }
