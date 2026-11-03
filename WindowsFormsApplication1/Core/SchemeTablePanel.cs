@@ -21,6 +21,9 @@ namespace WindowsFormsApplication1
         private readonly Button _btnAdd;
         private readonly Button _btnDel;
         private readonly Button _btnBrowse;
+        private readonly Button _btnSave;
+        /// <summary>ch:R14-2 宿主窗体接自己的"保存设置"逻辑；面板底部"保存方案表到配置"按钮触发。</summary>
+        public Action SaveRequested;
         private readonly Label _lblInfo;
         private bool _suppress;
         private bool _browsing;
@@ -43,12 +46,27 @@ namespace WindowsFormsApplication1
             _grid.SelectionMode = DataGridViewSelectionMode.RowHeaderSelect;
             _grid.ColumnHeadersHeightSizeMode = DataGridViewColumnHeadersHeightSizeMode.DisableResizing;
             _grid.EditMode = DataGridViewEditMode.EditOnKeystrokeOrF2;
+            // ch:R14-2 UI 打磨：白底细框、斑马纹、固定行高、表头加粗、选中色统一
+            _grid.BackgroundColor = Color.White;
+            _grid.BorderStyle = BorderStyle.FixedSingle;
+            _grid.AllowUserToResizeRows = false;
+            _grid.RowTemplate.Height = 26;
+            _grid.GridColor = Color.FromArgb(214, 218, 224);
+            _grid.AlternatingRowsDefaultCellStyle.BackColor = Color.FromArgb(245, 248, 252);
+            _grid.ColumnHeadersDefaultCellStyle = new DataGridViewCellStyle(_grid.ColumnHeadersDefaultCellStyle)
+            {
+                Font = new Font(_grid.Font, FontStyle.Bold),
+                BackColor = Color.FromArgb(236, 241, 246)
+            };
+            _grid.DefaultCellStyle.SelectionBackColor = Color.FromArgb(0, 122, 204);
+            _grid.DefaultCellStyle.SelectionForeColor = Color.White;
             var colKey = new DataGridViewTextBoxColumn();
             colKey.HeaderText = "载图串";
             colKey.Width = 200;
             var colPath = new DataGridViewTextBoxColumn();
             colPath.HeaderText = "方案路径";
             colPath.Width = 430;
+            colPath.AutoSizeMode = DataGridViewAutoSizeColumnMode.Fill; // ch:R14-2 路径列吃满剩余宽度
             colPath.ToolTipText = "双击单元格选择 .vpp 文件（也可点下方“选择 vpp…”）";
             _grid.Columns.Add(colKey);
             _grid.Columns.Add(colPath);
@@ -74,6 +92,11 @@ namespace WindowsFormsApplication1
             _btnBrowse.Text = "选择 vpp…";
             _btnBrowse.Width = 90;
             _btnBrowse.Click += BtnBrowse_Click;
+            _btnSave = new Button();
+            _btnSave.Text = "保存方案表到配置";
+            _btnSave.Width = 130;
+            _btnSave.BackColor = Color.FromArgb(223, 240, 223);
+            _btnSave.Click += delegate { var h = SaveRequested; if (h != null) h(); else MessageBox.Show("宿主窗体未接保存逻辑。", "保存方案表", MessageBoxButtons.OK, MessageBoxIcon.Warning); };
             _lblInfo = new Label();
             _lblInfo.AutoSize = true;
             _lblInfo.TextAlign = ContentAlignment.MiddleLeft;
@@ -81,6 +104,7 @@ namespace WindowsFormsApplication1
             bottom.Controls.Add(_btnAdd);
             bottom.Controls.Add(_btnDel);
             bottom.Controls.Add(_btnBrowse);
+            bottom.Controls.Add(_btnSave);
             bottom.Controls.Add(_lblInfo);
 
             Controls.Add(_grid);
@@ -210,7 +234,9 @@ namespace WindowsFormsApplication1
 
         private void BtnAdd_Click(object sender, EventArgs e)
         {
-            List<string[]> rows = SchemeStore.TrimTrailingEmpty(ReadGridRows());
+            // ch:R14-2 按"屏显行数"追加而非先裁剪：原实现空表时裁到 0 行再加 1 行、补齐又回 8 行，
+            //   点"添加方案行"视觉上毫无变化（用户反馈"添加行好像也没用"）。
+            List<string[]> rows = ReadGridRows();
             if (rows.Count >= SchemeStore.MaxSchemes)
             {
                 MessageBox.Show("方案数已达上限 " + SchemeStore.MaxSchemes + " 行。", "方案表", MessageBoxButtons.OK, MessageBoxIcon.Information);
@@ -221,10 +247,9 @@ namespace WindowsFormsApplication1
             _suppress = true;
             try
             {
-                // ch:R13-4 与其它刷新路径一致：网格至少保留前 8 行视图，避免添加行后
-                //   网格缩到有效行数、而上方 8 个文本框仍存在导致后续文本框编辑落不到网格
-                FillGrid(PadToLegacy(rows));
+                FillGrid(rows);
                 _grid.CurrentCell = _grid.Rows[rows.Count - 1].Cells[0];
+                try { _grid.FirstDisplayedScrollingRowIndex = Math.Max(0, rows.Count - 8); } catch (Exception) { }
                 _grid.BeginEdit(true);
             }
             finally
@@ -300,7 +325,10 @@ namespace WindowsFormsApplication1
         {
             _grid.Rows.Clear();
             for (int i = 0; i < rows.Count; i++)
-                _grid.Rows.Add(rows[i][0], rows[i][1]);
+            {
+                int idx = _grid.Rows.Add(rows[i][0], rows[i][1]);
+                _grid.Rows[idx].HeaderCell.Value = (idx + 1).ToString(); // ch:R14-2 行号即 ini 键序，便于对照
+            }
         }
 
         private void FillBoxes(List<string[]> rows)

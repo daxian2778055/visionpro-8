@@ -2366,6 +2366,7 @@ namespace WindowsFormsApplication1
                 textBox25.Visible = textBox26.Visible = textBox28.Visible = textBox27.Visible = false;
                 textBox32.Visible = textBox31.Visible = textBox30.Visible = textBox29.Visible = false;
                 label43.Visible = label42.Visible = label41.Visible = label40.Visible = false;
+                _schemePanel.SaveRequested += delegate { button7_Click(this, EventArgs.Empty); }; // ch:R14-2 就地保存=原"保存"逻辑
                 TabPage tp = new TabPage("方案表(≤100)");
                 tp.Controls.Add(_schemePanel);
                 tabControl1.TabPages.Add(tp);

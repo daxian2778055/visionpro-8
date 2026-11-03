@@ -1065,6 +1065,7 @@ namespace WindowsFormsApplication1
                 textBox10.Visible = textBox11.Visible = textBox12.Visible = textBox13.Visible = false;
                 textBox14.Visible = textBox15.Visible = textBox16.Visible = textBox17.Visible = false;
                 label15.Visible = label16.Visible = label14.Visible = false;
+                _schemePanel.SaveRequested += delegate { button5_Click(this, EventArgs.Empty); }; // ch:R14-2 就地保存=原"保存设置"逻辑
                 _btnSchemeTable = new Button();
                 _btnSchemeTable.Text = "方案表(≤100)";
                 _btnSchemeTable.Width = 100;

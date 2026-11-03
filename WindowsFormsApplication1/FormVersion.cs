@@ -10,13 +10,14 @@ namespace WindowsFormsApplication1
     public partial class FormVersion : Form
     {
         // 当前版本（与推送仓库的 git tag 一一对应）：语义化版本 + 发布日期
-        public const string AppVersion = "1.3.44";
+        public const string AppVersion = "1.3.45";
         public const string AppVersionDate = "2026-11-03";
         public const string AppRepoName = "正泰 VP八相机连续海康（M4 - 加密）";
 
         // 版本时间线：与仓库 git tag 一一对应（新版本在最前）
         private static readonly string[] VersionTimeline = new string[] 
         {
+            "v1.3.45  2026-11-03  第14轮续 方案表易用性：①修复『添加方案行』空表时视觉无反馈——原实现先把行裁到有效数(0)再加 1 行、补齐又回 8 行；改为按屏显行数追加并滚动定位+直接进编辑态；②UI 打磨：白底细框/斑马纹/固定行高 26/表头加粗/统一选中色、路径列自动吃满剩余宽度、行号列显示 1..N(即 ini 键序)；③底栏新增『保存方案表到配置』按钮(SaveRequested 钩子接各窗体原保存逻辑：Modbus/Omron=button7、RTU=b3、Form3=button5『保存设置』)，无需切回数据配置页找保存；④说明：网格默认至少 8 行=历史 8 槽兼容，空行不参与匹配、不计入有效方案数。构建 0 error、单测 58/58。",
             "v1.3.44  2026-11-03  第14轮 方案表成为唯一编辑入口：①四窗体（Modbus TCP/Omron/RTU/无协议 Form3）旧『切换』区 8+8 载图串/路径文本框连同行标签隐藏（控件保留作面板镜像，同步与匹配逻辑零改动；cam10 切换寄存器绑定 comboBox21/textBox41/使能□10 不属本区、维持可见）；②路径选择加固——双击事件改绑 CellDoubleClick（原 CellContentDoubleClick 在文本单元格先进编辑态时可能不触发），新增『选择 vpp…』按钮作用于当前行，_browsing 门闩防两入口重入对话框；③面板提示语改口径（编辑即时生效，保存写入配置）。构建 0 error、单测 58/58。",
             "v1.3.43  2026-11-03  第14轮(R13 复审修复)：①组帧缓存——R13-2 的 keys/bytes/seen 三个字段分开发布，客户端/服务端接收线程并发首包可读到 null bytes(ArgumentNullException→连接被拆)、改表时可持久错配旧触发串集合；改为单一不可变 FrameCache 一次 volatile 发布。②方案表计数——PadToLegacy 原地补 8 行后再 UpdateInfo，编辑后『有效方案』恒≥8(与保存裁剪不一致)；改为返回副本，各调用点统一按有效行计数，添加行后网格仍保持至少 8 行视图。③小修——保存顺序 3 处注释改回『先 1..N 后 count』；测试注释 scheme_count→count；AddFramePattern 先去重再判上限(满额重复串不再误报)；双击路径列先 EndEdit 再赋值。④测试加固——并发单测 K7 硬断言/K99 统计命中数、IoPulseOrder 30ms 猜测改事件门闩、新增 MaxPatterns≥100+8 覆盖钉、SetRows 返回值契约；单测 58/58，构建 0 error。",
             "v1.3.42  2026-11-03  第13轮(R12 复核修复，两条 P1)：①SchemeStore 快照撕裂——keys/paths 两个 volatile 数组分开发布，读侧'先 keys 后 paths'在并发改表时可旧新错位：缩表时 paths[hit] 越界(Form3 接收线程按断线处理→整条 TCP 连接被拆)、中间行变更时静默切错路径；改为单一不可变 Snapshot 一次发布+TryResolve 一次取回，四通道 qiehuan 全部接入，新增并发配对回归单测(100↔8 行整表改写×20 万次解析)。②组帧器/粘包诊断仍只认前 8 条载图串——第 9..100 路方案被 TCP 拆包/粘连时静默丢触发(R42 失败模式只覆盖 8/100)且仍在通讯线程读控件；NoteProtoFrameAnomaly/BuildFramePatterns 改读 store 快照，ProtoFrameAssembler.MaxPatterns 64→128(100 方案+8 相机触发)，超上限记限流日志(原静默丢弃)，载图串字节编码按快照引用缓存不再每收包重编。③警告组：删除 Form3 out0..out3 死代码(装载会用历史 out* 段值覆盖方案路径表前 8 行，现场 ini 残留 OK/NG 串时切方案必失败)；三窗体保存统一'先写 1..N 行、最后写 count'(与 Form3 一致，半程断电旧 count 生效)；文档/注释键名统一为 count(v1.3.41 条目误写 scheme_count 已就地更正)；SetRows 返回被弃行数；TrimTrailingEmpty/面板同步补 null 行/null 控件防护；方案表计数显示改有效行口径；双击路径列可浏览 vpp(第 9..100 行同享)；MaxSchemes 常量合并到 SchemeStore 单源。单测 57/57(新增配对/null 契约 2 项)，构建 0 error。",
