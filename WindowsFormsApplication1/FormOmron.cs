@@ -2475,6 +2475,11 @@ namespace WindowsFormsApplication1
                 TextBox[] zifu = { textBox40, textBox39, textBox38, textBox37, textBox36, textBox35, textBox34, textBox33 };
                 TextBox[] path = { textBox25, textBox26, textBox28, textBox27, textBox32, textBox31, textBox30, textBox29 };
                 _schemePanel = new SchemeTablePanel(_schemes, zifu, path);
+                // ch:R14 旧"切换"区 8+8 文本框并入方案表后隐藏（面板仍以其为镜像，逻辑零改动）
+                textBox40.Visible = textBox39.Visible = textBox38.Visible = textBox37.Visible = false;
+                textBox36.Visible = textBox35.Visible = textBox34.Visible = textBox33.Visible = false;
+                textBox25.Visible = textBox26.Visible = textBox28.Visible = textBox27.Visible = false;
+                textBox32.Visible = textBox31.Visible = textBox30.Visible = textBox29.Visible = false;
                 TabPage tp = new TabPage("方案表(≤100)");
                 tp.Controls.Add(_schemePanel);
                 tabControl1.TabPages.Add(tp);

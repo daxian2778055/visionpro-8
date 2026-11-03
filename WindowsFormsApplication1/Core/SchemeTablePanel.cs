@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Drawing;
+using System.IO;
 using System.Windows.Forms;
 
 namespace WindowsFormsApplication1
@@ -19,8 +20,10 @@ namespace WindowsFormsApplication1
         private readonly DataGridView _grid;
         private readonly Button _btnAdd;
         private readonly Button _btnDel;
+        private readonly Button _btnBrowse;
         private readonly Label _lblInfo;
         private bool _suppress;
+        private bool _browsing;
 
         public SchemeTablePanel(SchemeStore store, TextBox[] zifuBoxes, TextBox[] pathBoxes)
         {
@@ -39,17 +42,21 @@ namespace WindowsFormsApplication1
             _grid.RowHeadersWidth = 34;
             _grid.SelectionMode = DataGridViewSelectionMode.RowHeaderSelect;
             _grid.ColumnHeadersHeightSizeMode = DataGridViewColumnHeadersHeightSizeMode.DisableResizing;
+            _grid.EditMode = DataGridViewEditMode.EditOnKeystrokeOrF2;
             var colKey = new DataGridViewTextBoxColumn();
             colKey.HeaderText = "载图串";
             colKey.Width = 200;
             var colPath = new DataGridViewTextBoxColumn();
             colPath.HeaderText = "方案路径";
             colPath.Width = 430;
+            colPath.ToolTipText = "双击单元格选择 .vpp 文件（也可点下方“选择 vpp…”）";
             _grid.Columns.Add(colKey);
             _grid.Columns.Add(colPath);
             _grid.CellValueChanged += Grid_CellChanged;
             _grid.CurrentCellDirtyStateChanged += Grid_DirtyFlush;
-            _grid.CellContentDoubleClick += Grid_Browse; // ch:R13-3 双击路径列=浏览 vpp（第 9..100 行也有入口）
+            // ch:R14 原绑 CellContentDoubleClick：文本框单元格双击会先进入编辑态，内容双击事件可能不触发。
+            //   改绑 CellDoubleClick（单元格任意位置双击均触发，含第 9..100 行），配合下方“选择 vpp…”按钮兜底。
+            _grid.CellDoubleClick += Grid_Browse;
 
             var bottom = new FlowLayoutPanel();
             bottom.Dock = DockStyle.Bottom;
@@ -63,12 +70,17 @@ namespace WindowsFormsApplication1
             _btnDel.Text = "删除选中行";
             _btnDel.Width = 100;
             _btnDel.Click += BtnDel_Click;
+            _btnBrowse = new Button();
+            _btnBrowse.Text = "选择 vpp…";
+            _btnBrowse.Width = 90;
+            _btnBrowse.Click += BtnBrowse_Click;
             _lblInfo = new Label();
             _lblInfo.AutoSize = true;
             _lblInfo.TextAlign = ContentAlignment.MiddleLeft;
             _lblInfo.Margin = new Padding(10, 8, 0, 0);
             bottom.Controls.Add(_btnAdd);
             bottom.Controls.Add(_btnDel);
+            bottom.Controls.Add(_btnBrowse);
             bottom.Controls.Add(_lblInfo);
 
             Controls.Add(_grid);
@@ -110,15 +122,41 @@ namespace WindowsFormsApplication1
         private void Grid_Browse(object sender, DataGridViewCellEventArgs e)
         {
             if (e.RowIndex < 0 || e.ColumnIndex != 1) return;
-            using (OpenFileDialog dlg = new OpenFileDialog())
+            BrowseIntoCell(1, e.RowIndex);
+        }
+
+        /// <summary>ch:R14 "选择 vpp…"按钮兜底：作用于当前行的路径列（先选中行再点按钮）。</summary>
+        private void BtnBrowse_Click(object sender, EventArgs e)
+        {
+            DataGridViewRow row = _grid.CurrentRow;
+            if (row == null || row.Index < 0 || row.IsNewRow)
             {
-                dlg.Filter = "VP vpp File|*.vpp*";
-                try { dlg.FileName = Convert.ToString(_grid[e.ColumnIndex, e.RowIndex].Value ?? ""); } catch (Exception) { }
-                Form host = FindForm();
-                if (dlg.ShowDialog(host) != DialogResult.OK) return;
-                // ch:R13-4 编辑态先提交，避免赋值被编辑控件里的旧文本覆盖
-                try { _grid.EndEdit(); } catch (Exception) { }
-                _grid[e.ColumnIndex, e.RowIndex].Value = dlg.FileName; // 触发 CellValueChanged → store/文本框同步
+                MessageBox.Show("请先选中要设置路径的方案行。", "选择 vpp", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                return;
+            }
+            BrowseIntoCell(1, row.Index);
+        }
+
+        private void BrowseIntoCell(int col, int rowIndex)
+        {
+            if (_browsing) return; // ch:R14 双击+按钮两入口共用，防对话框重入
+            _browsing = true;
+            try
+            {
+                using (OpenFileDialog dlg = new OpenFileDialog())
+                {
+                    dlg.Filter = "VP vpp File|*.vpp*";
+                    try { dlg.FileName = Convert.ToString(_grid[col, rowIndex].Value ?? ""); } catch (Exception) { }
+                    Form host = FindForm();
+                    if (dlg.ShowDialog(host) != DialogResult.OK) return;
+                    // ch:R13-4 编辑态先提交，避免赋值被编辑控件里的旧文本覆盖
+                    try { _grid.EndEdit(); } catch (Exception) { }
+                    _grid[col, rowIndex].Value = dlg.FileName; // 触发 CellValueChanged → store/文本框同步
+                }
+            }
+            finally
+            {
+                _browsing = false;
             }
         }
 
@@ -278,7 +316,8 @@ namespace WindowsFormsApplication1
 
         private void UpdateInfo(List<string[]> rows)
         {
-            _lblInfo.Text = "有效方案 " + rows.Count + " / 上限 " + SchemeStore.MaxSchemes + " 行（前 8 行与上方文本框同步）";
+            // ch:R14 旧"切换"区文本框已隐藏，本表为唯一编辑入口；提示语同步改口径
+            _lblInfo.Text = "有效方案 " + rows.Count + " / 上限 " + SchemeStore.MaxSchemes + " 行（双击路径列可选 vpp；编辑即时生效，保存写入配置）";
         }
     }
 }

@@ -1059,6 +1059,12 @@ namespace WindowsFormsApplication1
                 TextBox[] zifu = { textBox18, textBox19, textBox21, textBox20, textBox23, textBox22, textBox25, textBox24 };
                 TextBox[] path = { textBox10, textBox11, textBox12, textBox13, textBox14, textBox15, textBox16, textBox17 };
                 _schemePanel = new SchemeTablePanel(_schemes, zifu, path);
+                // ch:R14 旧载图串/路径两列并入方案表后隐藏（面板仍以其为镜像，逻辑零改动）
+                textBox18.Visible = textBox19.Visible = textBox21.Visible = textBox20.Visible = false;
+                textBox23.Visible = textBox22.Visible = textBox25.Visible = textBox24.Visible = false;
+                textBox10.Visible = textBox11.Visible = textBox12.Visible = textBox13.Visible = false;
+                textBox14.Visible = textBox15.Visible = textBox16.Visible = textBox17.Visible = false;
+                label15.Visible = label16.Visible = label14.Visible = false;
                 _btnSchemeTable = new Button();
                 _btnSchemeTable.Text = "方案表(≤100)";
                 _btnSchemeTable.Width = 100;
