@@ -3344,7 +3344,7 @@ namespace WindowsFormsApplication1
 
         private void button7_Click(object sender, EventArgs e)
         {
-            // ch:R12 方案表全量保存（≤100 行）：重复载图串拒绝保存（与 Form3 R43 语义一致）；先写 count 再写 1..N。
+            // ch:R12 方案表全量保存（≤100 行）：重复载图串拒绝保存（与 Form3 R43 语义一致）；先写 1..N 行、最后写 count。
             //   老 ini 无 count 键也走此路径后自动补齐；表尾连续空行落盘前剔除。
             List<string[]> schemeRows = _schemePanel != null ? _schemePanel.GetNormalizedRows() : _schemes.GetRows();
             schemeRows = SchemeStore.TrimTrailingEmpty(schemeRows);

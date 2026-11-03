@@ -670,27 +670,36 @@ namespace WindowsFormsApplication1
         }
         // ch:R42 收包组帧用触发串集合：方案表全部载图串（ch:R13-2 由 8 条扩到 ≤100 条，取 SchemeStore 快照，
         //   不再读控件） + Form1 经 framePatternsProvider 提供的各相机方案 triggerZifu（vpp 输入，Form3 拿不到）。
-        //   载图串部分按快照数组引用缓存字节编码：仅改表时重建，100 行时不再每次 Receive 重编 100 个 GBK 串；
-        //   缓存字段若被客户端/服务端两个接收线程并发写坏最多少缓存一次重建，无正确性影响。
+        //   载图串部分按快照数组引用缓存字节编码：仅改表时重建，100 行时不再每次 Receive 重编 100 个 GBK 串。
+        //   ch:R13-4 缓存打包成单一不可变对象后一次发布：客户端/服务端多个接收线程并发重建时，
+        //   读侧要么看到完整的旧缓存、要么看到完整的新缓存，不会出现"新 keys+旧 bytes"或 null 缓存。
         public Func<string[]> framePatternsProvider;
-        private string[] _frameOwnKeysRef;
-        private List<byte[]> _frameOwnBytesCache;
-        private HashSet<string> _frameOwnSeenCache;
+        private sealed class FrameCache
+        {
+            public readonly string[] Keys;
+            public readonly List<byte[]> Bytes;
+            public readonly HashSet<string> Seen;
+            public FrameCache(string[] keys, List<byte[]> bytes, HashSet<string> seen)
+            {
+                Keys = keys; Bytes = bytes; Seen = seen;
+            }
+        }
+        private volatile FrameCache _frameCache;
         private int _frameOverflowLoggedMs = 0;
         private List<byte[]> BuildFramePatterns()
         {
             string[] own = _schemes.KeysArray();
-            if (!ReferenceEquals(own, _frameOwnKeysRef))
+            FrameCache cache = _frameCache;
+            if (cache == null || !ReferenceEquals(own, cache.Keys))
             {
                 List<byte[]> built = new List<byte[]>();
                 HashSet<string> seenB = new HashSet<string>();
                 for (int i = 0; i < own.Length; i++) AddFramePattern(built, seenB, own[i]);
-                _frameOwnKeysRef = own;
-                _frameOwnBytesCache = built;
-                _frameOwnSeenCache = seenB;
+                cache = new FrameCache(own, built, seenB);
+                _frameCache = cache; // ch:R13-4 单次引用发布
             }
-            List<byte[]> list = new List<byte[]>(_frameOwnBytesCache);
-            HashSet<string> seen = new HashSet<string>(_frameOwnSeenCache);
+            List<byte[]> list = new List<byte[]>(cache.Bytes);
+            HashSet<string> seen = new HashSet<string>(cache.Seen);
             try
             {
                 Func<string[]> ext = framePatternsProvider;
@@ -707,6 +716,8 @@ namespace WindowsFormsApplication1
         private void AddFramePattern(List<byte[]> list, HashSet<string> seen, string t)
         {
             if (string.IsNullOrEmpty(t)) return;
+            // ch:R13-4 先去重再判上限：满额时重复串不能再误报"超上限"（原顺序会记录假告警）
+            if (seen.Contains(t)) return;
             if (list.Count >= ProtoFrameAssembler.MaxPatterns)
             {
                 // ch:R13-2 原静默丢弃：108 条(100 方案+8 相机)内不会触发，一旦配置异常超限要留线索而不是无声少挂一条
@@ -718,7 +729,7 @@ namespace WindowsFormsApplication1
                 }
                 return;
             }
-            if (!seen.Add(t)) return;
+            seen.Add(t);
             list.Add(_protoEncoding.GetBytes(t));
         }
         private string DecodeProtoBytes(byte[] buf, int len)

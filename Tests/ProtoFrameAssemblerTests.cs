@@ -136,4 +136,13 @@ public class ProtoFrameAssemblerTests
         var b = new ProtoFrameAssembler();
         Assert.Equal(new[] { "T" }, S(b.Append(Encoding.ASCII.GetBytes("T"), 1, P("T", "T1"))));
     }
+
+    [Fact]
+    public void 上限覆盖_方案表全部行加相机触发串()
+    {
+        // ch:R13-4 钉住耦合：组帧上限必须覆盖 100 路方案表 + 8 路相机 triggerZifu，
+        //   否则扩容后第 56 条以后的载图串会再次被静默排除（R13-2 的 8/100 缺口）
+        Assert.True(ProtoFrameAssembler.MaxPatterns >= SchemeStore.MaxSchemes + SchemeStore.LegacyRows,
+            "MaxPatterns=" + ProtoFrameAssembler.MaxPatterns + " 小于 MaxSchemes+LegacyRows");
+    }
 }

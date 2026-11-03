@@ -99,6 +99,8 @@ public class IoPulseOrderTests
         // 正确判据是 outstanding 计数（入队前 +1，执行完 finally 里 -1）。
         int outstanding = 0;
         var q = new BlockingCollection<Action>();
+        var started = new ManualResetEventSlim(false);
+        var release = new ManualResetEventSlim(false);
 
         var worker = Task.Run(() =>
         {
@@ -110,13 +112,19 @@ public class IoPulseOrderTests
         });
 
         Interlocked.Increment(ref outstanding);   // 入队前登记
-        q.Add(() => Thread.Sleep(150));           // 模拟最后一条关断执行较慢
+        q.Add(() =>
+        {
+            started.Set();                         // 消费者已取走并开始执行
+            release.Wait(2000);                    // 卡住任务体，直到断言完成
+        });
         _ = worker; // 消费者后台运行，测试仅验证 outstanding 判据
 
-        Thread.Sleep(30);                          // 让消费者取走（Count 归 0），任务体仍在睡
+        // ch:R13-4 不用固定 Sleep 猜调度：等任务真正开始执行，再断言队列已空而 outstanding 仍 >0
+        Assert.True(started.Wait(2000));
         Assert.True(q.Count == 0);               // 队列已被取空
         // 任务执行中时 outstanding 仍应 >0，仅查队列长度会误判排空
         Assert.True(Interlocked.CompareExchange(ref outstanding, 0, 0) > 0);
+        release.Set();
 
         // 轮询到真正排空
         var deadline = Environment.TickCount + 2000;
@@ -125,6 +133,8 @@ public class IoPulseOrderTests
         Assert.Equal(0, Interlocked.CompareExchange(ref outstanding, 0, 0)); // 排空后 outstanding 应为 0
 
         q.CompleteAdding();
+        started.Dispose();
+        release.Dispose();
     }
 
     [Fact]

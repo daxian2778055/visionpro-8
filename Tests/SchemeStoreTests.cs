@@ -8,7 +8,7 @@ namespace VP8CamUnitTests;
 /// <summary>
 /// ch:R12 方案表数据层回归。
 ///   Tests/UnitTests.csproj 直链 WindowsFormsApplication1/Core/SchemeStore.cs。
-///   现场语义钉住：无 scheme_count 的老 ini 必须仍按 8 行装载（零迁移兼容）；
+///   现场语义钉住：无 count 键的老 ini 必须仍按 8 行装载（零迁移兼容）；
 ///   超上限夹 100；重复检测与尾部空行裁剪决定保存内容。
 /// </summary>
 public class SchemeStoreTests
@@ -55,7 +55,8 @@ public class SchemeStoreTests
         var store = new SchemeStore();
         var rows = new List<string[]>();
         for (int i = 0; i < 150; i++) rows.Add(new[] { "S" + i, "p" + i });
-        store.SetRows(rows);
+        int dropped = store.SetRows(rows);
+        Assert.Equal(50, dropped); // ch:R13-4 返回值契约：超出 100 的行数
         Assert.Equal(SchemeStore.MaxSchemes, store.KeysArray().Length);
         Assert.Equal("S99", store.KeysArray()[99]);
 
@@ -126,20 +127,27 @@ public class SchemeStoreTests
         }) { IsBackground = true };
         writer.Start();
 
+        int hit99 = 0;
         var ex = Record.Exception(() =>
         {
             for (int n = 0; n < 200000; n++)
             {
                 int h; string p;
                 if (store.TryResolve("K99", out p, out h))
+                {
+                    hit99++;
                     Assert.Equal("P99", p); // 命中了就必须是配对的第 99 行路径
-                if (store.TryResolve("K7", out p, out h))
-                    Assert.Equal("P7", p);
+                }
+                // K7 在大表/小表中都存在：必须每次都唯一命中，防止 TryResolve 退化为恒 false 时测试空过
+                Assert.True(store.TryResolve("K7", out p, out h));
+                Assert.Equal(1, h);
+                Assert.Equal("P7", p);
             }
         });
         System.Threading.Interlocked.Exchange(ref stop[0], 1);
         writer.Join(2000);
         Assert.Null(ex);
+        Assert.True(hit99 > 0); // 确保 100 行快照确实被解析过，而不是只跑了小表
     }
 
     [Fact]
@@ -148,7 +156,7 @@ public class SchemeStoreTests
         // ch:R13-3 null 行契约对齐 SetRows/FindDuplicates：不得 NRE
         var rows = new List<string[]> { new[] { "A", "1" }, null, new[] { "", "" } };
         var trimmed = SchemeStore.TrimTrailingEmpty(rows);
-        Assert.Equal(1, trimmed.Count);
+        Assert.Single(trimmed);
         Assert.Null(SchemeStore.FindDuplicates(new List<string[]> { null, new[] { "B", "" }, null }));
     }
 }

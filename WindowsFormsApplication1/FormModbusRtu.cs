@@ -2188,7 +2188,7 @@ namespace WindowsFormsApplication1
 
         private void b3_Click(object sender, EventArgs e)
         {
-            // ch:R12 方案表全量保存（≤100 行）：重复载图串拒绝保存；先写 count 再写 1..N。
+            // ch:R12 方案表全量保存（≤100 行）：重复载图串拒绝保存；先写 1..N 行、最后写 count。
             List<string[]> schemeRows = _schemePanel != null ? _schemePanel.GetNormalizedRows() : _schemes.GetRows();
             schemeRows = SchemeStore.TrimTrailingEmpty(schemeRows);
             string dupMsg = SchemeStore.FindDuplicates(schemeRows);

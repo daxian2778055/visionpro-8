@@ -10,13 +10,14 @@ namespace WindowsFormsApplication1
     public partial class FormVersion : Form
     {
         // 当前版本（与推送仓库的 git tag 一一对应）：语义化版本 + 发布日期
-        public const string AppVersion = "1.3.42";
+        public const string AppVersion = "1.3.43";
         public const string AppVersionDate = "2026-11-03";
         public const string AppRepoName = "正泰 VP八相机连续海康（M4 - 加密）";
 
         // 版本时间线：与仓库 git tag 一一对应（新版本在最前）
         private static readonly string[] VersionTimeline = new string[] 
         {
+            "v1.3.43  2026-11-03  第14轮(R13 复审修复)：①组帧缓存——R13-2 的 keys/bytes/seen 三个字段分开发布，客户端/服务端接收线程并发首包可读到 null bytes(ArgumentNullException→连接被拆)、改表时可持久错配旧触发串集合；改为单一不可变 FrameCache 一次 volatile 发布。②方案表计数——PadToLegacy 原地补 8 行后再 UpdateInfo，编辑后『有效方案』恒≥8(与保存裁剪不一致)；改为返回副本，各调用点统一按有效行计数，添加行后网格仍保持至少 8 行视图。③小修——保存顺序 3 处注释改回『先 1..N 后 count』；测试注释 scheme_count→count；AddFramePattern 先去重再判上限(满额重复串不再误报)；双击路径列先 EndEdit 再赋值。④测试加固——并发单测 K7 硬断言/K99 统计命中数、IoPulseOrder 30ms 猜测改事件门闩、新增 MaxPatterns≥100+8 覆盖钉、SetRows 返回值契约；单测 58/58，构建 0 error。",
             "v1.3.42  2026-11-03  第13轮(R12 复核修复，两条 P1)：①SchemeStore 快照撕裂——keys/paths 两个 volatile 数组分开发布，读侧'先 keys 后 paths'在并发改表时可旧新错位：缩表时 paths[hit] 越界(Form3 接收线程按断线处理→整条 TCP 连接被拆)、中间行变更时静默切错路径；改为单一不可变 Snapshot 一次发布+TryResolve 一次取回，四通道 qiehuan 全部接入，新增并发配对回归单测(100↔8 行整表改写×20 万次解析)。②组帧器/粘包诊断仍只认前 8 条载图串——第 9..100 路方案被 TCP 拆包/粘连时静默丢触发(R42 失败模式只覆盖 8/100)且仍在通讯线程读控件；NoteProtoFrameAnomaly/BuildFramePatterns 改读 store 快照，ProtoFrameAssembler.MaxPatterns 64→128(100 方案+8 相机触发)，超上限记限流日志(原静默丢弃)，载图串字节编码按快照引用缓存不再每收包重编。③警告组：删除 Form3 out0..out3 死代码(装载会用历史 out* 段值覆盖方案路径表前 8 行，现场 ini 残留 OK/NG 串时切方案必失败)；三窗体保存统一'先写 1..N 行、最后写 count'(与 Form3 一致，半程断电旧 count 生效)；文档/注释键名统一为 count(v1.3.41 条目误写 scheme_count 已就地更正)；SetRows 返回被弃行数；TrimTrailingEmpty/面板同步补 null 行/null 控件防护；方案表计数显示改有效行口径；双击路径列可浏览 vpp(第 9..100 行同享)；MaxSchemes 常量合并到 SchemeStore 单源。单测 57/57(新增配对/null 契约 2 项)，构建 0 error。",
             "v1.3.41  2026-11-03  第12轮 方案切换扩容至 100 量级：新增 Core\\SchemeStore/SchemeTablePanel/SchemeMatcher（纯数据层+代码构造表格，Tests 直链同源回归）。四条通讯通道（无协议 Form3、Modbus TCP、Omron、RTU）的『载图串→方案路径』从固定 8 对扩为 N 行：ini 新键 count（缺失=按老 8 键读取，现场 test.ini 零迁移兼容；实现与注释曾误写为 scheme_count，v1.3.42 起文档统一为 count），上限 100。匹配语义四通道统一：精确匹配、空串不参与、唯一命中才切换、多命中冲突拒绝并限流记日志（原 Modbus 族 8 分支 if 链先到先得会静默切错方案、空文本框遇空输入误命中一并封堵）。qiehuan 改读 store 快照数组——轮询/接收线程不再逐控件跨线程取 Text(100 行不放大)；前 8 行与既有文本框双向同步（浏览选路径照常生效），第 9..100 行在新增『方案表(≤100)』选项卡编辑（Form3 无 TabControl，为代码按钮+模态窗）；保存全表重复拒绝保存（并入 R43/R45 校验到全表）。新增单测 22 项（匹配器8+数据层14），共 55/55。注①：Form3 与 Omron 共用 change/path 两段（历史设计），两窗共享同一方案表属既有行为；注②：Form3 入口按钮为代码定位（保存按钮下方+6px），未经运行期目检，首开请确认无遮挡。",
             "v1.3.40  2026-10-21  第45轮(N5 写回执拼帧修复)：①N5——ReadOneFrame 续读起点按功能码区分：FC03 读长度后从下标3续读，FC06/FC10(8字节)与异常响应(5字节)从下标2续读 total-2；原实现统一从下标3会少读1字节，CRC 必失败且串口残留本帧末字节导致后续失步；写回执只有长度+功能码+CRC全通过才返回8；CRC失败不再 DiscardInBuffer，保留已进入缓冲的下一帧；异常响应先 CRC 再识别；②N4 残留——闩 CompareExchange 成功后、Task.Run 前的前置步骤(停采/进度窗/枚举/关设备)异常时只复位本次已置上的闩并跳过 Task.Run，不再永久卡死；③载图串与相机 triggerZifu 交叉冲突——保存时由仅提示改为弹窗拒绝保存(装载期仅记日志)，避免同一帧只切方案而跳过 getData。构建 0 error、单测 33/33。",

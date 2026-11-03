@@ -116,6 +116,8 @@ namespace WindowsFormsApplication1
                 try { dlg.FileName = Convert.ToString(_grid[e.ColumnIndex, e.RowIndex].Value ?? ""); } catch (Exception) { }
                 Form host = FindForm();
                 if (dlg.ShowDialog(host) != DialogResult.OK) return;
+                // ch:R13-4 编辑态先提交，避免赋值被编辑控件里的旧文本覆盖
+                try { _grid.EndEdit(); } catch (Exception) { }
                 _grid[e.ColumnIndex, e.RowIndex].Value = dlg.FileName; // 触发 CellValueChanged → store/文本框同步
             }
         }
@@ -181,7 +183,9 @@ namespace WindowsFormsApplication1
             _suppress = true;
             try
             {
-                FillGrid(rows);
+                // ch:R13-4 与其它刷新路径一致：网格至少保留前 8 行视图，避免添加行后
+                //   网格缩到有效行数、而上方 8 个文本框仍存在导致后续文本框编辑落不到网格
+                FillGrid(PadToLegacy(rows));
                 _grid.CurrentCell = _grid.Rows[rows.Count - 1].Cells[0];
                 _grid.BeginEdit(true);
             }
@@ -189,7 +193,7 @@ namespace WindowsFormsApplication1
             {
                 _suppress = false;
             }
-            UpdateInfo(rows);
+            UpdateInfo(SchemeStore.TrimTrailingEmpty(rows)); // ch:R13-4 新加的空行不计入有效方案，与保存裁剪口径一致
         }
 
         private void BtnDel_Click(object sender, EventArgs e)
@@ -241,10 +245,17 @@ namespace WindowsFormsApplication1
 
         private static List<string[]> PadToLegacy(List<string[]> rows)
         {
-            if (rows == null) rows = new List<string[]>();
-            while (rows.Count < SchemeStore.LegacyRows)
-                rows.Add(new string[] { "", "" });
-            return rows;
+            // ch:R13-4 返回补齐后的副本，不修改入参：调用方随后用原 rows 调 UpdateInfo，
+            //   若原地补齐会把"有效行"算成至少 8 行（保存时又裁剪，计数前后不一致）。
+            List<string[]> copy = new List<string[]>();
+            if (rows != null)
+            {
+                for (int i = 0; i < rows.Count; i++)
+                    copy.Add(rows[i] ?? new string[] { "", "" });
+            }
+            while (copy.Count < SchemeStore.LegacyRows)
+                copy.Add(new string[] { "", "" });
+            return copy;
         }
 
         private void FillGrid(List<string[]> rows)
