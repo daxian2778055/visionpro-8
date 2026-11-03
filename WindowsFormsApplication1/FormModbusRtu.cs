@@ -369,22 +369,11 @@ namespace WindowsFormsApplication1
             if (camera_dic[10][2] == "true")
                 c12.CheckState = CheckState.Checked;
 
-            t12.Text = wdini.ReadString("change" + "modbusrtu", "1", "");
-            t13.Text = wdini.ReadString("change" + "modbusrtu", "2", "");
-            t14.Text = wdini.ReadString("change" + "modbusrtu", "3", "");
-            t15.Text = wdini.ReadString("change" + "modbusrtu", "4", "");
-            t16.Text = wdini.ReadString("change" + "modbusrtu", "5", "");
-            t17.Text = wdini.ReadString("change" + "modbusrtu", "6", "");
-            t18.Text = wdini.ReadString("change" + "modbusrtu", "7", "");
-            t19.Text = wdini.ReadString("change" + "modbusrtu", "8", "");
-            t20.Text = wdini.ReadString("path" + "modbusrtu", "1", "");
-            t21.Text = wdini.ReadString("path" + "modbusrtu", "2", "");
-            t22.Text = wdini.ReadString("path" + "modbusrtu", "3", "");
-            t23.Text = wdini.ReadString("path" + "modbusrtu", "4", "");
-            t24.Text = wdini.ReadString("path" + "modbusrtu", "5", "");
-            t25.Text = wdini.ReadString("path" + "modbusrtu", "6", "");
-            t26.Text = wdini.ReadString("path" + "modbusrtu", "7", "");
-            t27.Text = wdini.ReadString("path" + "modbusrtu", "8", "");
+            // ch:R12 方案表：按 scheme_count（缺省=老 8 行）装载 N 行进 store，前 8 行由面板同步到文本框
+            _schemes.LoadFrom(i => wdini.ReadString("change" + "modbusrtu", i.ToString(), ""),
+                              i => wdini.ReadString("path" + "modbusrtu", i.ToString(), ""),
+                              wdini.ReadString("change" + "modbusrtu", "count", ""));
+            InitSchemeUi();
 
             Task.Run(() =>
             {
@@ -2199,23 +2188,41 @@ namespace WindowsFormsApplication1
 
         private void b3_Click(object sender, EventArgs e)
         {
-            wdini.WriteString("change"+ "modbusrtu", "1", t12.Text);
-            wdini.WriteString("change"+ "modbusrtu", "2", t13.Text);
-            wdini.WriteString("change"+ "modbusrtu", "3", t14.Text);
-            wdini.WriteString("change"+ "modbusrtu", "4", t15.Text);
-            wdini.WriteString("change"+ "modbusrtu", "5", t16.Text);
-            wdini.WriteString("change"+ "modbusrtu", "6", t17.Text);
-            wdini.WriteString("change"+ "modbusrtu", "7", t18.Text);
-            wdini.WriteString("change"+ "modbusrtu", "8", t19.Text);
-
-            wdini.WriteString("path"+ "modbusrtu", "1", t20.Text);
-            wdini.WriteString("path"+ "modbusrtu", "2", t21.Text);
-            wdini.WriteString("path"+ "modbusrtu", "3", t22.Text);
-            wdini.WriteString("path"+ "modbusrtu", "4", t23.Text);
-            wdini.WriteString("path"+ "modbusrtu", "5", t24.Text);
-            wdini.WriteString("path"+ "modbusrtu", "6", t25.Text);
-            wdini.WriteString("path"+ "modbusrtu", "7", t26.Text);
-            wdini.WriteString("path"+ "modbusrtu", "8", t27.Text);
+            // ch:R12 方案表全量保存（≤100 行）：重复载图串拒绝保存；先写 count 再写 1..N。
+            List<string[]> schemeRows = _schemePanel != null ? _schemePanel.GetNormalizedRows() : _schemes.GetRows();
+            schemeRows = SchemeStore.TrimTrailingEmpty(schemeRows);
+            string dupMsg = SchemeStore.FindDuplicates(schemeRows);
+            if (dupMsg != null)
+            {
+                MsgErroeLog.WriteLog("载图串重复拒绝保存:" + dupMsg);
+                MessageBox.Show("载图触发串重复，无法确定切换目标：" + dupMsg + "\r\n\r\n请修改重复的载图串后再保存。", "载图串冲突", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                return;
+            }
+            _schemes.SetRows(schemeRows);
+            wdini.WriteString("change" + "modbusrtu", "count", schemeRows.Count.ToString());
+            for (int i = 0; i < schemeRows.Count; i++)
+            {
+                wdini.WriteString("change" + "modbusrtu", (i + 1).ToString(), schemeRows[i][0]);
+                wdini.WriteString("path" + "modbusrtu", (i + 1).ToString(), schemeRows[i][1]);
+            }
+        }
+        private SchemeStore _schemes = new SchemeStore(); // ch:R12 方案表数据层（≤100 行，qiehuan 读其快照）
+        private SchemeTablePanel _schemePanel;
+        private void InitSchemeUi()
+        {
+            if (_schemePanel == null)
+            {
+                TextBox[] zifu = { t12, t13, t14, t15, t16, t17, t18, t19 };
+                TextBox[] path = { t20, t21, t22, t23, t24, t25, t26, t27 };
+                _schemePanel = new SchemeTablePanel(_schemes, zifu, path);
+                TabPage tp = new TabPage("方案表(≤100)");
+                tp.Controls.Add(_schemePanel);
+                tabControl1.TabPages.Add(tp);
+            }
+            else
+            {
+                _schemePanel.SyncAllFromStore();
+            }
         }
         // ch:R43 P2-12 原实现每个寄存器 new Regex（20ms 轮询 × 数十通道），改 IndexOf 截取，语义不变、零正则编译
         public string GetMiddleValue(string str, string sta, string end)
@@ -2818,60 +2825,32 @@ namespace WindowsFormsApplication1
             }
         }
         }
+        private int _lastSchemeConflictLogMs = 0; // ch:R12 载图串冲突限流日志（5s 一条）
+        private void LogSchemeConflictThrottled(string msg)
+        {
+            int now = Environment.TickCount;
+            if (unchecked(now - _lastSchemeConflictLogMs) >= 5000)
+            {
+                _lastSchemeConflictLogMs = now;
+                MsgErroeLog.WriteLog(msg);
+            }
+        }
         private int qiehuan(string aa)
         {
-            if (t12.Text == aa)
+            // ch:R12 匹配走 SchemeStore 快照（≤100 行）：轮询线程不再逐控件跨线程取 Text；空串不参与、多命中冲突拒绝。
+            string[] keys = _schemes.KeysArray();
+            string[] paths = _schemes.PathsArray();
+            int hits;
+            int hit = SchemeMatcher.Match(keys, aa, out hits);
+            if (hit >= 0)
             {
                 zifu = aa;
-                lujing = t20.Text;
+                lujing = paths[hit];
                 return 1;
             }
-            else if (t13.Text == aa)
-            {
-                zifu = aa;
-                lujing = t21.Text;
-                return 1;
-            }
-            else if (t14.Text == aa)
-            {
-                zifu = aa;
-                lujing = t22.Text;
-                return 1;
-            }
-            else if (t15.Text == aa)
-            {
-                zifu = aa;
-                lujing = t23.Text;
-                return 1;
-            }
-            else if (t16.Text == aa)
-            {
-                zifu = aa;
-                lujing = t24.Text;
-                return 1;
-            }
-            else if (t17.Text == aa)
-            {
-                zifu = aa;
-                lujing = t25.Text;
-                return 1;
-            }
-            else if (t18.Text == aa)
-            {
-                zifu = aa;
-                lujing = t26.Text;
-                return 1;
-            }
-            else if (t19.Text == aa)
-            {
-                zifu = aa;
-                lujing = t27.Text;
-                return 1;
-            }
-            else
-            {
-                return 0;
-            }
+            if (hit == SchemeMatcher.Conflict)
+                LogSchemeConflictThrottled("方案切换:载图串[" + aa + "]命中" + hits + "路，已拒绝切换（请检查配置重复）");
+            return 0;
         }
 
         private void comboBox2_SelectedIndexChanged_1(object sender, EventArgs e)

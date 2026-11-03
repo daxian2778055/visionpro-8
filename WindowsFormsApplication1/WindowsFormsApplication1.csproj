@@ -456,6 +456,9 @@
   <ItemGroup>
     <Compile Include="Core\ModbusCrc.cs" />
     <Compile Include="Core\ProtoFrameAssembler.cs" />
+    <Compile Include="Core\SchemeMatcher.cs" />
+    <Compile Include="Core\SchemeStore.cs" />
+    <Compile Include="Core\SchemeTablePanel.cs" />
     <Compile Include="Datas.cs" />
     <Compile Include="DemoControl\UserControlCurve.cs">
       <SubType>UserControl</SubType>

@@ -10,13 +10,14 @@ namespace WindowsFormsApplication1
     public partial class FormVersion : Form
     {
         // 当前版本（与推送仓库的 git tag 一一对应）：语义化版本 + 发布日期
-        public const string AppVersion = "1.3.40";
-        public const string AppVersionDate = "2026-10-21";
+        public const string AppVersion = "1.3.41";
+        public const string AppVersionDate = "2026-11-03";
         public const string AppRepoName = "正泰 VP八相机连续海康（M4 - 加密）";
 
         // 版本时间线：与仓库 git tag 一一对应（新版本在最前）
         private static readonly string[] VersionTimeline = new string[] 
         {
+            "v1.3.41  2026-11-03  第12轮 方案切换扩容至 100 量级：新增 Core\\SchemeStore/SchemeTablePanel/SchemeMatcher（纯数据层+代码构造表格，Tests 直链同源回归）。四条通讯通道（无协议 Form3、Modbus TCP、Omron、RTU）的『载图串→方案路径』从固定 8 对扩为 N 行：ini 新键 scheme_count（缺失=按老 8 键读取，现场 test.ini 零迁移兼容），上限 100。匹配语义四通道统一：精确匹配、空串不参与、唯一命中才切换、多命中冲突拒绝并限流记日志（原 Modbus 族 8 分支 if 链先到先得会静默切错方案、空文本框遇空输入误命中一并封堵）。qiehuan 改读 store 快照数组——轮询/接收线程不再逐控件跨线程取 Text(100 行不放大)；前 8 行与既有文本框双向同步（浏览选路径照常生效），第 9..100 行在新增『方案表(≤100)』选项卡编辑（Form3 无 TabControl，为代码按钮+模态窗）；保存全表重复拒绝保存（并入 R43/R45 校验到全表）。新增单测 22 项（匹配器8+数据层14），共 55/55。注①：Form3 与 Omron 共用 change/path 两段（历史设计），两窗共享同一方案表属既有行为；注②：Form3 入口按钮为代码定位（保存按钮下方+6px），未经运行期目检，首开请确认无遮挡。",
             "v1.3.40  2026-10-21  第45轮(N5 写回执拼帧修复)：①N5——ReadOneFrame 续读起点按功能码区分：FC03 读长度后从下标3续读，FC06/FC10(8字节)与异常响应(5字节)从下标2续读 total-2；原实现统一从下标3会少读1字节，CRC 必失败且串口残留本帧末字节导致后续失步；写回执只有长度+功能码+CRC全通过才返回8；CRC失败不再 DiscardInBuffer，保留已进入缓冲的下一帧；异常响应先 CRC 再识别；②N4 残留——闩 CompareExchange 成功后、Task.Run 前的前置步骤(停采/进度窗/枚举/关设备)异常时只复位本次已置上的闩并跳过 Task.Run，不再永久卡死；③载图串与相机 triggerZifu 交叉冲突——保存时由仅提示改为弹窗拒绝保存(装载期仅记日志)，避免同一帧只切方案而跳过 getData。构建 0 error、单测 33/33。",
             "v1.3.39  2026-10-21  第44轮(通讯帧与切换冲突收口)：①N4——方案切换 Invoke 封送失败不再清 qiehuanzhong（闩非本次置上，清掉会放行另一路正在进行的切换），仅记日志；②Modbus RTU 单帧收发重写——按功能码只读一整帧（FC03 先读字节数、FC06/FC10=8、异常响应=5），粘包切出第一帧并把剩余留在串口缓冲，短读在500ms窗口内拼满再CRC，写回执返回前必须长度+功能码+CRC全部通过；错帧只消费当前帧并立即返回，不再在 PortLock 内循环等下一帧，收敛持锁时间；站号/功能码/长度/CRC 不符均限流记日志；③载图串冲突——qiehuan 改多路命中计数，重复时拒绝切换并限流记日志；保存前校验8条载图串唯一性(重复弹窗拒绝保存)，装载期仅记日志；与相机 triggerZifu 交叉冲突提示。构建 0 error、单测 33/33。",
             "v1.3.38  2026-10-21  第43轮(全代码深入审查修复)：①通讯触发——32 处 DataChange/手动触发统一 TriggerSoftwareSafe 持 _cameraLocks 并锁内复核句柄，防与 timer2 断线重连的 Stop/Close/Destroy/Create 并发；②Modbus——FormModbus 轮询整段异常装甲(5s 限流)，fins_zuhe 改 TryGetValue，读失败串不再拼进触发值/视觉输入并屏蔽该通道触发，重连判据由 Contains(\":\") 改为 IsSuccess 且 30 轮节流；RTU/Omron 同步读失败门禁与 mapping 兜底；③取流回调与关闭释放——Bitmap 构造+登记整体挪入 m_BufForSaveImageLock，新增 _cbActive 回调在途计数，关闭时等回调归零再 Close/Destroy/Free，消除 HGlobal TOCTOU；④存图——连续运行 temptime 每帧无条件生成、TryParse 失败明确跳过，判定/扫描/删除/写入同一锁；⑤方案切换——后台入口整体封送 UI 线程，listBox2/设备打开/参数下发/启动段同步封送，打开方案路径改为排空通过后才提交 path_1/label75；⑥安全——停止采集全部走 StopGrabbingSafe，11 处演示停止不再关闭全局 OK/NG 脉冲，FormModbus/Omron 周期登记改 TryEnter(0) 不阻塞 UI；⑦通讯配置——Modbus 短帧必须长度完整且 CRC 通过，Form3 保存 du 地址修正、NumericUpDown 装载夹取、监听线程瞬时异常不再永久退出、串口读纳入 PortLock、接收忙循环加 10ms、隐藏配置窗不再叠加轮询线程并关闭连接；⑧离线单图——判据修正、离线用选中文件且兼容 32bpp、统一后台执行并兜底复位；⑨其它——oksum 原子累加、保存图片判空/返回值日志/防重名、相机3/4 列表选择源、定时器间隔 TryParse、MVCamera 句柄释放语义、Omron 连接 null 安全、Melsec 关闭释放串口、参数页 block.Inputs 入 blockLock、RTU 写回回显 250ms 门控、GetMiddleValue 去正则、Myjob 状态字段 volatile。自动曝光按用户要求未动。构建 0 error、单测 33/33。",

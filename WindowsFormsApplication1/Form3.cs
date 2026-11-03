@@ -97,23 +97,12 @@ namespace WindowsFormsApplication1
             try
             {
                 mdcan.port= new SerialPort();
-                textBox18.Text = wdini.ReadString("change", "1", "");
-                textBox19.Text = wdini.ReadString("change", "2", "");
-                textBox21.Text = wdini.ReadString("change", "3", "");
-                textBox20.Text = wdini.ReadString("change", "4", "");
-                textBox23.Text = wdini.ReadString("change", "5", "");
-                textBox22.Text = wdini.ReadString("change", "6", "");
-                textBox25.Text = wdini.ReadString("change", "7", "");
-                textBox24.Text = wdini.ReadString("change", "8", "");
-                textBox10.Text = wdini.ReadString("path", "1", "");
-                textBox11.Text = wdini.ReadString("path", "2", "");
-                textBox12.Text = wdini.ReadString("path", "3", "");
-                textBox13.Text = wdini.ReadString("path", "4", "");
-                textBox14.Text = wdini.ReadString("path", "5", "");
-                textBox15.Text = wdini.ReadString("path", "6", "");
-                textBox16.Text = wdini.ReadString("path", "7", "");
-                textBox17.Text = wdini.ReadString("path", "8", "");
-                textBox17.Text = wdini.ReadString("path", "8", "");
+                // ch:R12 方案表：按 scheme_count（缺省=老 8 行）装载 N 行进 store，前 8 行由面板同步到文本框。
+                //   注意：本通道与 Omron 共用 "change"/"path" 两段（历史设计，配置即共享；count 同段共享）。
+                _schemes.LoadFrom(i => wdini.ReadString("change", i.ToString(), ""),
+                                  i => wdini.ReadString("path", i.ToString(), ""),
+                                  wdini.ReadString("change", "count", ""));
+                InitSchemeUi();
                 comboBox2.Text = wdini.ReadString("change", "all", "");
                 // ch:R10-3 ini 手改非法值时 TryParse 回退，且夹取到控件范围，避免 Parse 异常中断后续 Load
                 decimal ny_ini;
@@ -246,7 +235,7 @@ namespace WindowsFormsApplication1
             this.label7.Text = "数据位：端口未打开|";
             this.label8.Text = "停止位：端口未打开|";
             this.label9.Text = "校验: 端口未打开";
-            ValidateLoadTriggerUniqueness(false); // ch:R43 装载期只记日志，不弹窗阻塞启动
+            ValidateLoadTriggerUniqueness(false, _schemes.GetRows()); // ch:R43 装载期只记日志，不弹窗阻塞启动；ch:R12 按方案表全量校验
             Task.Run(() =>
             {
                 chushihua();
@@ -1024,26 +1013,18 @@ namespace WindowsFormsApplication1
         private int qiehuan(string aa)
         {
             // ch:R43 载图串冲突收口：同一触发串命中多路时拒绝切换（原实现总是第一路胜出，静默切错方案）
-            string[] keys = { textBox18.Text, textBox19.Text, textBox21.Text, textBox20.Text,
-                              textBox23.Text, textBox22.Text, textBox25.Text, textBox24.Text };
-            string[] paths = { textBox10.Text, textBox11.Text, textBox12.Text, textBox13.Text,
-                               textBox14.Text, textBox15.Text, textBox16.Text, textBox17.Text };
-            int hit = -1, hits = 0;
-            for (int i = 0; i < keys.Length; i++)
-            {
-                if (!string.IsNullOrEmpty(keys[i]) && keys[i] == aa)
-                {
-                    hits++;
-                    hit = i;
-                }
-            }
-            if (hits == 1)
+            // ch:R12 匹配走 SchemeStore 快照（≤100 行）：接收线程不再逐控件跨线程取 Text；空串不参与、多命中冲突拒绝。
+            string[] keys = _schemes.KeysArray();
+            string[] paths = _schemes.PathsArray();
+            int hits;
+            int hit = SchemeMatcher.Match(keys, aa, out hits);
+            if (hit >= 0)
             {
                 zifu = aa;
                 lujing = paths[hit];
                 return 1;
             }
-            if (hits > 1)
+            if (hit == SchemeMatcher.Conflict)
                 LogTriggerConflictThrottled("载图串[" + aa + "]命中" + hits + "路，已拒绝切换（请检查配置重复）");
             return 0;
         }
@@ -1056,34 +1037,68 @@ namespace WindowsFormsApplication1
             _lastTriggerConflictLogMs = now;
             MsgErroeLog.WriteLog(msg);
         }
-        // ch:R43 载图串唯一性校验：重复时无法确定切哪个方案，保存直接拒绝；装载期只记日志不阻塞启动。
-        //   另检查与各相机方案 triggerZifu 的交叉冲突（可能是有意的“切方案+采图”，仅提示）。
-        private bool ValidateLoadTriggerUniqueness(bool showUi)
+        // ch:R12 方案表数据层（≤100 行，qiehuan 读其快照）。Form3 无 TabControl：面板放模态弹窗，
+        //   入口按钮在代码里挂到"保存设置"按钮下方，不动 Designer/resx。
+        private SchemeStore _schemes = new SchemeStore();
+        private SchemeTablePanel _schemePanel;
+        private Button _btnSchemeTable;
+        private void InitSchemeUi()
         {
-            string[] keys = { textBox18.Text, textBox19.Text, textBox21.Text, textBox20.Text,
-                              textBox23.Text, textBox22.Text, textBox25.Text, textBox24.Text };
-            string[] labels = { "change/1", "change/2", "change/3", "change/4",
-                                "change/5", "change/6", "change/7", "change/8" };
-            Dictionary<string, string> seen = new Dictionary<string, string>();
-            List<string> dups = new List<string>();
-            for (int i = 0; i < keys.Length; i++)
+            if (_schemePanel == null)
             {
-                string k = keys[i];
-                if (string.IsNullOrEmpty(k))
-                    continue;
-                string prev;
-                if (seen.TryGetValue(k, out prev))
-                    dups.Add("[" + k + "] 同时配置在 " + prev + " 与 " + labels[i]);
-                else
-                    seen[k] = labels[i];
+                TextBox[] zifu = { textBox18, textBox19, textBox21, textBox20, textBox23, textBox22, textBox25, textBox24 };
+                TextBox[] path = { textBox10, textBox11, textBox12, textBox13, textBox14, textBox15, textBox16, textBox17 };
+                _schemePanel = new SchemeTablePanel(_schemes, zifu, path);
+                _btnSchemeTable = new Button();
+                _btnSchemeTable.Text = "方案表(≤100)";
+                _btnSchemeTable.Width = 100;
+                _btnSchemeTable.Height = 24;
+                _btnSchemeTable.Location = new Point(button5.Location.X, button5.Location.Y + button5.Height + 6);
+                _btnSchemeTable.Anchor = button5.Anchor;
+                _btnSchemeTable.Click += BtnSchemeTable_Click;
+                button5.Parent.Controls.Add(_btnSchemeTable);
             }
-            if (dups.Count > 0)
+            else
             {
-                string msg = "载图触发串重复，无法确定切换目标：" + string.Join("；", dups.ToArray());
+                _schemePanel.SyncAllFromStore();
+            }
+        }
+        private void BtnSchemeTable_Click(object sender, EventArgs e)
+        {
+            using (Form dlg = new Form())
+            {
+                dlg.Text = "方案表（最多 100 行；前 8 行与界面文本框双向同步）";
+                dlg.StartPosition = FormStartPosition.CenterParent;
+                dlg.ClientSize = new Size(680, 460);
+                dlg.MinimizeBox = false;
+                dlg.ShowInTaskbar = false;
+                _schemePanel.Dock = DockStyle.Fill;
+                dlg.Controls.Add(_schemePanel);
+                dlg.FormClosed += delegate { if (_schemePanel != null) _schemePanel.Parent = null; };
+                dlg.ShowDialog(this);
+                _schemePanel.SyncAllFromStore();
+            }
+        }
+        // ch:R43 载图串唯一性校验：重复时无法确定切哪个方案，保存直接拒绝。
+        //   另检查与各相机方案 triggerZifu 的交叉冲突（可能是有意的“切方案+采图”，仅提示）。
+        // ch:R12 校验对象从固定 8 文本框改为传入的方案表全量行（≤100），重复检测用 SchemeStore.FindDuplicates。
+        private bool ValidateLoadTriggerUniqueness(bool showUi, List<string[]> rows)
+        {
+            string dup = SchemeStore.FindDuplicates(rows);
+            if (dup != null)
+            {
+                string msg = "载图触发串重复，无法确定切换目标：" + dup;
                 MsgErroeLog.WriteLog(msg);
                 if (showUi)
                     MessageBox.Show(msg + "\r\n\r\n请修改重复的载图串后再保存。", "载图串冲突", MessageBoxButtons.OK, MessageBoxIcon.Warning);
                 return false;
+            }
+            Dictionary<string, bool> seen = new Dictionary<string, bool>();
+            for (int i = 0; i < rows.Count; i++)
+            {
+                string k = rows[i] == null ? null : rows[i][0];
+                if (!string.IsNullOrEmpty(k) && !seen.ContainsKey(k))
+                    seen[k] = true;
             }
             List<string> cross = new List<string>();
             try
@@ -1749,29 +1764,24 @@ namespace WindowsFormsApplication1
 
         private void button5_Click(object sender, EventArgs e)
         {
-            if (!ValidateLoadTriggerUniqueness(true)) // ch:R43 重复载图串拒绝保存，避免运行期静默切错方案
+            // ch:R12 保存前先取方案表合并行（前 8 行=文本框，9..N=表格），重复/交叉冲突拒绝保存；
+            //   先写 1..N 键，再写 count，避免半程崩溃时读到超出实际写入行的旧值。
+            List<string[]> schemeRows = _schemePanel != null ? _schemePanel.GetNormalizedRows() : _schemes.GetRows();
+            schemeRows = SchemeStore.TrimTrailingEmpty(schemeRows);
+            if (!ValidateLoadTriggerUniqueness(true, schemeRows)) // ch:R43 重复载图串拒绝保存，避免运行期静默切错方案
                 return;
+            _schemes.SetRows(schemeRows);
             wdini.WriteString("modbustcp", "lunxun", lunxun.ToString());
             wdini.WriteString("modbustcp", "style", comboBox3.Text);
             wdini.WriteString("modbustcp", "gongnengma", comboBox4.Text);
             wdini.WriteString("modbustcp", "serial", comboBox5.Text);
-            wdini.WriteString("change", "1", textBox18.Text);
-            wdini.WriteString("change", "2", textBox19.Text);
-            wdini.WriteString("change", "3", textBox21.Text);
-            wdini.WriteString("change", "4", textBox20.Text);
-            wdini.WriteString("change", "5", textBox23.Text);
-            wdini.WriteString("change", "6", textBox22.Text);
-            wdini.WriteString("change", "7", textBox25.Text);
-            wdini.WriteString("change", "8", textBox24.Text);
+            for (int i = 0; i < schemeRows.Count; i++)
+            {
+                wdini.WriteString("change", (i + 1).ToString(), schemeRows[i][0]);
+                wdini.WriteString("path", (i + 1).ToString(), schemeRows[i][1]);
+            }
+            wdini.WriteString("change", "count", schemeRows.Count.ToString());
             wdini.WriteString("change", "all", comboBox2.Text);
-            wdini.WriteString("path", "1", textBox10.Text);
-            wdini.WriteString("path", "2", textBox11.Text);
-            wdini.WriteString("path", "3", textBox12.Text);
-            wdini.WriteString("path", "4", textBox13.Text);
-            wdini.WriteString("path", "5", textBox14.Text);
-            wdini.WriteString("path", "6", textBox15.Text);
-            wdini.WriteString("path", "7", textBox16.Text);
-            wdini.WriteString("path", "8", textBox17.Text);
             wdini.WriteString("modbustcp","xie", numericUpDown18.Value.ToString());
             wdini.WriteString("modbustcp", "du", numericUpDown1.Value.ToString()); // ch:R43 P1-8 原误写成写地址 NUD18，重启后读地址被覆盖
             wdini.WriteString("serial", "strportName", strportName);
