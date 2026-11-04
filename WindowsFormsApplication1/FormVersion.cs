@@ -10,13 +10,14 @@ namespace WindowsFormsApplication1
     public partial class FormVersion : Form
     {
         // 当前版本（与推送仓库的 git tag 一一对应）：语义化版本 + 发布日期
-        public const string AppVersion = "1.3.45";
-        public const string AppVersionDate = "2026-11-03";
+        public const string AppVersion = "1.3.46";
+        public const string AppVersionDate = "2026-11-04";
         public const string AppRepoName = "正泰 VP八相机连续海康（M4 - 加密）";
 
         // 版本时间线：与仓库 git tag 一一对应（新版本在最前）
         private static readonly string[] VersionTimeline = new string[] 
         {
+            "v1.3.46  2026-11-04  第15轮：①相机10方案切换防呆——勾选时拒绝第二通道（撤销勾选并写回 false），存量 ini 多通道使能在启动时告警，运行期 Cam10ChangeTracker 按通道记住已处理方案路径，同一通道值不变不再重复切换，杜绝两个 PLC 各保持不同方案串时 A/B 无限互切；②方案表按协议分家——Form3 改用 change_serial/path_serial（新段无 count 回退旧段、count=0 不回退），保存只写新段，与 Omron 的 change/path 互不覆盖；③Form3 移除 ModbusTCP 全链路（连接/断开/读写测试/轮询/Getfloat/busTcpClient 及全部 TCP 控件），mode4 与 mode6 统一走 FormModbus，串口 RTU 参数 style/gongnengma/xie/du/xieyi 迁到 [serial] 且缺失回退旧 [modbustcp] 键、保存不再覆盖 FormModbus 的 ip/port/en，旧值 modbus_RTU 归一化为 modbus-RTU；④修复 Form3 装载只赋 ComboBox.Text 不回填 qiehuan_fangshi，导致重启后按 PLC 报文自动切方案失效。构建 0 error、单测 78/78。",
             "v1.3.45  2026-11-03  第14轮续 方案表易用性：①修复『添加方案行』空表时视觉无反馈——原实现先把行裁到有效数(0)再加 1 行、补齐又回 8 行；改为按屏显行数追加并滚动定位+直接进编辑态；②UI 打磨：白底细框/斑马纹/固定行高 26/表头加粗/统一选中色、路径列自动吃满剩余宽度、行号列显示 1..N(即 ini 键序)；③底栏新增『保存方案表到配置』按钮(SaveRequested 钩子接各窗体原保存逻辑：Modbus/Omron=button7、RTU=b3、Form3=button5『保存设置』)，无需切回数据配置页找保存；④说明：网格默认至少 8 行=历史 8 槽兼容，空行不参与匹配、不计入有效方案数。构建 0 error、单测 58/58。",
             "v1.3.44  2026-11-03  第14轮 方案表成为唯一编辑入口：①四窗体（Modbus TCP/Omron/RTU/无协议 Form3）旧『切换』区 8+8 载图串/路径文本框连同行标签隐藏（控件保留作面板镜像，同步与匹配逻辑零改动；cam10 切换寄存器绑定 comboBox21/textBox41/使能□10 不属本区、维持可见）；②路径选择加固——双击事件改绑 CellDoubleClick（原 CellContentDoubleClick 在文本单元格先进编辑态时可能不触发），新增『选择 vpp…』按钮作用于当前行，_browsing 门闩防两入口重入对话框；③面板提示语改口径（编辑即时生效，保存写入配置）。构建 0 error、单测 58/58。",
             "v1.3.43  2026-11-03  第14轮(R13 复审修复)：①组帧缓存——R13-2 的 keys/bytes/seen 三个字段分开发布，客户端/服务端接收线程并发首包可读到 null bytes(ArgumentNullException→连接被拆)、改表时可持久错配旧触发串集合；改为单一不可变 FrameCache 一次 volatile 发布。②方案表计数——PadToLegacy 原地补 8 行后再 UpdateInfo，编辑后『有效方案』恒≥8(与保存裁剪不一致)；改为返回副本，各调用点统一按有效行计数，添加行后网格仍保持至少 8 行视图。③小修——保存顺序 3 处注释改回『先 1..N 后 count』；测试注释 scheme_count→count；AddFramePattern 先去重再判上限(满额重复串不再误报)；双击路径列先 EndEdit 再赋值。④测试加固——并发单测 K7 硬断言/K99 统计命中数、IoPulseOrder 30ms 猜测改事件门闩、新增 MaxPatterns≥100+8 覆盖钉、SetRows 返回值契约；单测 58/58，构建 0 error。",
