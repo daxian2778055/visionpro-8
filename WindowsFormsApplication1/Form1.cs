@@ -3158,6 +3158,24 @@ namespace WindowsFormsApplication1
             modbusrtu.getData += new FormModbusRtu.GetSeletionData(DataChange_modbusrtu);
             modbusrtu.Show();
             modbusrtu.Visible = false;
+            // ch:R44 相机10方案切换配置防呆：勾选时已拒绝“第二个通道”，此处再对存量 ini 做一次启动告警，
+            //   防止现场手改/老配置遗留“多通道同时使能”。运行期由 _cam10Tracker 按通道变化去重，不会再互切。
+            try
+            {
+                ClassIni cam10Ini = new ClassIni();
+                cam10Ini.ReadINIFile(AppDomain.CurrentDomain.BaseDirectory + "//test.ini");
+                string cam10Conflict = SchemeSwitchConfig.FindAllEnabledCam10(
+                    (section, key, def) => cam10Ini.ReadString(section, key, def));
+                if (cam10Conflict != null)
+                {
+                    MsgErroeLog.WriteLog("配置警告：多个通道同时启用相机10方案切换（" + cam10Conflict +
+                        "）。已启用防呆：各通道只在方案路径变化时切换，避免无限互切；请关闭多余通道的相机10使能。");
+                }
+            }
+            catch (Exception ex)
+            {
+                MsgErroeLog.WriteLog("相机10配置防呆检查失败:" + ex.Message);
+            }
             fx.Show();
             fx.Visible = false;
             frm5.Show();
@@ -7643,22 +7661,31 @@ namespace WindowsFormsApplication1
             }
             if (e.Camera.Contains("10"))
             {
-                if (path_1 != omron.lujing.Replace("\0", "") && qiehuanzhong == 0)
+                string omronCam10Path = (omron.lujing ?? "").Replace("\0", "");
+                if (path_1 != omronCam10Path && qiehuanzhong == 0)
                 {
                     if (omron.camera_dic[10][2] == "true")
                     {
-                        if (!omron.camera_dic[10][1].Contains("无"))
+                        if (!_cam10Tracker.ShouldSwitch("omron", omronCam10Path))
                         {
-                            omron.SetSwitchPending(10);
+                            // ch:R44 防呆：本通道触发值未变，拒绝重复切换（多通道各保持不同方案串时不再互切）
+                            omron.qiehuanzhong = 0;
                         }
-
-                        Task.Run(() =>
+                        else
                         {
-                            // ch:P2 必须 try/finally 复位：原实现若 xinghao_qiehuan 抛异常，omron.qiehuanzhong 永久停在 1 → 后续 cam10 切换事件不再触发
-                            try { xinghao_qiehuan(omron.lujing.Replace("\0", "")); }
-                            catch (Exception ex) { MsgErroeLog.WriteLog("异常:" + ex.Message); }
-                            finally { omron.qiehuanzhong = 0; }
-                        });
+                            if (!omron.camera_dic[10][1].Contains("无"))
+                            {
+                                omron.SetSwitchPending(10);
+                            }
+
+                            Task.Run(() =>
+                            {
+                                // ch:P2 必须 try/finally 复位：原实现若 xinghao_qiehuan 抛异常，omron.qiehuanzhong 永久停在 1 → 后续 cam10 切换事件不再触发
+                                try { xinghao_qiehuan(omronCam10Path); }
+                                catch (Exception ex) { MsgErroeLog.WriteLog("异常:" + ex.Message); }
+                                finally { omron.qiehuanzhong = 0; }
+                            });
+                        }
                     }
                     else
                     {
@@ -7869,22 +7896,31 @@ namespace WindowsFormsApplication1
             }
             if (e.Camera.Contains("10"))
             {
-                if (path_1 != modbustcp.lujing.Replace("\0", "") && qiehuanzhong == 0)
+                string modbustcpCam10Path = (modbustcp.lujing ?? "").Replace("\0", "");
+                if (path_1 != modbustcpCam10Path && qiehuanzhong == 0)
                 {
                     if (modbustcp.camera_dic[10][2] == "true")
                     {
-                        if (!modbustcp.camera_dic[10][1].Contains("无"))
+                        if (!_cam10Tracker.ShouldSwitch("modbustcp", modbustcpCam10Path))
                         {
-                            modbustcp.SetSwitchPending(10);
+                            // ch:R44 防呆：本通道触发值未变，拒绝重复切换（多通道各保持不同方案串时不再互切）
+                            modbustcp.qiehuanzhong = 0;
                         }
-
-                        Task.Run(() =>
+                        else
                         {
-                            // ch:P2 必须 try/finally 复位：原实现若 xinghao_qiehuan 抛异常，modbustcp.qiehuanzhong 永久停在 1 → 后续 cam10 切换事件不再触发
-                            try { xinghao_qiehuan(modbustcp.lujing.Replace("\0", "")); }
-                            catch (Exception ex) { MsgErroeLog.WriteLog("异常:" + ex.Message); }
-                            finally { modbustcp.qiehuanzhong = 0; }
-                        });
+                            if (!modbustcp.camera_dic[10][1].Contains("无"))
+                            {
+                                modbustcp.SetSwitchPending(10);
+                            }
+
+                            Task.Run(() =>
+                            {
+                                // ch:P2 必须 try/finally 复位：原实现若 xinghao_qiehuan 抛异常，modbustcp.qiehuanzhong 永久停在 1 → 后续 cam10 切换事件不再触发
+                                try { xinghao_qiehuan(modbustcpCam10Path); }
+                                catch (Exception ex) { MsgErroeLog.WriteLog("异常:" + ex.Message); }
+                                finally { modbustcp.qiehuanzhong = 0; }
+                            });
+                        }
                     }
                     else
                     {
@@ -8095,22 +8131,31 @@ namespace WindowsFormsApplication1
             }
             if (e.Camera.Contains("10"))
             {
-                if (path_1 != modbusrtu.lujing.Replace("\0", "") && qiehuanzhong == 0)
+                string modbusrtuCam10Path = (modbusrtu.lujing ?? "").Replace("\0", "");
+                if (path_1 != modbusrtuCam10Path && qiehuanzhong == 0)
                 {
                     if (modbusrtu.camera_dic[10][2] == "true")
                     {
-                        if (!modbusrtu.camera_dic[10][1].Contains("无"))
+                        if (!_cam10Tracker.ShouldSwitch("modbusrtu", modbusrtuCam10Path))
                         {
-                            modbusrtu.SetSwitchPending(10);
+                            // ch:R44 防呆：本通道触发值未变，拒绝重复切换（多通道各保持不同方案串时不再互切）
+                            modbusrtu.qiehuanzhong = 0;
                         }
-
-                        Task.Run(() =>
+                        else
                         {
-                            // ch:P2 必须 try/finally 复位：原实现若 xinghao_qiehuan 抛异常，modbusrtu.qiehuanzhong 永久停在 1 → 后续 cam10 切换事件不再触发
-                            try { xinghao_qiehuan(modbusrtu.lujing.Replace("\0", "")); }
-                            catch (Exception ex) { MsgErroeLog.WriteLog("异常:" + ex.Message); }
-                            finally { modbusrtu.qiehuanzhong = 0; }
-                        });
+                            if (!modbusrtu.camera_dic[10][1].Contains("无"))
+                            {
+                                modbusrtu.SetSwitchPending(10);
+                            }
+
+                            Task.Run(() =>
+                            {
+                                // ch:P2 必须 try/finally 复位：原实现若 xinghao_qiehuan 抛异常，modbusrtu.qiehuanzhong 永久停在 1 → 后续 cam10 切换事件不再触发
+                                try { xinghao_qiehuan(modbusrtuCam10Path); }
+                                catch (Exception ex) { MsgErroeLog.WriteLog("异常:" + ex.Message); }
+                                finally { modbusrtu.qiehuanzhong = 0; }
+                            });
+                        }
                     }
                     else
                     {
@@ -9517,6 +9562,10 @@ namespace WindowsFormsApplication1
             xinghao_qiehuan(selectedPath);
         }
         int qiehuanzhong = 1;
+        // ch:R44 相机10方案切换防呆：三条 PLC 通道各自记住上次已处理的方案路径，
+        //   同一通道值不变时不再重复切换；否则两个 PLC 各保持不同方案串会 A/B 无限互切。
+        //   配置层同时由 SchemeSwitchConfig 拒绝多通道同时启用 cam10（勾选时检查）。
+        private readonly Cam10ChangeTracker _cam10Tracker = new Cam10ChangeTracker();
         private int _detectingCount = 0; // ch:正在执行 block.Run 的检测帧数（参考正常版本，切换方案排空等待用，Interlocked 操作）
         private int _lastDropLogMs = 0; // ch:回调丢帧限频日志时间戳（防呆，避免静默丢帧无法排查）
 

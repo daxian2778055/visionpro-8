@@ -1088,6 +1088,8 @@ namespace WindowsFormsApplication1
         public bool fins_en = false;
         decimal lunxun_time = 0;
         public bool chushihua = false;
+        // ch:R44 相机10配置防呆：撤销 checkbox 时防止 CheckedChanged 递归
+        private bool _cam10GuardReverting;
         private int _lastGridUiTick;
 
         private bool AllowModbusGridRefresh()
@@ -3335,18 +3337,36 @@ namespace WindowsFormsApplication1
 
         private void checkBox12_CheckedChanged(object sender, EventArgs e)
         {
-            if (chushihua)
+            if (!chushihua || _cam10GuardReverting)
+                return;
+
+            if (checkBox12.CheckState == CheckState.Checked)
             {
-                if (checkBox12.CheckState == CheckState.Checked)
+                // ch:R44 相机10方案切换配置防呆：同一台设备只允许一个 PLC 通道控制方案切换。
+                //   勾选前检查 Omron/ModbusTCP/ModbusRTU 另外两段 ini，已有一个启用则拒绝本次勾选。
+                string conflict = SchemeSwitchConfig.FindOtherEnabledCam10(
+                    (section, key, def) => wdini.ReadString(section, key, def),
+                    SchemeSwitchConfig.ModbusTcpSection);
+                if (conflict != null)
                 {
-                    camera_dic[10][2] = "true";
-                    wdini.WriteString("c10_modbustcp", "fanhuien", "true");
-                }
-                else
-                {
+                    _cam10GuardReverting = true;
+                    try { checkBox12.CheckState = CheckState.Unchecked; }
+                    finally { _cam10GuardReverting = false; }
                     camera_dic[10][2] = "false";
                     wdini.WriteString("c10_modbustcp", "fanhuien", "false");
+                    MsgErroeLog.WriteLog("拒绝启用相机10方案切换：已启用通道 " + conflict);
+                    MessageBox.Show("同一台设备只允许一个通道控制方案切换。\r\n当前已启用：" + conflict +
+                        "\r\n请先关闭该通道的相机10使能，再启用本通道。", "方案切换配置冲突",
+                        MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                    return;
                 }
+                camera_dic[10][2] = "true";
+                wdini.WriteString("c10_modbustcp", "fanhuien", "true");
+            }
+            else
+            {
+                camera_dic[10][2] = "false";
+                wdini.WriteString("c10_modbustcp", "fanhuien", "false");
             }
         }
 

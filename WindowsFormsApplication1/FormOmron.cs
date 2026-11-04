@@ -281,7 +281,8 @@ namespace WindowsFormsApplication1
                 checkBox12.CheckState = CheckState.Checked;
 
             // ch:R12 方案表：按 count 键（缺省=老 8 行）装载 N 行进 store，前 8 行由面板同步到文本框。
-            //   注意：本通道与无协议通道(Form3)共用 "change"/"path" 两段（历史设计，配置即共享）。
+            // ch:R45 本通道保持 "change"/"path"（历史段，现场 Omron 配置零迁移）；
+            //   无协议通道(Form3)已改用 "change_serial"/"path_serial"，两边方案表独立、不再互相覆盖。
             _schemes.LoadFrom(i => wdini.ReadString("change", i.ToString(), ""),
                               i => wdini.ReadString("path", i.ToString(), ""),
                               wdini.ReadString("change", "count", ""));
@@ -734,6 +735,8 @@ namespace WindowsFormsApplication1
        public   bool fins_en = false;
         decimal lunxun_time = 0;
         public bool chushihua = false;
+        // ch:R44 相机10配置防呆：撤销 checkbox 时防止 CheckedChanged 递归
+        private bool _cam10GuardReverting;
         private void checkBox1_CheckedChanged(object sender, EventArgs e)
         {
             if (chushihua)
@@ -2342,18 +2345,36 @@ namespace WindowsFormsApplication1
 
         private void checkBox12_CheckedChanged(object sender, EventArgs e)
         {
-            if (chushihua)
+            if (!chushihua || _cam10GuardReverting)
+                return;
+
+            if (checkBox12.CheckState == CheckState.Checked)
             {
-                if (checkBox12.CheckState == CheckState.Checked)
+                // ch:R44 相机10方案切换配置防呆：同一台设备只允许一个 PLC 通道控制方案切换。
+                //   勾选前检查 Omron/ModbusTCP/ModbusRTU 另外两段 ini，已有一个启用则拒绝本次勾选。
+                string conflict = SchemeSwitchConfig.FindOtherEnabledCam10(
+                    (section, key, def) => wdini.ReadString(section, key, def),
+                    SchemeSwitchConfig.OmronSection);
+                if (conflict != null)
                 {
-                    camera_dic[10][2] = "true";
-                    wdini.WriteString("c10", "fanhuien", "true");
-                }
-                else
-                {
+                    _cam10GuardReverting = true;
+                    try { checkBox12.CheckState = CheckState.Unchecked; }
+                    finally { _cam10GuardReverting = false; }
                     camera_dic[10][2] = "false";
                     wdini.WriteString("c10", "fanhuien", "false");
+                    MsgErroeLog.WriteLog("拒绝启用相机10方案切换：已启用通道 " + conflict);
+                    MessageBox.Show("同一台设备只允许一个通道控制方案切换。\r\n当前已启用：" + conflict +
+                        "\r\n请先关闭该通道的相机10使能，再启用本通道。", "方案切换配置冲突",
+                        MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                    return;
                 }
+                camera_dic[10][2] = "true";
+                wdini.WriteString("c10", "fanhuien", "true");
+            }
+            else
+            {
+                camera_dic[10][2] = "false";
+                wdini.WriteString("c10", "fanhuien", "false");
             }
         }
 

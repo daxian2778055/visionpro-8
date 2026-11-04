@@ -454,10 +454,13 @@
     </Reference>
   </ItemGroup>
   <ItemGroup>
+    <Compile Include="Core\Cam10ChangeTracker.cs" />
     <Compile Include="Core\ModbusCrc.cs" />
     <Compile Include="Core\ProtoFrameAssembler.cs" />
     <Compile Include="Core\SchemeMatcher.cs" />
     <Compile Include="Core\SchemeStore.cs" />
+    <Compile Include="Core\SchemeSwitchConfig.cs" />
+    <Compile Include="Core\SerialSchemeSection.cs" />
     <Compile Include="Core\SchemeTablePanel.cs">
       <SubType>Component</SubType>
     </Compile>

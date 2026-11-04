@@ -17,6 +17,11 @@
     <Compile Include="..\WindowsFormsApplication1\Core\SchemeMatcher.cs" Link="Core\SchemeMatcher.cs" />
     <!-- ch:R12 方案表数据层同为纯托管，直链测同一份实现 -->
     <Compile Include="..\WindowsFormsApplication1\Core\SchemeStore.cs" Link="Core\SchemeStore.cs" />
+    <!-- ch:R44 相机10方案切换防呆：通道变化去重 + 多通道配置冲突检查 -->
+    <Compile Include="..\WindowsFormsApplication1\Core\Cam10ChangeTracker.cs" Link="Core\Cam10ChangeTracker.cs" />
+    <Compile Include="..\WindowsFormsApplication1\Core\SchemeSwitchConfig.cs" Link="Core\SchemeSwitchConfig.cs" />
+    <!-- ch:R45 方案表段解析：Form3 独立段 + 旧段回退 -->
+    <Compile Include="..\WindowsFormsApplication1\Core\SerialSchemeSection.cs" Link="Core\SerialSchemeSection.cs" />
   </ItemGroup>
 
   <ItemGroup>
