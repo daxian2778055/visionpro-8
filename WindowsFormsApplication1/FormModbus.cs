@@ -3372,26 +3372,36 @@ namespace WindowsFormsApplication1
 
         private void button7_Click(object sender, EventArgs e)
         {
-            // ch:R12 方案表全量保存（≤100 行）：重复载图串拒绝保存（与 Form3 R43 语义一致）；先写 1..N 行、最后写 count。
-            //   老 ini 无 count 键也走此路径后自动补齐；表尾连续空行落盘前剔除。
-            List<string[]> schemeRows = _schemePanel != null ? _schemePanel.GetNormalizedRows() : _schemes.GetRows();
-            schemeRows = SchemeStore.TrimTrailingEmpty(schemeRows);
-            string dupMsg = SchemeStore.FindDuplicates(schemeRows);
-            if (dupMsg != null)
+            try
             {
-                MsgErroeLog.WriteLog("载图串重复拒绝保存:" + dupMsg);
-                MessageBox.Show("载图触发串重复，无法确定切换目标：" + dupMsg + "\r\n\r\n请修改重复的载图串后再保存。", "载图串冲突", MessageBoxButtons.OK, MessageBoxIcon.Warning);
-                return;
+                // ch:R12 方案表全量保存（≤100 行）：重复载图串拒绝保存（与 Form3 R43 语义一致）；先写 1..N 行、最后写 count。
+                //   老 ini 无 count 键也走此路径后自动补齐；表尾连续空行落盘前剔除。
+                List<string[]> schemeRows = _schemePanel != null ? _schemePanel.GetNormalizedRows() : _schemes.GetRows();
+                schemeRows = SchemeStore.TrimTrailingEmpty(schemeRows);
+                string dupMsg = SchemeStore.FindDuplicates(schemeRows);
+                if (dupMsg != null)
+                {
+                    MsgErroeLog.WriteLog("载图串重复拒绝保存:" + dupMsg);
+                    MessageBox.Show("载图触发串重复，无法确定切换目标：" + dupMsg + "\r\n\r\n请修改重复的载图串后再保存。", "载图串冲突", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                    return;
+                }
+                _schemes.SetRows(schemeRows);
+                // ch:R13-3 四窗体统一"先写 1..N 行、最后写 count"：半程断电时旧 count 仍生效，
+                //   扩容的新行不会读到写了一半的脏值；超出新 count 的旧键留在 ini 但读取端按 count 截断，不会被复活。
+                for (int i = 0; i < schemeRows.Count; i++)
+                {
+                    wdini.WriteString("change_modbustcp", (i + 1).ToString(), schemeRows[i][0]);
+                    wdini.WriteString("path_modbustcp", (i + 1).ToString(), schemeRows[i][1]);
+                }
+                wdini.WriteString("change_modbustcp", "count", schemeRows.Count.ToString());
             }
-            _schemes.SetRows(schemeRows);
-            // ch:R13-3 四窗体统一"先写 1..N 行、最后写 count"：半程断电时旧 count 仍生效，
-            //   扩容的新行不会读到写了一半的脏值；超出新 count 的旧键留在 ini 但读取端按 count 截断，不会被复活。
-            for (int i = 0; i < schemeRows.Count; i++)
+            catch (Exception ex)
             {
-                wdini.WriteString("change_modbustcp", (i + 1).ToString(), schemeRows[i][0]);
-                wdini.WriteString("path_modbustcp", (i + 1).ToString(), schemeRows[i][1]);
+                // ch:R48 ③ 原保存循环半途抛异常：前几键已写、后续未写，store 与 ini 分叉且只弹裸异常框
+                MsgErroeLog.WriteLog("ModbusTCP 配置保存失败:" + ex);
+                MessageBox.Show("配置未完整保存：部分键可能已写入，请检查 ini 权限/占用后重试。\r\n\r\n" + ex.Message,
+                    "保存失败", MessageBoxButtons.OK, MessageBoxIcon.Error);
             }
-            wdini.WriteString("change_modbustcp", "count", schemeRows.Count.ToString());
         }
 
         private void textBox1_TextChanged(object sender, EventArgs e)

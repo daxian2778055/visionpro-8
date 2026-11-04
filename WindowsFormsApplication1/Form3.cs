@@ -42,10 +42,13 @@ namespace WindowsFormsApplication1
         public string gongnengma="06";
         public string serial_xieyi = "无协议";
         public string qiehuan_fangshi = "";
-        string strReceive;
         bool bAccpet = false;
        // SerialPortmdcan.port = new SerialPort();
        public  Modbus mdcan = new Modbus();
+        // ch:v1.3.49 P2-11 串口组帧器与读缓冲：AcceptData 固定在 UI 线程执行（fun 循环 Invoke），
+        //   组帧器为 UI 线程独占，无需加锁；与 TCP 两路使用的 ProtoFrameAssembler 同一组件。
+        private readonly ProtoFrameAssembler _serialFrameAssembler = new ProtoFrameAssembler();
+        private readonly byte[] _serialReadBuffer = new byte[4096];
         public int modbus_qufan = 0;
         public static string strportName = "";
         public static string strbaudRate = "";
@@ -652,6 +655,7 @@ namespace WindowsFormsApplication1
         public void CloseResources()
         {
             try { bAccpet = false; } catch (Exception ex) { new ErrorLog().WriteLog(ex.ToString()); }
+            try { _serialFrameAssembler.Reset(); } catch (Exception ex) { new ErrorLog().WriteLog(ex.ToString()); } // ch:v1.3.49 P2-11 关闭时丢弃半截组帧缓冲
             try { if (mdcan != null && mdcan.port != null && mdcan.port.IsOpen) mdcan.port.Close(); } catch (Exception ex) { new ErrorLog().WriteLog(ex.ToString()); }
             // ch:R11-3 关闭/置空与 Send/重连同入 _clientSocketLock：原不加锁会在 Send 持锁进行中并发置空，违背本轮"串行化"不变量
             try { lock (_clientSocketLock) { if (socketClient != null) { socketClient.Close(); socketClient = null; } } } catch (Exception exInner) { new ErrorLog().WriteLog(exInner.ToString()); }
@@ -1275,6 +1279,7 @@ namespace WindowsFormsApplication1
                         return;
                     }
                     bAccpet = true;
+                    _serialFrameAssembler.Reset(); // ch:v1.3.49 P2-11 新接收会话从空缓冲开始，避免上次残留半帧拼错
                     getRecevice = new Thread(new ThreadStart(testdelegate));
                     getRecevice.IsBackground = true; // ch:防止主程序退出后进程残留
                     getRecevice.Start();
@@ -1287,6 +1292,7 @@ namespace WindowsFormsApplication1
             {
                 // ch:置位退出标志，接收线程本轮结束后自然退出；不再使用已废弃的 Thread.Abort（易致句柄未释放/状态不一致）
                 bAccpet = false;
+                _serialFrameAssembler.Reset(); // ch:v1.3.49 P2-11 丢弃半截组帧缓冲，重新开始接收时从头组帧
                 try
                 {
                     if (getRecevice != null && getRecevice.IsAlive)
@@ -1331,18 +1337,36 @@ namespace WindowsFormsApplication1
             {
                 try
                 {
+                    int readCount;
                     // ch:R43 P1-8 串口读与 Modbus 事务共用 PortLock：原 ReadExisting 无锁会偷走 PLC 响应字节
+                    // ch:v1.3.49 P2-11 改按字节读 + 组帧：原 ReadExisting 后整串等值匹配，驱动分块到达时
+                    //   方案串/触发串被拆成两半，两头都匹配不上 → 静默丢触发。现与 TCP 两路一致，
+                    //   先由 ProtoFrameAssembler 还原完整帧，再逐帧走 qiehuan/getData。
                     lock (mdcan.PortLock)
                     {
-                        strReceive = mdcan.port.ReadExisting();
+                        if (mdcan.port == null || !mdcan.port.IsOpen)
+                            return;
+                        int available = mdcan.port.BytesToRead;
+                        if (available <= 0)
+                            return;
+                        readCount = mdcan.port.Read(_serialReadBuffer, 0, Math.Min(available, _serialReadBuffer.Length));
                     }
-                    txtReceive.AppendText(strReceive);
-                    if (qiehuan_fangshi == "Serial")
+                    if (readCount <= 0)
+                        return;
+                    List<byte[]> frames = _serialFrameAssembler.Append(_serialReadBuffer, readCount, BuildFramePatterns());
+                    foreach (byte[] frameBytes in frames)
                     {
-                        if (qiehuan(strReceive) == 0)
+                        string frameText = DecodeProtoBytes(frameBytes, frameBytes.Length);
+                        if (jinzhi == 1)
+                            frameText = frameText.Replace('\0', '0');
+                        txtReceive.AppendText(frameText);
+                        if (qiehuan_fangshi == "Serial")
                         {
-                            SelectionChangedEventArgs E = new SelectionChangedEventArgs(strReceive);
-                            getData(this, E);
+                            if (qiehuan(frameText) == 0)
+                            {
+                                SelectionChangedEventArgs E = new SelectionChangedEventArgs(frameText);
+                                getData(this, E);
+                            }
                         }
                     }
                 }
@@ -1629,6 +1653,22 @@ namespace WindowsFormsApplication1
         }
 
         private void button5_Click(object sender, EventArgs e)
+        {
+            // ch:v1.3.49 P2-9 整体异常保护：ClassIni.WriteString 失败会抛 ApplicationException，
+            //   原实现保存循环半途抛出 → 前几键已写、后面没写，重启后方案表回退旧状态且只弹裸异常框。
+            try
+            {
+                SaveAllSettings();
+            }
+            catch (Exception ex)
+            {
+                MsgErroeLog.WriteLog("串口/方案配置保存失败:" + ex);
+                MessageBox.Show("配置未完整保存：" + ex.Message + "\r\n\r\n部分键可能已写入，请确认 test.ini 未被占用/只读后重新保存。",
+                    "保存失败", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            }
+        }
+
+        private void SaveAllSettings()
         {
             // ch:R12 保存前先取方案表合并行（前 8 行=文本框，9..N=表格），重复/交叉冲突拒绝保存；
             //   先写 1..N 键，再写 count，避免半程崩溃时读到超出实际写入行的旧值。

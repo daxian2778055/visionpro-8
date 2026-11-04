@@ -5049,10 +5049,11 @@ namespace WindowsFormsApplication1
 
                                                         if (checkBox55.CheckState == CheckState.Checked)
                                                         {
-                                                            setbox12(listBox18.Items[3].ToString(), 4);
-                                                            setbox12(listBox18.Items[2].ToString(), 3);
-                                                            setbox12(listBox18.Items[1].ToString(), 2);
-                                                            setbox12(listBox18.Items[0].ToString(), 1);
+                                                            string[] recent7 = SnapshotStatRecords(_statRecordsCam7);
+                                                            setbox12(recent7[3], 4);
+                                                            setbox12(recent7[2], 3);
+                                                            setbox12(recent7[1], 2);
+                                                            setbox12(recent7[0], 1);
                                                             setbox12(temptime + ":" + cuowu1 + ":" + jobnumber, 0);
                                                         }
 
@@ -5061,10 +5062,11 @@ namespace WindowsFormsApplication1
 
                                                         if (checkBox53.CheckState == CheckState.Checked)
                                                         {
-                                                            setbox13(listBox17.Items[3].ToString(), 4);
-                                                            setbox13(listBox17.Items[2].ToString(), 3);
-                                                            setbox13(listBox17.Items[1].ToString(), 2);
-                                                            setbox13(listBox17.Items[0].ToString(), 1);
+                                                            string[] recent8 = SnapshotStatRecords(_statRecordsCam8);
+                                                            setbox13(recent8[3], 4);
+                                                            setbox13(recent8[2], 3);
+                                                            setbox13(recent8[1], 2);
+                                                            setbox13(recent8[0], 1);
                                                             setbox13(temptime + ":" + cuowu1 + ":" + jobnumber, 0);
                                                         }
 
@@ -6615,8 +6617,22 @@ namespace WindowsFormsApplication1
                     listBox15.Items[bb] = aa;
             }
         }
+        // ch:v1.3.49 P2-13 相机7/8"最近5次记录"快照：原统计 Task 在纯线程池线程直读 listBox18/17.Items，
+        //   UI 线程并发重置/清理时可能读到短列表 -> ArgumentOutOfRange，异常被 Task 外层 catch 吞掉导致当帧统计行丢失。
+        //   现由 setbox12/13 同步维护字符串数组，统计 Task 只读数组快照，不再回读控件集合。
+        private readonly object _statRecordsLock = new object();
+        private readonly string[] _statRecordsCam7 = new string[5] { "record", "record", "record", "record", "record" };
+        private readonly string[] _statRecordsCam8 = new string[5] { "record", "record", "record", "record", "record" };
+        private string[] SnapshotStatRecords(string[] source)
+        {
+            lock (_statRecordsLock) { return (string[])source.Clone(); }
+        }
         private void setbox12(string aa, int bb)
         {
+            if (bb >= 0 && bb < _statRecordsCam7.Length)
+            {
+                lock (_statRecordsLock) { _statRecordsCam7[bb] = aa; }
+            }
             if (listBox18.InvokeRequired)
             {
                 ltbox12 l5 = setbox12;
@@ -6631,6 +6647,10 @@ namespace WindowsFormsApplication1
         }
         private void setbox13(string aa, int bb)
         {
+            if (bb >= 0 && bb < _statRecordsCam8.Length)
+            {
+                lock (_statRecordsLock) { _statRecordsCam8[bb] = aa; }
+            }
             if (listBox17.InvokeRequired)
             {
                 ltbox13 l5 = setbox13;
@@ -9992,14 +10012,14 @@ namespace WindowsFormsApplication1
                             MsgErroeLog.WriteLog("方案装载失败(相机Job/Block):" + ex);
                             // 旧 manager 已在上面 Shutdown，半装载的 job/block 可能仍指向已失效对象；
                             //   全部清空，防止检测线程继续 Run 旧 block（数据级风险）
-                            myjob1.job = null; myjob1.block = null;
-                            myjob2.job = null; myjob2.block = null;
-                            myjob3.job = null; myjob3.block = null;
-                            myjob4.job = null; myjob4.block = null;
-                            myjob5.job = null; myjob5.block = null;
-                            myjob6.job = null; myjob6.block = null;
-                            myjob7.job = null; myjob7.block = null;
-                            myjob8.job = null; myjob8.block = null;
+                            ClearJobBlockSafe(myjob1);
+                            ClearJobBlockSafe(myjob2);
+                            ClearJobBlockSafe(myjob3);
+                            ClearJobBlockSafe(myjob4);
+                            ClearJobBlockSafe(myjob5);
+                            ClearJobBlockSafe(myjob6);
+                            ClearJobBlockSafe(myjob7);
+                            ClearJobBlockSafe(myjob8);
                         }
                         if (jobLoadFailed)
                         {
@@ -10019,14 +10039,14 @@ namespace WindowsFormsApplication1
                         }
                         this.Invoke(new Action(() => listBox2.Visible = true));
                         // ch:方案 JobCount 不足的相机清空 job/block，防止执行悬垂的旧 block（参考正常版本：en 按 JobCount 收敛）
-                        if (manager1.JobCount < 8) { myjob8.job = null; myjob8.block = null; }
-                        if (manager1.JobCount < 7) { myjob7.job = null; myjob7.block = null; }
-                        if (manager1.JobCount < 6) { myjob6.job = null; myjob6.block = null; }
-                        if (manager1.JobCount < 5) { myjob5.job = null; myjob5.block = null; }
-                        if (manager1.JobCount < 4) { myjob4.job = null; myjob4.block = null; }
-                        if (manager1.JobCount < 3) { myjob3.job = null; myjob3.block = null; }
-                        if (manager1.JobCount < 2) { myjob2.job = null; myjob2.block = null; }
-                        if (manager1.JobCount < 1) { myjob1.job = null; myjob1.block = null; }
+                        if (manager1.JobCount < 8) ClearJobBlockSafe(myjob8);
+                        if (manager1.JobCount < 7) ClearJobBlockSafe(myjob7);
+                        if (manager1.JobCount < 6) ClearJobBlockSafe(myjob6);
+                        if (manager1.JobCount < 5) ClearJobBlockSafe(myjob5);
+                        if (manager1.JobCount < 4) ClearJobBlockSafe(myjob4);
+                        if (manager1.JobCount < 3) ClearJobBlockSafe(myjob3);
+                        if (manager1.JobCount < 2) ClearJobBlockSafe(myjob2);
+                        if (manager1.JobCount < 1) ClearJobBlockSafe(myjob1);
 
                     }
                     catch (Exception ex)
@@ -12633,22 +12653,24 @@ namespace WindowsFormsApplication1
             // ch:性能埋点：记录本次回调占用海康 SDK 取流线程的时长
             long perfT0 = System.Diagnostics.Stopwatch.GetTimestamp();
             int perfIdx = -1;
-            if (closing || Volatile.Read(ref qiehuanzhong) == 1)
-            {
-                if (Volatile.Read(ref qiehuanzhong) == 1 && Environment.TickCount - _lastDropLogMs > 5000)
-                {
-                    _lastDropLogMs = Environment.TickCount;
-                    MsgErroeLog.WriteLog("回调帧被丢弃（qiehuanzhong 长时间未复位，检查切换流程）");
-                }
-                return;
-            }
             try
             {
                 int nIndex = (int)pUser;
                 if (nIndex < 0 || nIndex > 7)
                     return;
                 perfIdx = nIndex;
+                // ch:R48 P2-12 登记先于决策：先计入回调在途，再判 closing/qiehuanzhong；
+                //   原顺序在"已过判定、未登记"的几行窗口内会让关闭路径读到 _cbActive==0 而提前 CloseDevice。
                 System.Threading.Interlocked.Increment(ref _cbActive[nIndex]); // ch:R43 P0-1 登记回调在途，关闭路径据此等待
+                if (closing || Volatile.Read(ref qiehuanzhong) == 1)
+                {
+                    if (Volatile.Read(ref qiehuanzhong) == 1 && Environment.TickCount - _lastDropLogMs > 5000)
+                    {
+                        _lastDropLogMs = Environment.TickCount;
+                        MsgErroeLog.WriteLog("回调帧被丢弃（qiehuanzhong 长时间未复位，检查切换流程）");
+                    }
+                    return;
+                }
                 ++m_nFrames[nIndex];
                 if (bmp[nIndex] != null || System.Threading.Volatile.Read(ref _detectBusy[nIndex]) != 0)
                 {
@@ -13787,6 +13809,12 @@ namespace WindowsFormsApplication1
                 if (m_MyCamera[i] == null)
                     continue;
                 MyCamera.MV_SAVE_IMG_TO_FILE_PARAM stSaveParam = new MyCamera.MV_SAVE_IMG_TO_FILE_PARAM();
+                int camIndex = i;
+                MyCamera cam = m_MyCamera[i];
+                IntPtr frameCopy = IntPtr.Zero;
+                // ch:v1.3.49 P2-14 原实现 UI 线程持 m_BufForSaveImageLock[i] 同步调 MV_CC_SaveImageToFile_NET：
+                //   磁盘 IO 期间取流回调取同一把锁 → 取图排队/丢帧，UI 也卡住。改为锁内只做像素拷贝 + 参数快照，
+                //   文件写入移到后台线程；拷贝保证保存期间原缓冲被新帧覆写也不影响输出。
                 lock (m_BufForSaveImageLock[i])
                 {
                     if (m_pSaveImageBuf[i] == IntPtr.Zero || m_stFrameInfo[i].nFrameLen == 0 || m_stFrameInfo[i].nWidth == 0 || m_stFrameInfo[i].nHeight == 0)
@@ -13794,19 +13822,51 @@ namespace WindowsFormsApplication1
                         MsgErroeLog.WriteLog("保存图片跳过：相机" + (i + 1) + " 无有效帧缓冲");
                         continue;
                     }
+                    int dataLen = (int)m_stFrameInfo[i].nFrameLen;
+                    frameCopy = Marshal.AllocHGlobal(dataLen);
+                    CopyMemory(frameCopy, m_pSaveImageBuf[i], (uint)dataLen); // 拷贝到独立缓冲，锁外/后台保存不受覆写影响
                     stSaveParam.enImageType = MyCamera.MV_SAVE_IAMGE_TYPE.MV_Image_Bmp;
                     stSaveParam.enPixelType = m_stFrameInfo[i].enPixelType;
-                    stSaveParam.pData = m_pSaveImageBuf[i];
+                    stSaveParam.pData = frameCopy;
                     stSaveParam.nDataLen = m_stFrameInfo[i].nFrameLen;
                     stSaveParam.nHeight = m_stFrameInfo[i].nHeight;
                     stSaveParam.nWidth = m_stFrameInfo[i].nWidth;
                     // ch:R43 P2-6 文件名加时间戳：原仅用帧号，跨天/重启后同帧号直接覆盖旧图
                     stSaveParam.pImagePath = "Dev" + (i + 1).ToString() + "_" + DateTime.Now.ToString("yyyyMMdd_HHmmss_fff")
                         + "_w" + stSaveParam.nWidth.ToString() + "_h" + stSaveParam.nHeight.ToString() + "_fn" + m_stFrameInfo[i].nFrameNum.ToString() + ".bmp";
-                    int nRet = m_MyCamera[i].MV_CC_SaveImageToFile_NET(ref stSaveParam);
-                    if (MyCamera.MV_OK != nRet)
-                        MsgErroeLog.WriteLog("保存图片失败 相机" + (i + 1) + " nRet=0x" + nRet.ToString("X8") + " path=" + stSaveParam.pImagePath);
                 }
+                if (frameCopy == IntPtr.Zero)
+                    continue;
+                MyCamera.MV_SAVE_IMG_TO_FILE_PARAM param = stSaveParam;
+                string savedPath = stSaveParam.pImagePath;
+                Task.Run(() =>
+                {
+                    try
+                    {
+                        // 与关闭相机/断线重连互斥：后台保存期间若 CloseDevice 销毁句柄，SDK 会操作已失效设备对象
+                        lock (_cameraLocks[camIndex])
+                        {
+                            if (m_MyCamera[camIndex] != cam) // 关闭置空或已重开成新对象：本次拷贝对应旧句柄，跳过
+                            {
+                                MsgErroeLog.WriteLog("保存图片跳过：相机" + (camIndex + 1) + " 句柄已变更/关闭");
+                                return;
+                            }
+                            MyCamera.MV_SAVE_IMG_TO_FILE_PARAM p = param;
+                            int nRet = cam.MV_CC_SaveImageToFile_NET(ref p);
+                            if (MyCamera.MV_OK != nRet)
+                                MsgErroeLog.WriteLog("保存图片失败 相机" + (camIndex + 1) + " nRet=0x" + nRet.ToString("X8") + " path=" + savedPath);
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        MsgErroeLog.WriteLog("保存图片异常 相机" + (camIndex + 1) + ":" + ex);
+                    }
+                    finally
+                    {
+                        if (frameCopy != IntPtr.Zero)
+                            Marshal.FreeHGlobal(frameCopy); // 保底释放：成功/失败/异常三条路径都不泄漏
+                    }
+                });
             }
         }
         private void checkBox4_CheckedChanged_1(object sender, EventArgs e)
@@ -15855,6 +15915,17 @@ namespace WindowsFormsApplication1
             {
                 if (job.block == null || !job.block.Inputs.Contains(inputName)) return null;
                 return job.block.Inputs[inputName].Value.ToString();
+            }
+        }
+        // ch:R48 ① 装载失败/JobCount 不足时清空 job/block 必须持 blockLock：
+        //   读侧 getrecord/Run 在锁内，锁外裸置 null 绕过内存栅栏，理论上可让检测线程仍见旧非空 block 并对已 Shutdown 对象 Run。
+        private static void ClearJobBlockSafe(Myjob job)
+        {
+            if (job == null) return;
+            lock (job.blockLock)
+            {
+                job.job = null;
+                job.block = null;
             }
         }
         private void trriger_set()

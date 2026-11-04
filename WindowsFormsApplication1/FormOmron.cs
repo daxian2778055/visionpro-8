@@ -49,6 +49,9 @@ namespace WindowsFormsApplication1
         private int x=999;
         private int y=999;
         Dictionary<string, string []> fins_dic = new Dictionary<string,string[]>();
+        // ch:v1.3.49 P2-10 fins_dic 跨线程访问保护：UI 线程 Clear/Add 与轮询线程 foreach、检测线程写回 foreach 并发，
+        //   原实现会在下一次 MoveNext 抛"集合已修改"整轮丢弃。约定：所有增删改入 finsDicLock；后台线程一律用快照。
+        private readonly object finsDicLock = new object();
         public  Dictionary<int, string[]> camera_dic = new Dictionary<int, string[]>();
         Dictionary<int, int[]> fins_name = new Dictionary<int, int[]>();
         Dictionary<int, int[]> fins_data = new Dictionary<int, int[]>();
@@ -186,7 +189,8 @@ namespace WindowsFormsApplication1
                     fins_length = Math.Max(0, Math.Min(1000, IniDec(wdini.ReadString((i + 1).ToString(), "changdu", "0"), 0))); // ch:R11-2 内层循环上界，夹 [0,1000]（IniDec 已取整）
                     ABCD= wdini.ReadString((i + 1).ToString(), "gaodiwei", "触发").Replace("\0", "");
                     fins_style = wdini.ReadString((i + 1).ToString(), "geshi", "int").Replace("\0", "");
-                    fins_dic.Add(fins_mingcheng, new string[] { fins_mingcheng, fins_qishi.ToString(), fins_length.ToString(), ABCD, fins_style });
+                    lock (finsDicLock)
+                        fins_dic.Add(fins_mingcheng, new string[] { fins_mingcheng, fins_qishi.ToString(), fins_length.ToString(), ABCD, fins_style });
                     for (int j = 0; j < fins_length; j++)
                     {
                         xuanzhong_temp = fins_qishi - address_qishi + j;
@@ -846,7 +850,8 @@ namespace WindowsFormsApplication1
                                     }
                                     else
                                     {
-                                        fins_dic.Add(nmAdd, new string[] { nmAdd, qAdd.ToString(), lenAdd.ToString(), comboBox2.Text, comboBox3.Text });
+                                        lock (finsDicLock)
+                                            fins_dic.Add(nmAdd, new string[] { nmAdd, qAdd.ToString(), lenAdd.ToString(), comboBox2.Text, comboBox3.Text });
                                         for (int i = 0; i < lenAdd; i++)
                                         {
                                             xuanzhong_temp = qAdd - Math.Truncate(numericUpDown1.Value) + i;
@@ -1015,7 +1020,7 @@ namespace WindowsFormsApplication1
             {
             dataGridView1.Visible = false;
             wdini.WriteString("fins", "geshu", "0");
-            fins_dic.Clear();
+            lock (finsDicLock) { fins_dic.Clear(); }
             // ch:清掉相机反馈映射，使检测结果输出彻底停止
             for (int i = 1; i <= 8; i++)
             {
@@ -1128,9 +1133,13 @@ namespace WindowsFormsApplication1
                                 int xuanzhong_temp = 0;
                                 string fins_temp = "";
                                 string shuju_temp = "";
-                                if (fins_dic.Count > 0)
+                                // ch:v1.3.49 P2-10 每轮在锁内取 fins_dic 快照，后续只遍历快照：
+                                //   UI 线程增删通道不再与轮询 MoveNext 并发，避免"集合已修改"导致整轮通道数据丢失。
+                                Dictionary<string, string[]> finsSnapshot;
+                                lock (finsDicLock) { finsSnapshot = new Dictionary<string, string[]>(fins_dic); }
+                                if (finsSnapshot.Count > 0)
                                 {
-                                    foreach (var par in fins_dic)
+                                    foreach (var par in finsSnapshot)
                                     {
                                         shuju_temp = "";
                                         bool commFailed = false; // ch:记录本轮是否有读取失败，用于触发断线自动重连
@@ -1339,6 +1348,9 @@ namespace WindowsFormsApplication1
 
                 bool gridUi = AllowModbusGridRefresh(); // ch:N1残留 写回回显节流，跨线程写 GridView 前统一封送
                 string fins_temp = "";
+                // ch:v1.3.49 P2-10 写回在检测线程执行，同样用锁内快照，避免与 UI 线程增删通道并发
+                Dictionary<string, string[]> finsSnapshot;
+                lock (finsDicLock) { finsSnapshot = new Dictionary<string, string[]>(fins_dic); }
                 foreach (var pat in camera_dic)
                 {
                     if (pat.Value[5] != "无")
@@ -1353,7 +1365,7 @@ namespace WindowsFormsApplication1
                             if (NotePendingWriteFailed(pat.Key)) pat.Value[5] = "无";
                             continue;
                         }
-                        foreach (var par in fins_dic)
+                        foreach (var par in finsSnapshot)
                         {
                             if (pat.Value[5] == par.Value[0])
                             {
@@ -2468,24 +2480,34 @@ namespace WindowsFormsApplication1
 
         private void button7_Click(object sender, EventArgs e)
         {
-            // ch:R12 方案表全量保存（≤100 行）：重复载图串拒绝保存；先写 1..N 行、最后写 count。
-            List<string[]> schemeRows = _schemePanel != null ? _schemePanel.GetNormalizedRows() : _schemes.GetRows();
-            schemeRows = SchemeStore.TrimTrailingEmpty(schemeRows);
-            string dupMsg = SchemeStore.FindDuplicates(schemeRows);
-            if (dupMsg != null)
+            try
             {
-                MsgErroeLog.WriteLog("载图串重复拒绝保存:" + dupMsg);
-                MessageBox.Show("载图触发串重复，无法确定切换目标：" + dupMsg + "\r\n\r\n请修改重复的载图串后再保存。", "载图串冲突", MessageBoxButtons.OK, MessageBoxIcon.Warning);
-                return;
+                // ch:R12 方案表全量保存（≤100 行）：重复载图串拒绝保存；先写 1..N 行、最后写 count。
+                List<string[]> schemeRows = _schemePanel != null ? _schemePanel.GetNormalizedRows() : _schemes.GetRows();
+                schemeRows = SchemeStore.TrimTrailingEmpty(schemeRows);
+                string dupMsg = SchemeStore.FindDuplicates(schemeRows);
+                if (dupMsg != null)
+                {
+                    MsgErroeLog.WriteLog("载图串重复拒绝保存:" + dupMsg);
+                    MessageBox.Show("载图触发串重复，无法确定切换目标：" + dupMsg + "\r\n\r\n请修改重复的载图串后再保存。", "载图串冲突", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                    return;
+                }
+                _schemes.SetRows(schemeRows);
+                // ch:R13-3 统一"先写 1..N 行、最后写 count"（半程断电时旧 count 生效，超新 count 的旧键不会被读到）
+                for (int i = 0; i < schemeRows.Count; i++)
+                {
+                    wdini.WriteString("change", (i + 1).ToString(), schemeRows[i][0]);
+                    wdini.WriteString("path", (i + 1).ToString(), schemeRows[i][1]);
+                }
+                wdini.WriteString("change", "count", schemeRows.Count.ToString());
             }
-            _schemes.SetRows(schemeRows);
-            // ch:R13-3 统一"先写 1..N 行、最后写 count"（半程断电时旧 count 生效，超新 count 的旧键不会被读到）
-            for (int i = 0; i < schemeRows.Count; i++)
+            catch (Exception ex)
             {
-                wdini.WriteString("change", (i + 1).ToString(), schemeRows[i][0]);
-                wdini.WriteString("path", (i + 1).ToString(), schemeRows[i][1]);
+                // ch:R48 ③ 原保存循环半途抛异常：前几键已写、后续未写，store 与 ini 分叉且只弹裸异常框
+                MsgErroeLog.WriteLog("Omron 配置保存失败:" + ex);
+                MessageBox.Show("配置未完整保存：部分键可能已写入，请检查 ini 权限/占用后重试。\r\n\r\n" + ex.Message,
+                    "保存失败", MessageBoxButtons.OK, MessageBoxIcon.Error);
             }
-            wdini.WriteString("change", "count", schemeRows.Count.ToString());
         }
         private SchemeStore _schemes = new SchemeStore(); // ch:R12 方案表数据层（≤100 行，qiehuan 读其快照）
         private SchemeTablePanel _schemePanel;
