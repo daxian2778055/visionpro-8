@@ -51,7 +51,7 @@ namespace WindowsFormsApplication1
         private int _overlayFontSize = 12;   // ini camera/overlay_font_size
         private Color _overlayFontColor = Color.Yellow; // ini camera/overlay_font_color (ARGB)
         // ch:R33 每相机「本拍 ModbusTCP 输出文本」缓存：检测线程在 blockLock 内写入(取 block 的 modbustcp 输出端)，
-        //   UI 线程覆盖层只读本字段——不读 FormModbus.camera_dic，故无论最终走 frm3 还是配置窗都能显示。
+        //   UI 线程覆盖层只读本字段——不读 FormModbus.camera_dic，故与最终出数通道解耦（Form3 的 ModbusTCP 已删除，现统一走 FormModbus）。
         private readonly string[] _mtcpOverlayOut = new string[9];
         // ch:R32 覆盖层配置控件本体已在 Designer（labelOverlayFontSize/numOverlayFontSize/labelOverlayFontColor/btnOverlayFontColor），
         //   设计器可直接拖改；此处只保留状态字段与回填/事件方法。
@@ -327,14 +327,14 @@ namespace WindowsFormsApplication1
         private const int OutIO = 1;               // IO 脉冲
         private const int OutSerial = 2;           // 串口（frm3）
         private const int OutTcp = 3;              // TCP（frm3）
-        private const int OutModbusTcp = 4;        // ModbusTCP（frm3）
+        private const int OutModbusTcp = 4;        // ModbusTCP（FormModbus；兼容旧选择，统一走 FormModbus 配置窗）
         private const int OutOmron = 5;            // 欧姆龙 Fins（FormOmron 配置窗）
         private const int OutModbusTcpWin = 6;     // ModbusTCP（FormModbus 配置窗）
         private const int OutModbusRtu = 7;        // ModbusRTU（FormModbusRtu 配置窗）
         private volatile int _outputMode = OutAuto;
         private bool _outputModeSyncing;           // 防止程序赋值 SelectedIndex 与 SelectedIndexChanged 互相触发
         // ch:R19 各 Modbus 数据路「首次触发」日志标志：切输出方式时复位(ApplyOutputMode 尾部)，触发一次记一条，定位 mode4 实际走哪条路
-        private volatile bool _logPathSerial, _logPathFrm3, _logPathMtcpWin;
+        private volatile bool _logPathSerial, _logPathMtcpWin;
 
         // ch:把选中的输出方式落到 8 个 job 的对应标志位，并同步旧的 4 组 CheckBox（单一数据源，避免两处各写一份）。
         //   mode<0(自动)时一律不动任何标志位，保持各开关原状。
@@ -385,7 +385,7 @@ namespace WindowsFormsApplication1
                 try { canshuIni.WriteString("camera", "output_mode", mode.ToString()); }
                 catch (Exception ex) { MsgErroeLog.WriteLog("输出方式保存失败:" + ex.Message); }
             }
-            _logPathSerial = _logPathFrm3 = _logPathMtcpWin = true; // ch:R19 切模式后各 Modbus 数据路首次触发各记一条，现场日志直接看出走了哪条路
+            _logPathSerial = _logPathMtcpWin = true; // ch:R19 切模式后各 Modbus 数据路首次触发各记一条，现场日志直接看出走了哪条路
             UpdateModbusOverlayLabels(); // ch:R32 切输出方式立即生效覆盖层（ModbusTCP 相关模式才显示）
             try // ch:R19 记录三路决策状态与数据终端存在性：mode4 再遇无输出时，一行日志即可定位卡在哪一闸
             {
@@ -393,7 +393,7 @@ namespace WindowsFormsApplication1
                 try { lock (myjob1.blockLock) { term = " Outputs(serial=" + myjob1.block.Outputs.Contains("serial") + ",modbustcp=" + myjob1.block.Outputs.Contains("modbustcp") + ")"; } }
                 catch { term = " Outputs(未就绪)"; }
                 MsgErroeLog.WriteLog("输出方式=" + mode + " 状态: cfgWin(fins_en=" + modbustcp.fins_en + ",chushihua=" + modbustcp.chushihua
-                    + ") frm3(IsEnable=" + frm3.IsEnable + ",style=" + frm3.modbus_style + ",fn=" + frm3.gongnengma + ",xie=" + frm3.xie
+                    + ") frm3串口Modbus(style=" + frm3.modbus_style + ",fn=" + frm3.gongnengma + ",xie=" + frm3.xie
                     + ") job1(serial=" + myjob1.serial + ",modbustcp=" + myjob1.modbustcp + ")" + term);
             }
             catch (Exception ex) { MsgErroeLog.WriteLog("输出方式状态记录失败:" + ex.Message); }
@@ -869,14 +869,6 @@ namespace WindowsFormsApplication1
                     myjob6.modbustcp = false;
                     myjob7.modbustcp = false;
                     myjob8.modbustcp = false;
-                    myjob1.modbustemp = false;
-                    myjob2.modbustemp = false;
-                    myjob3.modbustemp = false;
-                    myjob4.modbustemp = false;
-                    myjob5.modbustemp = false;
-                    myjob6.modbustemp = false;
-                    myjob7.modbustemp = false;
-                    myjob8.modbustemp = false;
                     myjob1.jiasu = false;
                     myjob2.jiasu = false;
                     myjob3.jiasu = false;
@@ -1422,7 +1414,6 @@ namespace WindowsFormsApplication1
                         // path_1 = @".\test.vpp";
 
                     }
-                    frm3.jobsum = manager1.JobCount;
                     if (manager1.JobCount > 1)
                     {
 
@@ -4624,17 +4615,17 @@ namespace WindowsFormsApplication1
                             bool outOmron = (outMode < 0 || outMode == OutOmron);
                             bool outMtcpWin = (outMode < 0 || outMode == OutModbusTcpWin);
                             bool outMrtu = (outMode < 0 || outMode == OutModbusRtu);
-                            string snapTcp, snapSerial, snapMtcp, snapBuchang;
+                            string snapTcp, snapSerial, snapBuchang;
                             // ch:P2-① CSV 用不可变快照：检测线程锁内一次性拼好 "ji*" 输出串，Task 不再回读 block.Outputs，消除把 N+1 帧结果记到 N 帧行
                             string jiSnapshot = "";
                             lock (myjob.blockLock)
                             {
                             try { snapTcp = (outTcp && myjob.tcp) ? (faultThisFrame ? "999" : (myjob.block.Outputs.Contains("tcp") && myjob.block.Outputs["tcp"].Value != null ? myjob.block.Outputs["tcp"].Value.ToString() : "")) : ""; } catch { snapTcp = ""; } // ch:R13 只在本路真的会发时才读 Output（持 blockLock，关键路径上）
-                            try { snapSerial = ((outSerial && myjob.serial) || (outMode == OutModbusTcp && myjob.modbustcp)) ? (faultThisFrame ? "999" : (myjob.block.Outputs.Contains("serial") && myjob.block.Outputs["serial"].Value != null ? myjob.block.Outputs["serial"].Value.ToString() : "")) : ""; } catch { snapSerial = ""; } // ch:R13 + ch:R19 mode4 下数据若在 serial 终端也读出（见串口分支的 mode4 回退子句）
-                            try { snapMtcp = (outMtcp && myjob.modbustcp) ? (faultThisFrame ? "999" : (myjob.block.Outputs.Contains("modbustcp") && myjob.block.Outputs["modbustcp"].Value != null ? myjob.block.Outputs["modbustcp"].Value.ToString() : "")) : ""; } catch { snapMtcp = ""; } // ch:R13
+                            try { snapSerial = (outSerial && myjob.serial) ? (faultThisFrame ? "999" : (myjob.block.Outputs.Contains("serial") && myjob.block.Outputs["serial"].Value != null ? myjob.block.Outputs["serial"].Value.ToString() : "")) : ""; } catch { snapSerial = ""; } // ch:R13 只在本路真的会发时才读 Output
+                            // 覆盖层输出值捕获见下方 RecordModbusOverlayOut，不再单独维护 frm3 标准路快照。
                             // ch:R33 画面覆盖层的 ModbusTCP 输出值捕获（与数据路无关）：
                             //   需求口径=「该流程勾了 modbustcp 输出 + 输出模式选 ModbusTCP」就显示 ToolBlock 的 modbustcp 输出值，
-                            //   最终经 frm3 还是 FormModbus 出数不在考虑内。故直接读 block 的 modbustcp 输出端取文本，
+                            //   最终统一经 FormModbus 出数。故直接读 block 的 modbustcp 输出端取文本，
                             //   为空时回落 serial 端(R19：现场数据也有落在 serial 端的情况)，两条都不通才算无输出。
                             RecordModbusOverlayOut(int.Parse(myjob.path_number), myjob, faultThisFrame);
                             try { snapBuchang = (myjob.block.Outputs.Contains("buchang") && myjob.block.Outputs["buchang"].Value != null ? myjob.block.Outputs["buchang"].Value.ToString() : "0"); } catch { snapBuchang = "0"; }
@@ -4698,10 +4689,7 @@ namespace WindowsFormsApplication1
                                     catch (Exception ex) { MsgErroeLog.WriteLog("异常:" + ex.Message); }
                                 });
                             }
-                            if ((outSerial && myjob.serial) // ch:P1 判断提到 Task.Run 外（串口关闭时不再每帧派发空 Task）；ch:R13 加输出方式互斥闸
-                                || (outMode == OutModbusTcp && myjob.modbustcp && snapSerial != "" // ch:R19 mode4 数据路回退：现场 Modbus 数据在 Outputs["serial"]、自动模式实际经串口分支的寄存器写子路径(frm3.mdcan)出数，mode4 原把它关死致静默
-                                && !(modbustcp.fins_en && modbustcp.chushihua)   //   配置窗活跃 → 让 4638(FormModbus) 独发
-                                && !frm3.IsEnable))                               //   ch:R20 4732 闸开(IsEnable)就不碰——互斥按两组闸门输入裁决、与数据有无无关，杜绝 IsEnable 真但终端空时 4732 写零与本回退真值互覆的理论双写；三路必居其一可证明不双写。进入时 myjob.modbustcp 必真(4572 子闸)故只走寄存器写、绝不发原始串口文本
+                            if (outSerial && myjob.serial) // ch:P1 判断提到 Task.Run 外（串口关闭时不再每帧派发空 Task）；ch:R13 加输出方式互斥闸
                             {
                                 if (_logPathSerial) { _logPathSerial = false; MsgErroeLog.WriteLog("Modbus数据路:串口分支寄存器子路径 mode=" + _outputMode + " myjob.modbustcp=" + myjob.modbustcp); } // ch:R19 每次切模式首次触发记一条
                                 RunAsyncTail(() =>
@@ -4782,7 +4770,7 @@ namespace WindowsFormsApplication1
                                     catch (Exception ex) { MsgErroeLog.WriteLog("异常:" + ex.Message); }
                                 });
                             }
-                            if ((outMtcpWin || outMtcp) && modbustcp.fins_en && modbustcp.chushihua) // ch:R13 输出方式互斥闸；mode4「ModbusTCP输出」=ModbusTCP 总闸：配置窗实现与 frm3 实现(见下方 outMtcp 分支)由 fins_en&&chushihua 二选一，原只认 outMtcpWin 导致 mode4 遇配置窗活跃时双闸全灭、静默不输出
+                            if ((outMtcpWin || outMtcp) && modbustcp.fins_en && modbustcp.chushihua) // ch:R13 输出方式互斥闸；mode4/mode6 都走 FormModbus（Form3 的 ModbusTCP 已删除，不再有 frm3 标准路）
                             {
                                 if (_logPathMtcpWin) { _logPathMtcpWin = false; MsgErroeLog.WriteLog("Modbus数据路:配置窗FormModbus mode=" + _outputMode); } // ch:R19 每次切模式首次触发记一条
                                 try
@@ -4880,84 +4868,6 @@ namespace WindowsFormsApplication1
                                 {
                                     gongjukuai(myjob.path_number, tempout1);
                                 });
-                            }
-                            if (outMtcp && myjob.modbustcp && frm3.IsEnable && !(modbustcp.fins_en && modbustcp.chushihua)) // ch:R13 输出方式互斥闸
-                            {
-                                if (_logPathFrm3) { _logPathFrm3 = false; MsgErroeLog.WriteLog("Modbus数据路:frm3标准路(4732) mode=" + _outputMode + " snapMtcp=" + (snapMtcp == "" ? "空" : "有")); } // ch:R19 每次切模式首次触发记一条
-                                RunAsyncTail(() =>
-
-                               {
-
-                                   try
-                                   {
-                                       #region modbustcp
-                                       string[] out1temp = snapMtcp.Split(','); // ch:P1-04 用检测线程快照
-                                       int changdu_temp = 0;
-                                       if (snapMtcp.Contains(',')) // ch:P1-04 用检测线程快照
-                                       {
-                                           changdu_temp = myjob.changdu;
-                                       }
-                                       if (frm3.modbus_style == "float")
-                                       {
-                                           myjob.address = (int.Parse(frm3.xie) + 2 * (int.Parse(myjob.path_number) + changdu_temp - 1)).ToString();
-                                           for (int i = 0; i < out1temp.Length; i++)
-                                           {
-                                               float Pdata;
-                                               float.TryParse(out1temp[i], out Pdata);
-
-                                               if (!myjob.modbustemp)
-                                                   myjob.modbustemp = true;
-
-                                               object temp_pd = frm3.Getfloat(Pdata);
-                                               frm3.modbus_duxie((int.Parse(frm3.xie) + 2 * (int.Parse(myjob.path_number) + changdu_temp - 1) + 2 * i).ToString(), ref temp_pd, 1);
-                                               myjob.modbustemp = false;
-                                           }
-                                       }
-                                       else if (frm3.modbus_style == "int")
-                                       {
-                                           int jinzhi = 1;
-                                           if (frm3.gongnengma == "10")
-                                           {
-                                               jinzhi = 2;
-                                               myjob.address = (int.Parse(frm3.xie) + 2 * (int.Parse(myjob.path_number) + changdu_temp - 1)).ToString();
-                                           }
-                                           else if (frm3.gongnengma == "06")
-                                           {
-                                               myjob.address = (int.Parse(frm3.xie) + int.Parse(myjob.path_number) + changdu_temp - 1).ToString();
-                                           }
-                                           for (int i = 0; i < out1temp.Length; i++)
-                                           {
-                                               int Pdata;
-                                               short s_Pdata;
-                                               byte[] tempdata;
-                                               int.TryParse(out1temp[i], out Pdata);
-
-                                               if (!myjob.modbustemp)
-                                                   myjob.modbustemp = true;
-                                               if (frm3.gongnengma == "10")
-                                               {
-
-                                                   object temp_pd = frm3.Getint(Pdata, out tempdata);
-                                                   frm3.modbus_duxie((int.Parse(frm3.xie) + 2 * (int.Parse(myjob.path_number) + changdu_temp - 1) + jinzhi * i).ToString(), ref temp_pd, 1);
-                                               }
-                                               else if (frm3.gongnengma == "06")
-                                               {
-                                                   short.TryParse(out1temp[i], out s_Pdata);
-
-                                                   object temp_pd = s_Pdata;
-                                                   frm3.modbus_duxie((int.Parse(frm3.xie) + int.Parse(myjob.path_number) + changdu_temp - 1 + jinzhi * i).ToString(), ref temp_pd, 1);
-                                               }
-                                               myjob.modbustemp = false;
-                                           }
-                                       }
-                                       #endregion
-                                   }
-                                   catch (Exception ex)
-                                   {
-                                       myjob.modbustemp = false;
-                                       MsgErroeLog.WriteLog("ModbusTCP frm3分支(4732)写回异常 cam=" + myjob.path_number + ":" + ex.Message); // ch:R19 原静默吞异常，mode4 无输出时现场无法定位
-                                   }
-                               });
                             }
                             // ch:R43 P1-1 每帧无条件生成时间戳：原实现只在 trrigerEn=true 时赋值，连续运行(trrigerEn=false)下
                             //   temptime 恒为空串，cuntu_fangfa 解析必抛异常被吞，表现为"配了存图但一张都没有"
@@ -7695,6 +7605,9 @@ namespace WindowsFormsApplication1
                 }
                 else
                 {
+                    // ch:R44 已经与全局方案一致：记为已处理，防止其它通道切走后本通道再切回来
+                    if (path_1 == omronCam10Path)
+                        _cam10Tracker.MarkHandled("omron", omronCam10Path);
                     if (!omron.camera_dic[10][1].Contains("无"))
                     {
                         omron.SetSwitchPending(10);
@@ -7930,6 +7843,9 @@ namespace WindowsFormsApplication1
                 }
                 else
                 {
+                    // ch:R44 已经与全局方案一致：记为已处理，防止其它通道切走后本通道再切回来
+                    if (path_1 == modbustcpCam10Path)
+                        _cam10Tracker.MarkHandled("modbustcp", modbustcpCam10Path);
                     if (!modbustcp.camera_dic[10][1].Contains("无"))
                     {
                         modbustcp.SetSwitchPending(10);
@@ -8165,6 +8081,9 @@ namespace WindowsFormsApplication1
                 }
                 else
                 {
+                    // ch:R44 已经与全局方案一致：记为已处理，防止其它通道切走后本通道再切回来
+                    if (path_1 == modbusrtuCam10Path)
+                        _cam10Tracker.MarkHandled("modbusrtu", modbusrtuCam10Path);
                     if (!modbusrtu.camera_dic[10][1].Contains("无"))
                     {
                         modbusrtu.SetSwitchPending(10);

@@ -15,9 +15,6 @@ using System.Threading.Tasks;
 using System.Collections.Concurrent;
 using System.Globalization;
 using demo;
-using HslCommunication.ModBus;
-using HslCommunication;
-using System.Diagnostics;
 
 namespace WindowsFormsApplication1
 {
@@ -42,13 +39,9 @@ namespace WindowsFormsApplication1
         protected bool stop = false;
         protected bool constant = false;
         private StreamReader sRead;
-        Stopwatch timelunxun = new Stopwatch();
-        Stopwatch timelunxun1 = new Stopwatch();
         public string gongnengma="06";
         public string serial_xieyi = "无协议";
         public string qiehuan_fangshi = "";
-        private int lunxun = 0;
-        private int xiangji = 1;
         string strReceive;
         bool bAccpet = false;
        // SerialPortmdcan.port = new SerialPort();
@@ -67,15 +60,6 @@ namespace WindowsFormsApplication1
         int jinzhi;
         public string zifu;
         public string lujing;
-        public int jobsum=0;
-        /// <summary>
-        /// 初始化类
-        /// </summary>
-        public ModbusTcpNet busTcpClient = null;
-        /// <summary>
-        /// 监听状态
-        /// </summary>
-        public bool IsEnable = false;
         ErrorLog MsgErroeLog = new ErrorLog();
         public string xie = "0";
         public string du = "0";
@@ -84,25 +68,51 @@ namespace WindowsFormsApplication1
 
         }
 
+        /// <summary>
+        /// ch:R46 串口 Modbus 参数读取：优先 [serial] 新键，缺失回退旧 [modbustcp] 键。
+        ///   legacyKey 为 null 表示没有旧键可回退；空值/纯空白按缺失处理，返回 defaultValue。
+        /// </summary>
+        private string ReadSerialSetting(string key, string legacyKey, string defaultValue)
+        {
+            string value = wdini.ReadString("serial", key, "");
+            if (string.IsNullOrEmpty(value) && legacyKey != null)
+                value = wdini.ReadString("modbustcp", legacyKey, "");
+            value = value.Replace("\0", "");
+            return string.IsNullOrEmpty(value) ? defaultValue : value;
+        }
+
         private void Form3_Load(object sender, EventArgs e)
         {
             try
             {
                 mdcan.port= new SerialPort();
                 // ch:R12 方案表：按 count 键（缺省=老 8 行）装载 N 行进 store，前 8 行由面板同步到文本框。
-                //   注意：本通道与 Omron 共用 "change"/"path" 两段（历史设计，配置即共享；count 同段共享）。
-                _schemes.LoadFrom(i => wdini.ReadString("change", i.ToString(), ""),
-                                  i => wdini.ReadString("path", i.ToString(), ""),
-                                  wdini.ReadString("change", "count", ""));
+                // ch:R45 本通道（无协议/串口）改用独立段 "change_serial"/"path_serial"，与 Omron 的
+                //   "change"/"path" 分开；新段还没有 count 键时回退读旧段，现场升级无需手改 ini。
+                string schemeChangeSection, schemePathSection, schemeCount;
+                SerialSchemeSection.Resolve(
+                    (section, key, def) => wdini.ReadString(section, key, def),
+                    out schemeChangeSection, out schemePathSection, out schemeCount);
+                _schemes.LoadFrom(i => wdini.ReadString(schemeChangeSection, i.ToString(), ""),
+                                  i => wdini.ReadString(schemePathSection, i.ToString(), ""),
+                                  schemeCount);
                 InitSchemeUi();
-                comboBox2.Text = wdini.ReadString("change", "all", "");
-                // ch:R10-3 ini 手改非法值时 TryParse 回退，且夹取到控件范围，避免 Parse 异常中断后续 Load
-                decimal ny_ini;
-                if (decimal.TryParse(wdini.ReadString("modbustcp", "lunxun", "0"), out ny_ini))
+                // "all" 是协议选择键（Serial/Tcp_client/Tcp_server），随方案表迁到新段；
+                //   新段还没有该键时回退读旧段，避免升级后协议选择丢失。
+                string protocolMode = wdini.ReadString(schemeChangeSection, "all", "");
+                if (string.IsNullOrEmpty(protocolMode) && schemeChangeSection == SerialSchemeSection.Change)
+                    protocolMode = wdini.ReadString(SerialSchemeSection.LegacyChange, "all", "");
+                // ch:R46 旧配置 all=modbustcp：Form3 的 ModbusTCP 已删除（统一由 FormModbus 负责），
+                //   清空选择并留日志，避免升级后界面仍显示一个已失效的协议项。
+                if (string.Equals(protocolMode, "modbustcp", StringComparison.OrdinalIgnoreCase))
                 {
-                    ny_ini = Math.Max(numericUpDown2.Minimum, Math.Min(numericUpDown2.Maximum, ny_ini));
-                    numericUpDown2.Value = ny_ini;
+                    MsgErroeLog.WriteLog("Form3 协议选择 modbustcp 已停用：ModbusTCP 统一由 FormModbus 配置，本次已清空该选择");
+                    protocolMode = "";
                 }
+                comboBox2.Text = protocolMode;
+                // ch:R46 装载时只赋 Text 不会触发 SelectedIndexChanged（ComboBox 默认 DropDown 样式），
+                //   显式同步一次运行态字段；否则重启后 qiehuan_fangshi 为空，串口/网口按 PLC 报文自动切方案的三个判断全部失效。
+                comboBox2_SelectedIndexChanged(null, EventArgs.Empty);
             }
             catch (Exception ex) { MsgErroeLog.WriteLog("异常:" + ex.Message); }
             try
@@ -146,17 +156,23 @@ namespace WindowsFormsApplication1
             textBox6.Text = wdini.ReadString("tcpclient", "ip2", textBox6.Text);
             textBox2.Text = wdini.ReadString("tcpsend", "send1", textBox2.Text);
             decimal devalue;
-            decimal.TryParse(wdini.ReadString("modbustcp", "xie", "0"), out devalue);
+            // ch:R46 Form3 的 Modbus TCP 已删除，串口 Modbus RTU 参数改存 [serial]：
+            //   style/gongnengma/xie/du/xieyi 先读新键，缺失再回退旧 [modbustcp] 键（现场升级零迁移）；
+            //   保存只写 [serial]，不再碰 FormModbus 使用的 [modbustcp] ip/port 等键。
+            decimal.TryParse(ReadSerialSetting("xie", "xie", "0"), out devalue);
             numericUpDown18.Value = Math.Max(numericUpDown18.Minimum, Math.Min(numericUpDown18.Maximum, devalue)); // ch:R43 P2-4 夹取范围，防 ini 越界值让整个 Load 中断
-            decimal.TryParse(wdini.ReadString("modbustcp", "du", "0"), out devalue);
+            decimal.TryParse(ReadSerialSetting("du", "du", "0"), out devalue);
             numericUpDown1.Value = Math.Max(numericUpDown1.Minimum, Math.Min(numericUpDown1.Maximum, devalue));
-            txtIp.Text = wdini.ReadString("modbustcp", "ip", txtIp.Text);
-            txtPort.Text = wdini.ReadString("modbustcp", "port", txtPort.Text);
             // ch:R13-3 删除 out0..out3 的 ok/ng 装载与字段：textBox10..17 的真实语义是方案表 path/1..8，
             //   原装载在其后追加执行会用历史 out* 段值覆盖方案路径（现场 ini 若残留 OK/NG 串→切方案必 File.Exists 失败）。
-            comboBox3.Text = wdini.ReadString("modbustcp", "style","float").Replace("\0", "");
-            comboBox4.Text = wdini.ReadString("modbustcp", "gongnengma", "06").Replace("\0", "");
-            comboBox5.Text = wdini.ReadString("modbustcp", "serial", "无协议").Replace("\0", "");
+            comboBox3.Text = ReadSerialSetting("style", "style", "float");
+            comboBox4.Text = ReadSerialSetting("gongnengma", "gongnengma", "06");
+            // 旧处理器写的是 "modbus_RTU"（下划线），设计器选项是 "modbus-RTU"（连字符）；
+            //   升级时统一归一化，避免旧值被当成"无协议"而误开文本接收。
+            string serialProtocol = ReadSerialSetting("xieyi", "serial", "无协议");
+            comboBox5.Text = serialProtocol.Replace("_", "-").Equals("modbus-RTU", StringComparison.OrdinalIgnoreCase)
+                ? "modbus-RTU" : "无协议";
+            serial_xieyi = comboBox5.Text;
             if (wdini.ReadString("jinzhi", "16en", "true") == "true")
             {
                 jinzhi = 1;
@@ -176,12 +192,6 @@ namespace WindowsFormsApplication1
                 modbus_qufan = 0;
                 checkBox6.CheckState = CheckState.Unchecked;
             }
-            if (wdini.ReadString("modbustcp", "en", "false") == "true")
-            {
-                checkBox5.CheckState = CheckState.Checked;
-            }
-            else
-                checkBox5.CheckState = CheckState.Unchecked;
             if (wdini.ReadString("tcpclient", "en", "false") == "true")
             {
                 checkBox3.CheckState = CheckState.Checked;
@@ -241,7 +251,7 @@ namespace WindowsFormsApplication1
                         this.label7.Text = "数据位：" +mdcan.port.DataBits + "|";
                         this.label8.Text = "停止位：" +mdcan.port.StopBits + "|";
                         this.label9.Text = "校验:" + mdcan.port.Parity;
-                        if (wdini.ReadString("modbustcp", "serial", "无协议").Replace("\0", "") == "无协议")
+                        if (serial_xieyi == "无协议")
                             btnReceive_Click(null,null);
                     }
                     catch (Exception ex)
@@ -313,181 +323,20 @@ namespace WindowsFormsApplication1
                     catch (Exception ex) { monitor = "Tcpclient连接失败"; LogThrottled(ref _lastCliConnErrLogMs, "TCP客户端连接失败:" + ex.Message); } // ch:R10-7 补限流日志
                 }
             }
-            if(checkBox5.CheckState == CheckState.Checked)
-            {
-                if (string.IsNullOrWhiteSpace(txtIp.Text) || string.IsNullOrWhiteSpace(txtPort.Text))
-                {
-                    // ch:未配置 ModbusTCP 服务器地址时不自动连接，避免无谓的重试与 Socket 释放竞争
-                    MsgErroeLog.WriteLog("ModbusTCP 未配置 IP/端口，跳过自动连接");
-                }
-                else
-                {
-                    button21_Click(null, null);
-                    for (int i = 0; i < 5; i++)
-                    {
-                        if (IsEnable == false)
-                        {
-                            Thread.Sleep(5000);
-                            if (IsEnable == false)
-
-                            {
-                                button21_Click(null, null);
-                            }
-                        }
-                    }
-                    td1 = new Thread(new ThreadStart(lunxun_monitor));
-                    td1.IsBackground = true;
-                    td1.Start();
-                }
-            }
         }
-        bool tongxunzhong = false;
-        bool tongxunzhong1 = false;
-        public void modbus_duxie(string address,ref object value,int duxie)
-        {
-            
-            // ch:R38 H4 旧的整段 lock(locker_2) 因锁区跨 getData(封送到 UI 线程)与 UI 线程互等可死锁，保持注释不恢复（现场也不走 frm3 modbustcp）；
-            //   出站并发改由下面每个 busTcpClient 调用点的短临界区串行：锁内只有一次读写，不跨事件/UI 封送。
-            //lock (locker_2)
-           // {
-               tongxunzhong = true;       
-                if (duxie == 1)
-                {
-                    float f1, f2 = 0;
-                    int i1, i2 = 0;
-                    short s1, s2 = 0;
-                    timelunxun1.Restart();
-                    if (value is float)
-                    {
-                        f1 = (float)value;
-                        lock (locker_2) { busTcpClient.Write(address, f1); } // ch:R38 H4 短临界区串行写
-                    }
-                    else if (value is int)
-                    {
-                        i1 = (int)value;
-                        lock (locker_2) { busTcpClient.Write(address, i1); } // ch:R38 H4 短临界区串行写
-                    }
-                    else if (value is short)
-                    {
-                    s1 = (short)value;
-                    lock (locker_2) { busTcpClient.Write(address, s1); } // ch:R38 H4 短临界区串行写
-                }
-                if (timelunxun1.ElapsedMilliseconds > 400)
-                {
-                    MsgErroeLog.WriteLog("modbustcp轮询写监控超时");
-                }
-            }
-                else
-                {
-                    float f1, f2 = 0;
-                    int i1, i2 = 0;
-                    short s1, s2 = 0;
-                    for (int i = 0; i < jobsum; i++)
-                    {
-                        if (value is float)
-                        {
-                            lock (locker_2) { f1 = Getfloat(busTcpClient.ReadFloat((int.Parse(du)+(i*2)).ToString()).Content); } // ch:R38 H4 短临界区串行读
-                            value = f1;
-                            if (xiangji == i + 1)
-                            {
-                                f2 = f1;
-                            }
-                        }
-                        else if (value is int)
-                        {
-                            byte[] tempdata;
-                            lock (locker_2) { i1 = Getint(busTcpClient.ReadInt32((int.Parse(du) + (i * 2)).ToString()).Content, out tempdata); } // ch:R38 H4 短临界区串行读
-                            value = i1;
-                            if (xiangji == i + 1)
-                            {
-                                i2 = i1;
-                            }
-                        }
-                        else if (value is short)
-                        {
-                            lock (locker_2) { s1 = busTcpClient.ReadInt16((int.Parse(du) + i).ToString()).Content; } // ch:R38 H4 短临界区串行读
-                            value = s1;
-                            if (xiangji == i + 1)
-                            {
-                                s2 = s1;
-                            }
-                        }
-                        
-                        if (qiehuan_fangshi == "modbustcp" && (value.ToString() != "0"))
-                        {
-                            if (value is float)
-                            {
-                                f1 = 0;
-                                lock (locker_2) { busTcpClient.Write((int.Parse(du) + (i * 2)).ToString(), f1); } // ch:R38 H4 短临界区串行写
-                            }
-                            else if (value is int)
-                            {
-                                i1 = 0;
-                                lock (locker_2) { busTcpClient.Write((int.Parse(du) + (i * 2)).ToString(), i1); } // ch:R38 H4 短临界区串行写
-                            }
-                            else if (value is short)
-                            {
-                                s1 = 0;
-                                lock (locker_2) { busTcpClient.Write((int.Parse(du) +i).ToString(), s1); } // ch:R38 H4 短临界区串行写
-                            }
-                            if (qiehuan(value.ToString()) == 0)
-                            {
-                                SelectionChangedEventArgs E = new SelectionChangedEventArgs(value.ToString());
-                                getData(this, E);
-                            }
-                        }
-                    }
-                    if (value is float)
-                    {
-                        value = f2;
-                    }
-                    else if (value is int)
-                    {
-                        value = i2;
-                    }
-                    else if (value is short)
-                    {
-                        value = s2;
-                    }
-                }
-                tongxunzhong = false;
-           // }
-           
-        }
-        // ch:R14 轮询/重连线程退出标志：lunxun_monitor、clientmonitor 原为 while(true)，
+        // ch:R14 重连线程退出标志：clientmonitor 原为 while(true)，
         //   进程退出阶段(Form1 已 closing=true、正在关 socket/冲刷日志)它们仍在发请求/自动重连，
         //   会与清理竞争、刷出退出期异常。由 Form1_FormClosing 经 RequestExit() 置位后停手。
         //   注意只在真正退出时调用：窗体被「隐藏但不销毁」(本窗体 FormClosing 里 e.Cancel=true)不置位，
-        //   否则用户下次再打开配置窗时轮询线程已经停了、功能失效。
+        //   否则用户下次再打开配置窗时重连线程已经停了、功能失效。
         private volatile bool _exiting = false;
 
-        // ch:R14 进程退出时停掉本窗体的轮询/重连线程(不 Join —— 它们是后台线程，最多再睡完当前一觉)
+        // ch:R14 进程退出时停掉本窗体的重连线程(不 Join —— 它们是后台线程，最多再睡完当前一觉)
         public void RequestExit()
         {
             _exiting = true;
-            IsEnable = false; // ch:让 lunxun_monitor 立刻落空转分支，不再发起新的轮询读
         }
 
-        private void lunxun_monitor()
-        {
-            while (!_exiting) // ch:R14 原 while(true) 无退出标志，进程退出期仍会轮询发请求
-            {
-                if (IsEnable && lunxun != 0&& tongxunzhong == false)
-                {
-                    Thread.Sleep(lunxun);
-                    timelunxun.Restart();
-                    button9_Click(null, null);
-                   if( timelunxun.ElapsedMilliseconds>400)
-                    {
-                        MsgErroeLog.WriteLog("modbustcp轮询读监控超时"+ timelunxun.ElapsedMilliseconds);
-                        if(timelunxun.ElapsedMilliseconds>1000)
-                        Thread.Sleep(2000); // ch:P1-④ 退避封顶 2s，避免通讯抖动后节拍恢复要等 10 秒
-                    }
-                }
-                else
-                    Thread.Sleep(20);
-            }
-        }
         void DataChange(string data)
         {
             textBox9.Text = data;
@@ -1788,19 +1637,22 @@ namespace WindowsFormsApplication1
             if (!ValidateLoadTriggerUniqueness(true, schemeRows)) // ch:R43 重复载图串拒绝保存，避免运行期静默切错方案
                 return;
             _schemes.SetRows(schemeRows);
-            wdini.WriteString("modbustcp", "lunxun", lunxun.ToString());
-            wdini.WriteString("modbustcp", "style", comboBox3.Text);
-            wdini.WriteString("modbustcp", "gongnengma", comboBox4.Text);
-            wdini.WriteString("modbustcp", "serial", comboBox5.Text);
+            // ch:R46 Form3 已删除 ModbusTCP；串口 Modbus 参数统一写 [serial]（不再写 [modbustcp]，
+            //   避免覆盖 FormModbus 的 ip/port/en 等配置）。旧 [modbustcp] 键保留不动，仅作升级回退来源。
+            wdini.WriteString("serial", "style", comboBox3.Text);
+            wdini.WriteString("serial", "gongnengma", comboBox4.Text);
+            wdini.WriteString("serial", "xie", numericUpDown18.Value.ToString());
+            wdini.WriteString("serial", "du", numericUpDown1.Value.ToString()); // ch:R43 P1-8 原误写成写地址 NUD18，重启后读地址被覆盖
+            // 协议项只有「无协议 / modbus-RTU」两种，保存前归一化，避免手输的下划线/大小写写进 ini
+            serial_xieyi = comboBox5.Text == "modbus-RTU" ? "modbus-RTU" : "无协议";
+            wdini.WriteString("serial", "xieyi", serial_xieyi);
             for (int i = 0; i < schemeRows.Count; i++)
             {
-                wdini.WriteString("change", (i + 1).ToString(), schemeRows[i][0]);
-                wdini.WriteString("path", (i + 1).ToString(), schemeRows[i][1]);
+                wdini.WriteString(SerialSchemeSection.Change, (i + 1).ToString(), schemeRows[i][0]);
+                wdini.WriteString(SerialSchemeSection.Path, (i + 1).ToString(), schemeRows[i][1]);
             }
-            wdini.WriteString("change", "count", schemeRows.Count.ToString());
-            wdini.WriteString("change", "all", comboBox2.Text);
-            wdini.WriteString("modbustcp","xie", numericUpDown18.Value.ToString());
-            wdini.WriteString("modbustcp", "du", numericUpDown1.Value.ToString()); // ch:R43 P1-8 原误写成写地址 NUD18，重启后读地址被覆盖
+            wdini.WriteString(SerialSchemeSection.Change, "count", schemeRows.Count.ToString());
+            wdini.WriteString(SerialSchemeSection.Change, "all", comboBox2.Text);
             wdini.WriteString("serial", "strportName", strportName);
             wdini.WriteString("serial", "strbaudRate", strbaudRate);
             wdini.WriteString("serial", "strStopBits", strStopBits);
@@ -1809,8 +1661,6 @@ namespace WindowsFormsApplication1
             // WritePrivateProfileString("Test", "id", "xym", "d://vc//Ex1//ex1.ini");
             wdini.WriteString("tcpserver", "port1", textBox3.Text);
             wdini.WriteString("tcpserver", "ip1", textBox4.Text);
-            wdini.WriteString("modbustcp", "port", txtPort.Text);
-            wdini.WriteString("modbustcp", "ip", txtIp.Text);
             wdini.WriteString("tcpsend", "send1", textBox2.Text);
             wdini.WriteString("tcpclient", "port2", textBox5.Text);
             wdini.WriteString("tcpclient", "ip2", textBox6.Text);
@@ -1835,10 +1685,6 @@ namespace WindowsFormsApplication1
                 wdini.WriteString("serial", "en", "true");
             else
                 wdini.WriteString("serial", "en", "false");
-            if (checkBox5.CheckState == CheckState.Checked)
-                wdini.WriteString("modbustcp", "en", "true");
-            else
-                wdini.WriteString("modbustcp", "en", "false");
 
         }
 
@@ -1874,7 +1720,6 @@ namespace WindowsFormsApplication1
             }
         }
         private object locker_1 = new object();
-        private object locker_2 = new object();
         public void changeok(string aa)
         {
             lock (locker_1)
@@ -2395,64 +2240,6 @@ namespace WindowsFormsApplication1
             }
         }
 
-        private void button21_Click(object sender, EventArgs e)
-        {
-            try
-            {
-                if (IsEnable)
-                {
-                    MessageBox.Show("请勿重复建立连接!");
-                    return;
-                }
-                string ip = txtIp.Text.Trim();
-                int port = Convert.ToInt32(txtPort.Text);
-                if (ip == null || ip == "")
-                {
-                    MessageBox.Show("ip不能为空!");
-                    return;
-                }
-                // ch:R38 H4 建连纳入短临界区：避免与轮询/写回并发调用交错（锁内只有创建对象+连接，不跨事件/UI 封送）
-                OperateResult res;
-                lock (locker_2)
-                {
-                    busTcpClient = new ModbusTcpNet(ip, port, 0x01);
-                    res = busTcpClient.ConnectServer();
-                }
-                if (res.IsSuccess == true) //接收状态返回值
-                {
-                    IsEnable = true;
-                    MsgErroeLog.WriteLog("开启连接成功");
-                }
-                else
-                {
-                    MsgErroeLog.WriteLog("开启连接失败");
-                }
-            }
-            catch (Exception ex)
-            {
-                MsgErroeLog.WriteLog("开启连接失败!" + "---" + ex.Message.ToString());
-            }
-        }
-
-        private void button20_Click(object sender, EventArgs e)
-        {
-            try
-            {
-                if (!IsEnable)
-                {
-                    MsgErroeLog.WriteLog("尚未建立连接!");
-                    return;
-                }
-                lock (locker_2) { busTcpClient.ConnectClose(); } // ch:R38 H4 短临界区：断连与轮询/写回串行
-                IsEnable = false;
-                MsgErroeLog.WriteLog("关闭连接成功！");
-            }
-            catch (Exception ex)
-            {
-                MsgErroeLog.WriteLog("关闭连接失败!" + "---" + ex.Message.ToString());
-            }
-        }
-
         private void numericUpDown18_ValueChanged(object sender, EventArgs e)
         {
             xie = numericUpDown18.Value.ToString();
@@ -2463,66 +2250,6 @@ namespace WindowsFormsApplication1
             du= numericUpDown1.Value.ToString();
         }
 
-        private void button8_Click(object sender, EventArgs e)
-        {
-            if (IsEnable)
-            {
-                if (modbus_style == "float")
-                {
-                    float indata;
-                    float.TryParse(textBox27.Text, out indata);
-                    //  busTcpClient.Write(xie, Getfloat(indata));
-                    object temp_xie= Getfloat(indata);
-                    modbus_duxie(xie,ref temp_xie,1);
-                }
-                else if(modbus_style=="int")
-                {
-                    int indata;
-                    short s_indata;
-                    byte[] tempdata;
-                    int.TryParse(textBox27.Text, out indata);
-                    short.TryParse(textBox27.Text, out s_indata);
-                    if (gongnengma == "10")
-                    {
-                       // busTcpClient.Write(xie, Getint(indata, out tempdata));
-                        object temp_xie = Getint(indata, out tempdata);
-                        modbus_duxie(xie, ref temp_xie, 1);
-                    }
-                    else if (gongnengma == "06")
-                    {
-                        //busTcpClient.Write(xie, s_indata);
-                        object temp_xie = s_indata;
-                        modbus_duxie(xie, ref temp_xie, 1);
-                    }
-                }
-            }
-        }
-        public static int Diaohuan(int cc)
-        {
-            int da;
-            int xiao;
-            xiao = cc / 65536;
-            da = cc % 65536;
-            cc = da * 65536 + xiao;
-            return cc;
-        }
-        public float Getfloat(float values)
-        {
-            float[] value = new float[] { values };
-            var result = new byte[value.Length * sizeof(float)];
-            Buffer.BlockCopy(value, 0, result, 0, result.Length);
-            byte[] data;
-            if (modbus_qufan == 1)
-            {
-                data = new byte[4] { result[2], result[3], result[0], result[1] };
-            }
-            else
-            {
-                data = new byte[4] { result[0], result[1], result[2], result[3] };
-            }
-            value[0] = BitConverter.ToSingle(data, 0);
-            return value[0];
-        }
         public int Getint(int values,out byte [] data1)
         {
             int[] value = new int[] { values };
@@ -2542,48 +2269,6 @@ namespace WindowsFormsApplication1
             value[0] = BitConverter.ToInt32(data, 0);
             return value[0];
         }
-        // ch:轮询线程写接收值显示，跨线程时转 UI 线程
-        private void SetText26(string s)
-        {
-            if (this.InvokeRequired)
-                this.BeginInvoke(new Action(() => textBox26.Text = s));
-            else
-                textBox26.Text = s;
-        }
-        private void button9_Click(object sender, EventArgs e)
-        {
-            if (IsEnable)
-            {
-                //float Pdata;
-                // Pdata = Diaohuan(Pdata);
-                if (modbus_style == "float")
-                {
-                    object temp_du = (float)2.2;
-                    modbus_duxie(du, ref temp_du, 0);
-                    SetText26(temp_du.ToString());
-                    //textBox26.Text = Getfloat(busTcpClient.ReadFloat(du).Content).ToString();
-                }
-                else if(modbus_style=="int")
-                {
-                    if (gongnengma == "10")
-                    {
-                        //byte[] tempdata;
-                        //  textBox26.Text = Getint(busTcpClient.ReadInt32(du).Content, out tempdata).ToString();
-                        object temp_du = (int)2;
-                        modbus_duxie(du, ref temp_du, 0);
-                        SetText26(temp_du.ToString());
-                    }
-                    else if(gongnengma=="06")
-                    {
-                        object temp_du = (short)2;
-                        modbus_duxie(du, ref temp_du, 0);
-                        SetText26(temp_du.ToString());
-                        //textBox26.Text = busTcpClient.ReadInt16(du).Content.ToString();
-                    }
-                }
-            }
-        }
-
         private void comboBox3_SelectedIndexChanged(object sender, EventArgs e)
         {
             if(comboBox3.Text=="float")
@@ -2656,14 +2341,8 @@ namespace WindowsFormsApplication1
 
         private void comboBox5_SelectedIndexChanged(object sender, EventArgs e)
         {
-            if (comboBox5.Text == "无协议")
-            {
-                serial_xieyi = "无协议";
-            }
-            else if (comboBox5.Text == "modbus_RTU")
-            {
-                serial_xieyi = "modbus_RTU";
-            }
+            // ch:R46 统一使用设计器里的 "modbus-RTU"（连字符）；旧配置的 "modbus_RTU" 在装载时已归一化。
+            serial_xieyi = comboBox5.Text == "modbus-RTU" ? "modbus-RTU" : "无协议";
         }
 
         private void comboBox2_SelectedIndexChanged(object sender, EventArgs e)
@@ -2680,13 +2359,13 @@ namespace WindowsFormsApplication1
             {
                 qiehuan_fangshi = "Tcp_server";
             }
-            else if (comboBox2.Text == "modbustcp")
+            else
             {
-                qiehuan_fangshi = "modbustcp";
+                // ch:R46 "modbustcp" 已从 Form3 移除（统一由 FormModbus 负责），旧配置按空选择处理
+                qiehuan_fangshi = "";
             }
         }
         private bool front = false;
-        private Thread td1;
 
         private void timer4_Tick(object sender, EventArgs e)
         {
@@ -2700,16 +2379,6 @@ namespace WindowsFormsApplication1
             {
                 front = false;
             }
-        }
-
-        private void numericUpDown2_ValueChanged(object sender, EventArgs e)
-        {
-            lunxun =(int)numericUpDown2.Value;
-        }
-
-        private void numericUpDown3_ValueChanged(object sender, EventArgs e)
-        {
-            xiangji =(int) numericUpDown3.Value;
         }
     }
 }

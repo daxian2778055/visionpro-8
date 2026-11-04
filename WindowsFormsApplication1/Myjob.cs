@@ -68,7 +68,6 @@ namespace WindowsFormsApplication1
         public bool modbustcp;
         public bool tcp;
         public bool serial;
-        public bool modbustemp;
         public bool cuntu;
         public bool xuanran;
         public bool IO;

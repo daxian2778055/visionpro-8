@@ -94,24 +94,11 @@
             this.label14 = new System.Windows.Forms.Label();
             this.groupBox3 = new System.Windows.Forms.GroupBox();
             this.comboBox3 = new System.Windows.Forms.ComboBox();
-            this.textBox27 = new System.Windows.Forms.TextBox();
-            this.textBox26 = new System.Windows.Forms.TextBox();
-            this.button9 = new System.Windows.Forms.Button();
-            this.button8 = new System.Windows.Forms.Button();
             this.numericUpDown1 = new System.Windows.Forms.NumericUpDown();
             this.label20 = new System.Windows.Forms.Label();
             this.numericUpDown18 = new System.Windows.Forms.NumericUpDown();
             this.label19 = new System.Windows.Forms.Label();
-            this.button20 = new System.Windows.Forms.Button();
-            this.button21 = new System.Windows.Forms.Button();
-            this.label18 = new System.Windows.Forms.Label();
-            this.txtIp = new System.Windows.Forms.TextBox();
-            this.txtPort = new System.Windows.Forms.TextBox();
-            this.label17 = new System.Windows.Forms.Label();
-            this.checkBox5 = new System.Windows.Forms.CheckBox();
             this.groupBox4 = new System.Windows.Forms.GroupBox();
-            this.label10 = new System.Windows.Forms.Label();
-            this.numericUpDown2 = new System.Windows.Forms.NumericUpDown();
             this.comboBox4 = new System.Windows.Forms.ComboBox();
             this.checkBox6 = new System.Windows.Forms.CheckBox();
             this.textBox28 = new System.Windows.Forms.TextBox();
@@ -120,15 +107,12 @@
             this.button11 = new System.Windows.Forms.Button();
             this.comboBox5 = new System.Windows.Forms.ComboBox();
             this.timer4 = new System.Windows.Forms.Timer(this.components);
-            this.numericUpDown3 = new System.Windows.Forms.NumericUpDown();
             this.groupBox1.SuspendLayout();
             this.groupBox2.SuspendLayout();
             this.groupBox3.SuspendLayout();
             ((System.ComponentModel.ISupportInitialize)(this.numericUpDown1)).BeginInit();
             ((System.ComponentModel.ISupportInitialize)(this.numericUpDown18)).BeginInit();
             this.groupBox4.SuspendLayout();
-            ((System.ComponentModel.ISupportInitialize)(this.numericUpDown2)).BeginInit();
-            ((System.ComponentModel.ISupportInitialize)(this.numericUpDown3)).BeginInit();
             this.SuspendLayout();
             // 
             // button1
@@ -620,8 +604,7 @@
             this.comboBox2.Items.AddRange(new object[] {
             "Tcp_server",
             "Tcp_client",
-            "Serial",
-            "modbustcp"});
+            "Serial"});
             this.comboBox2.Location = new System.Drawing.Point(580, 245);
             this.comboBox2.Name = "comboBox2";
             this.comboBox2.Size = new System.Drawing.Size(121, 20);
@@ -706,29 +689,17 @@
             // 
             // groupBox3
             // 
-            this.groupBox3.Controls.Add(this.numericUpDown3);
             this.groupBox3.Controls.Add(this.comboBox3);
-            this.groupBox3.Controls.Add(this.textBox27);
-            this.groupBox3.Controls.Add(this.textBox26);
-            this.groupBox3.Controls.Add(this.button9);
-            this.groupBox3.Controls.Add(this.button8);
             this.groupBox3.Controls.Add(this.numericUpDown1);
             this.groupBox3.Controls.Add(this.label20);
             this.groupBox3.Controls.Add(this.numericUpDown18);
             this.groupBox3.Controls.Add(this.label19);
-            this.groupBox3.Controls.Add(this.button20);
-            this.groupBox3.Controls.Add(this.button21);
-            this.groupBox3.Controls.Add(this.label18);
-            this.groupBox3.Controls.Add(this.txtIp);
-            this.groupBox3.Controls.Add(this.txtPort);
-            this.groupBox3.Controls.Add(this.label17);
-            this.groupBox3.Controls.Add(this.checkBox5);
             this.groupBox3.Location = new System.Drawing.Point(300, 12);
             this.groupBox3.Name = "groupBox3";
-            this.groupBox3.Size = new System.Drawing.Size(123, 274);
+            this.groupBox3.Size = new System.Drawing.Size(123, 100);
             this.groupBox3.TabIndex = 78;
             this.groupBox3.TabStop = false;
-            this.groupBox3.Text = "ModbusTcp";
+            this.groupBox3.Text = "Modbus参数";
             // 
             // comboBox3
             // 
@@ -739,46 +710,12 @@
             this.comboBox3.Items.AddRange(new object[] {
             "float",
             "int"});
-            this.comboBox3.Location = new System.Drawing.Point(1, 249);
+            this.comboBox3.Location = new System.Drawing.Point(1, 74);
             this.comboBox3.Name = "comboBox3";
             this.comboBox3.Size = new System.Drawing.Size(76, 20);
             this.comboBox3.TabIndex = 131;
             this.comboBox3.Text = "float";
             this.comboBox3.SelectedIndexChanged += new System.EventHandler(this.comboBox3_SelectedIndexChanged);
-            // 
-            // textBox27
-            // 
-            this.textBox27.Location = new System.Drawing.Point(56, 201);
-            this.textBox27.Name = "textBox27";
-            this.textBox27.Size = new System.Drawing.Size(64, 21);
-            this.textBox27.TabIndex = 130;
-            // 
-            // textBox26
-            // 
-            this.textBox26.Location = new System.Drawing.Point(56, 226);
-            this.textBox26.Name = "textBox26";
-            this.textBox26.Size = new System.Drawing.Size(38, 21);
-            this.textBox26.TabIndex = 79;
-            // 
-            // button9
-            // 
-            this.button9.Location = new System.Drawing.Point(2, 226);
-            this.button9.Name = "button9";
-            this.button9.Size = new System.Drawing.Size(51, 23);
-            this.button9.TabIndex = 129;
-            this.button9.Text = "读测试";
-            this.button9.UseVisualStyleBackColor = true;
-            this.button9.Click += new System.EventHandler(this.button9_Click);
-            // 
-            // button8
-            // 
-            this.button8.Location = new System.Drawing.Point(2, 200);
-            this.button8.Name = "button8";
-            this.button8.Size = new System.Drawing.Size(51, 23);
-            this.button8.TabIndex = 79;
-            this.button8.Text = "写测试";
-            this.button8.UseVisualStyleBackColor = true;
-            this.button8.Click += new System.EventHandler(this.button8_Click);
             // 
             // numericUpDown1
             // 
@@ -787,7 +724,7 @@
             0,
             0,
             0});
-            this.numericUpDown1.Location = new System.Drawing.Point(33, 174);
+            this.numericUpDown1.Location = new System.Drawing.Point(33, 46);
             this.numericUpDown1.Maximum = new decimal(new int[] {
             60000,
             0,
@@ -801,7 +738,7 @@
             // label20
             // 
             this.label20.AutoSize = true;
-            this.label20.Location = new System.Drawing.Point(6, 176);
+            this.label20.Location = new System.Drawing.Point(6, 48);
             this.label20.Name = "label20";
             this.label20.Size = new System.Drawing.Size(23, 12);
             this.label20.TabIndex = 127;
@@ -814,7 +751,7 @@
             0,
             0,
             0});
-            this.numericUpDown18.Location = new System.Drawing.Point(33, 147);
+            this.numericUpDown18.Location = new System.Drawing.Point(33, 19);
             this.numericUpDown18.Maximum = new decimal(new int[] {
             60000,
             0,
@@ -828,81 +765,14 @@
             // label19
             // 
             this.label19.AutoSize = true;
-            this.label19.Location = new System.Drawing.Point(6, 149);
+            this.label19.Location = new System.Drawing.Point(6, 21);
             this.label19.Name = "label19";
             this.label19.Size = new System.Drawing.Size(23, 12);
             this.label19.TabIndex = 84;
             this.label19.Text = "写:";
             // 
-            // button20
-            // 
-            this.button20.Location = new System.Drawing.Point(2, 110);
-            this.button20.Margin = new System.Windows.Forms.Padding(2);
-            this.button20.Name = "button20";
-            this.button20.Size = new System.Drawing.Size(103, 33);
-            this.button20.TabIndex = 83;
-            this.button20.Text = "关闭连接";
-            this.button20.UseVisualStyleBackColor = true;
-            this.button20.Click += new System.EventHandler(this.button20_Click);
-            // 
-            // button21
-            // 
-            this.button21.Location = new System.Drawing.Point(2, 74);
-            this.button21.Margin = new System.Windows.Forms.Padding(2);
-            this.button21.Name = "button21";
-            this.button21.Size = new System.Drawing.Size(103, 31);
-            this.button21.TabIndex = 82;
-            this.button21.Text = "开启连接";
-            this.button21.UseVisualStyleBackColor = true;
-            this.button21.Click += new System.EventHandler(this.button21_Click);
-            // 
-            // label18
-            // 
-            this.label18.AutoSize = true;
-            this.label18.Location = new System.Drawing.Point(6, 51);
-            this.label18.Name = "label18";
-            this.label18.Size = new System.Drawing.Size(29, 12);
-            this.label18.TabIndex = 80;
-            this.label18.Text = "port";
-            // 
-            // txtIp
-            // 
-            this.txtIp.Location = new System.Drawing.Point(18, 21);
-            this.txtIp.Name = "txtIp";
-            this.txtIp.Size = new System.Drawing.Size(94, 21);
-            this.txtIp.TabIndex = 81;
-            // 
-            // txtPort
-            // 
-            this.txtPort.Location = new System.Drawing.Point(36, 48);
-            this.txtPort.Name = "txtPort";
-            this.txtPort.Size = new System.Drawing.Size(48, 21);
-            this.txtPort.TabIndex = 79;
-            // 
-            // label17
-            // 
-            this.label17.AutoSize = true;
-            this.label17.Location = new System.Drawing.Point(0, 24);
-            this.label17.Name = "label17";
-            this.label17.Size = new System.Drawing.Size(17, 12);
-            this.label17.TabIndex = 80;
-            this.label17.Text = "IP";
-            // 
-            // checkBox5
-            // 
-            this.checkBox5.AutoSize = true;
-            this.checkBox5.Location = new System.Drawing.Point(82, 253);
-            this.checkBox5.Margin = new System.Windows.Forms.Padding(2);
-            this.checkBox5.Name = "checkBox5";
-            this.checkBox5.Size = new System.Drawing.Size(36, 16);
-            this.checkBox5.TabIndex = 79;
-            this.checkBox5.Text = "En";
-            this.checkBox5.UseVisualStyleBackColor = true;
-            // 
             // groupBox4
             // 
-            this.groupBox4.Controls.Add(this.label10);
-            this.groupBox4.Controls.Add(this.numericUpDown2);
             this.groupBox4.Controls.Add(this.comboBox4);
             this.groupBox4.Controls.Add(this.checkBox6);
             this.groupBox4.Controls.Add(this.textBox28);
@@ -911,32 +781,10 @@
             this.groupBox4.Controls.Add(this.button11);
             this.groupBox4.Location = new System.Drawing.Point(105, 336);
             this.groupBox4.Name = "groupBox4";
-            this.groupBox4.Size = new System.Drawing.Size(145, 125);
+            this.groupBox4.Size = new System.Drawing.Size(145, 100);
             this.groupBox4.TabIndex = 79;
             this.groupBox4.TabStop = false;
             this.groupBox4.Text = "Modbus";
-            // 
-            // label10
-            // 
-            this.label10.AutoSize = true;
-            this.label10.Location = new System.Drawing.Point(11, 100);
-            this.label10.Name = "label10";
-            this.label10.Size = new System.Drawing.Size(53, 12);
-            this.label10.TabIndex = 134;
-            this.label10.Text = "轮询时间";
-            // 
-            // numericUpDown2
-            // 
-            this.numericUpDown2.Location = new System.Drawing.Point(73, 96);
-            this.numericUpDown2.Maximum = new decimal(new int[] {
-            200,
-            0,
-            0,
-            0});
-            this.numericUpDown2.Name = "numericUpDown2";
-            this.numericUpDown2.Size = new System.Drawing.Size(54, 21);
-            this.numericUpDown2.TabIndex = 134;
-            this.numericUpDown2.ValueChanged += new System.EventHandler(this.numericUpDown2_ValueChanged);
             // 
             // comboBox4
             // 
@@ -1021,29 +869,6 @@
             this.timer4.Interval = 200;
             this.timer4.Tick += new System.EventHandler(this.timer4_Tick);
             // 
-            // numericUpDown3
-            // 
-            this.numericUpDown3.Location = new System.Drawing.Point(96, 227);
-            this.numericUpDown3.Maximum = new decimal(new int[] {
-            8,
-            0,
-            0,
-            0});
-            this.numericUpDown3.Minimum = new decimal(new int[] {
-            1,
-            0,
-            0,
-            0});
-            this.numericUpDown3.Name = "numericUpDown3";
-            this.numericUpDown3.Size = new System.Drawing.Size(27, 21);
-            this.numericUpDown3.TabIndex = 132;
-            this.numericUpDown3.Value = new decimal(new int[] {
-            1,
-            0,
-            0,
-            0});
-            this.numericUpDown3.ValueChanged += new System.EventHandler(this.numericUpDown3_ValueChanged);
-            // 
             // Form3
             // 
             this.AutoScaleDimensions = new System.Drawing.SizeF(6F, 12F);
@@ -1124,8 +949,6 @@
             ((System.ComponentModel.ISupportInitialize)(this.numericUpDown18)).EndInit();
             this.groupBox4.ResumeLayout(false);
             this.groupBox4.PerformLayout();
-            ((System.ComponentModel.ISupportInitialize)(this.numericUpDown2)).EndInit();
-            ((System.ComponentModel.ISupportInitialize)(this.numericUpDown3)).EndInit();
             this.ResumeLayout(false);
             this.PerformLayout();
 
@@ -1197,21 +1020,10 @@
         private System.Windows.Forms.TextBox textBox18;
         private System.Windows.Forms.Label label14;
         private System.Windows.Forms.GroupBox groupBox3;
-        private System.Windows.Forms.Button button20;
-        private System.Windows.Forms.Button button21;
-        private System.Windows.Forms.Label label18;
-        private System.Windows.Forms.TextBox txtIp;
-        private System.Windows.Forms.TextBox txtPort;
-        private System.Windows.Forms.Label label17;
-        private System.Windows.Forms.CheckBox checkBox5;
         private System.Windows.Forms.NumericUpDown numericUpDown1;
         private System.Windows.Forms.Label label20;
         private System.Windows.Forms.NumericUpDown numericUpDown18;
         private System.Windows.Forms.Label label19;
-        private System.Windows.Forms.Button button8;
-        public System.Windows.Forms.TextBox textBox26;
-        private System.Windows.Forms.Button button9;
-        private System.Windows.Forms.TextBox textBox27;
         private System.Windows.Forms.ComboBox comboBox3;
         private System.Windows.Forms.GroupBox groupBox4;
         private System.Windows.Forms.TextBox textBox28;
@@ -1222,8 +1034,5 @@
         private System.Windows.Forms.ComboBox comboBox4;
         private System.Windows.Forms.ComboBox comboBox5;
         private System.Windows.Forms.Timer timer4;
-        private System.Windows.Forms.Label label10;
-        private System.Windows.Forms.NumericUpDown numericUpDown2;
-        private System.Windows.Forms.NumericUpDown numericUpDown3;
     }
 }
