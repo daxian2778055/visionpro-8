@@ -10,13 +10,14 @@ namespace WindowsFormsApplication1
     public partial class FormVersion : Form
     {
         // 当前版本（与推送仓库的 git tag 一一对应）：语义化版本 + 发布日期
-        public const string AppVersion = "1.3.46";
+        public const string AppVersion = "1.3.47";
         public const string AppVersionDate = "2026-11-04";
         public const string AppRepoName = "正泰 VP八相机连续海康（M4 - 加密）";
 
         // 版本时间线：与仓库 git tag 一一对应（新版本在最前）
         private static readonly string[] VersionTimeline = new string[] 
         {
+            "v1.3.47  2026-11-04  第15轮热修：①P1-A 方案切换静默丢失——ShouldSwitch 先记账，抢闩失败或排空中止后同方案串本会话不再重试；xinghao_qiehuan 改返回 bool，未受理即 Forget(source)，排空中止分支同样 Forget 并把中止弹窗按 60s 限流；②P1-B timer10 原无条件清 frm3.lujing，抢闩被占时 Form3 切换请求被静默丢弃；改为受理后才消费，未受理保留请求下个 Tick 重试；③P1-C 为误报——button15_Click 未被任何控件绑定（设计器实际绑定 button15_Click_1），timer10 不会被永久关闭；④P1-D mode4 语义——恢复 R19 串口 RTU 回退（与已删除的 frm3 ModbusTCP 无关）：FormModbus 未激活且数据落在 serial 端时仍按 frm3.mdcan 写寄存器，避免现场 mode4+串口 RTU 组合升级后静默零输出；⑤P2 为误报——Cam10ChangeTracker/SchemeSwitchConfig/SerialSchemeSection 均已有单测。构建 0 error、单测 78/78。",
             "v1.3.46  2026-11-04  第15轮：①相机10方案切换防呆——勾选时拒绝第二通道（撤销勾选并写回 false），存量 ini 多通道使能在启动时告警，运行期 Cam10ChangeTracker 按通道记住已处理方案路径，同一通道值不变不再重复切换，杜绝两个 PLC 各保持不同方案串时 A/B 无限互切；②方案表按协议分家——Form3 改用 change_serial/path_serial（新段无 count 回退旧段、count=0 不回退），保存只写新段，与 Omron 的 change/path 互不覆盖；③Form3 移除 ModbusTCP 全链路（连接/断开/读写测试/轮询/Getfloat/busTcpClient 及全部 TCP 控件），mode4 与 mode6 统一走 FormModbus，串口 RTU 参数 style/gongnengma/xie/du/xieyi 迁到 [serial] 且缺失回退旧 [modbustcp] 键、保存不再覆盖 FormModbus 的 ip/port/en，旧值 modbus_RTU 归一化为 modbus-RTU；④修复 Form3 装载只赋 ComboBox.Text 不回填 qiehuan_fangshi，导致重启后按 PLC 报文自动切方案失效。构建 0 error、单测 78/78。",
             "v1.3.45  2026-11-03  第14轮续 方案表易用性：①修复『添加方案行』空表时视觉无反馈——原实现先把行裁到有效数(0)再加 1 行、补齐又回 8 行；改为按屏显行数追加并滚动定位+直接进编辑态；②UI 打磨：白底细框/斑马纹/固定行高 26/表头加粗/统一选中色、路径列自动吃满剩余宽度、行号列显示 1..N(即 ini 键序)；③底栏新增『保存方案表到配置』按钮(SaveRequested 钩子接各窗体原保存逻辑：Modbus/Omron=button7、RTU=b3、Form3=button5『保存设置』)，无需切回数据配置页找保存；④说明：网格默认至少 8 行=历史 8 槽兼容，空行不参与匹配、不计入有效方案数。构建 0 error、单测 58/58。",
             "v1.3.44  2026-11-03  第14轮 方案表成为唯一编辑入口：①四窗体（Modbus TCP/Omron/RTU/无协议 Form3）旧『切换』区 8+8 载图串/路径文本框连同行标签隐藏（控件保留作面板镜像，同步与匹配逻辑零改动；cam10 切换寄存器绑定 comboBox21/textBox41/使能□10 不属本区、维持可见）；②路径选择加固——双击事件改绑 CellDoubleClick（原 CellContentDoubleClick 在文本单元格先进编辑态时可能不触发），新增『选择 vpp…』按钮作用于当前行，_browsing 门闩防两入口重入对话框；③面板提示语改口径（编辑即时生效，保存写入配置）。构建 0 error、单测 58/58。",

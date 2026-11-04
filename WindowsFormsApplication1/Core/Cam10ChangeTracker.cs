@@ -18,6 +18,8 @@ namespace WindowsFormsApplication1
         /// <summary>
         /// 返回 true=该通道的方案路径相对上次已变化，可以发起切换；false=重复值，应忽略。
         /// 第一次调用（无历史）视为变化，保证启动后 PLC 当前方案能生效。
+        /// 调用方契约：返回 true 后若切换未受理（闩被占/前置失败）或排空中止，必须 Forget(source)，
+        ///   否则同一方案串在本会话内不会再重试（R46 修复的静默丢失路径）。
         /// </summary>
         public bool ShouldSwitch(string source, string requestedPath)
         {

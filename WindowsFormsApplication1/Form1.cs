@@ -327,7 +327,7 @@ namespace WindowsFormsApplication1
         private const int OutIO = 1;               // IO 脉冲
         private const int OutSerial = 2;           // 串口（frm3）
         private const int OutTcp = 3;              // TCP（frm3）
-        private const int OutModbusTcp = 4;        // ModbusTCP（FormModbus；兼容旧选择，统一走 FormModbus 配置窗）
+        private const int OutModbusTcp = 4;        // ModbusTCP（FormModbus；兼容旧选择。FormModbus 未激活时保留串口 RTU 数据回退，见串口分支）
         private const int OutOmron = 5;            // 欧姆龙 Fins（FormOmron 配置窗）
         private const int OutModbusTcpWin = 6;     // ModbusTCP（FormModbus 配置窗）
         private const int OutModbusRtu = 7;        // ModbusRTU（FormModbusRtu 配置窗）
@@ -4621,7 +4621,7 @@ namespace WindowsFormsApplication1
                             lock (myjob.blockLock)
                             {
                             try { snapTcp = (outTcp && myjob.tcp) ? (faultThisFrame ? "999" : (myjob.block.Outputs.Contains("tcp") && myjob.block.Outputs["tcp"].Value != null ? myjob.block.Outputs["tcp"].Value.ToString() : "")) : ""; } catch { snapTcp = ""; } // ch:R13 只在本路真的会发时才读 Output（持 blockLock，关键路径上）
-                            try { snapSerial = (outSerial && myjob.serial) ? (faultThisFrame ? "999" : (myjob.block.Outputs.Contains("serial") && myjob.block.Outputs["serial"].Value != null ? myjob.block.Outputs["serial"].Value.ToString() : "")) : ""; } catch { snapSerial = ""; } // ch:R13 只在本路真的会发时才读 Output
+                            try { snapSerial = ((outSerial && myjob.serial) || (outMode == OutModbusTcp && myjob.modbustcp)) ? (faultThisFrame ? "999" : (myjob.block.Outputs.Contains("serial") && myjob.block.Outputs["serial"].Value != null ? myjob.block.Outputs["serial"].Value.ToString() : "")) : ""; } catch { snapSerial = ""; } // ch:R13 只在本路真的会发时才读 Output；ch:R46 mode4 保留串口 RTU 回退（与已删除的 frm3 TCP 无关）
                             // 覆盖层输出值捕获见下方 RecordModbusOverlayOut，不再单独维护 frm3 标准路快照。
                             // ch:R33 画面覆盖层的 ModbusTCP 输出值捕获（与数据路无关）：
                             //   需求口径=「该流程勾了 modbustcp 输出 + 输出模式选 ModbusTCP」就显示 ToolBlock 的 modbustcp 输出值，
@@ -4689,7 +4689,9 @@ namespace WindowsFormsApplication1
                                     catch (Exception ex) { MsgErroeLog.WriteLog("异常:" + ex.Message); }
                                 });
                             }
-                            if (outSerial && myjob.serial) // ch:P1 判断提到 Task.Run 外（串口关闭时不再每帧派发空 Task）；ch:R13 加输出方式互斥闸
+                            if ((outSerial && myjob.serial) // ch:P1 判断提到 Task.Run 外（串口关闭时不再每帧派发空 Task）；ch:R13 加输出方式互斥闸
+                                || (outMode == OutModbusTcp && myjob.modbustcp && snapSerial != "" // ch:R46 mode4 数据路回退：现场 Modbus 数据在 Outputs["serial"]、经串口分支的寄存器写子路径(frm3.mdcan，串口 RTU)出数；这是 R19 的现场行为，与已删除的 frm3 ModbusTCP 无关
+                                && !(modbustcp.fins_en && modbustcp.chushihua)))   //   配置窗活跃 → 由下方 FormModbus 分支独发，二者必居其一，不会双写
                             {
                                 if (_logPathSerial) { _logPathSerial = false; MsgErroeLog.WriteLog("Modbus数据路:串口分支寄存器子路径 mode=" + _outputMode + " myjob.modbustcp=" + myjob.modbustcp); } // ch:R19 每次切模式首次触发记一条
                                 RunAsyncTail(() =>
@@ -4770,7 +4772,7 @@ namespace WindowsFormsApplication1
                                     catch (Exception ex) { MsgErroeLog.WriteLog("异常:" + ex.Message); }
                                 });
                             }
-                            if ((outMtcpWin || outMtcp) && modbustcp.fins_en && modbustcp.chushihua) // ch:R13 输出方式互斥闸；mode4/mode6 都走 FormModbus（Form3 的 ModbusTCP 已删除，不再有 frm3 标准路）
+                            if ((outMtcpWin || outMtcp) && modbustcp.fins_en && modbustcp.chushihua) // ch:R13 输出方式互斥闸；mode4/mode6 都走 FormModbus（Form3 的 ModbusTCP 已删除）；mode4 在配置窗未激活时由上方串口分支按 RTU 回退，二者互斥
                             {
                                 if (_logPathMtcpWin) { _logPathMtcpWin = false; MsgErroeLog.WriteLog("Modbus数据路:配置窗FormModbus mode=" + _outputMode); } // ch:R19 每次切模式首次触发记一条
                                 try
@@ -7591,7 +7593,8 @@ namespace WindowsFormsApplication1
                             Task.Run(() =>
                             {
                                 // ch:P2 必须 try/finally 复位：原实现若 xinghao_qiehuan 抛异常，omron.qiehuanzhong 永久停在 1 → 后续 cam10 切换事件不再触发
-                                try { xinghao_qiehuan(omronCam10Path); }
+                                // ch:R46 未受理（闩被占/前置失败）要 Forget，否则该通道对同一方案串永久不再重试
+                                try { if (!xinghao_qiehuan(omronCam10Path, "omron")) _cam10Tracker.Forget("omron"); }
                                 catch (Exception ex) { MsgErroeLog.WriteLog("异常:" + ex.Message); }
                                 finally { omron.qiehuanzhong = 0; }
                             });
@@ -7829,7 +7832,8 @@ namespace WindowsFormsApplication1
                             Task.Run(() =>
                             {
                                 // ch:P2 必须 try/finally 复位：原实现若 xinghao_qiehuan 抛异常，modbustcp.qiehuanzhong 永久停在 1 → 后续 cam10 切换事件不再触发
-                                try { xinghao_qiehuan(modbustcpCam10Path); }
+                                // ch:R46 未受理要 Forget，否则该通道对同一方案串永久不再重试
+                                try { if (!xinghao_qiehuan(modbustcpCam10Path, "modbustcp")) _cam10Tracker.Forget("modbustcp"); }
                                 catch (Exception ex) { MsgErroeLog.WriteLog("异常:" + ex.Message); }
                                 finally { modbustcp.qiehuanzhong = 0; }
                             });
@@ -8067,7 +8071,8 @@ namespace WindowsFormsApplication1
                             Task.Run(() =>
                             {
                                 // ch:P2 必须 try/finally 复位：原实现若 xinghao_qiehuan 抛异常，modbusrtu.qiehuanzhong 永久停在 1 → 后续 cam10 切换事件不再触发
-                                try { xinghao_qiehuan(modbusrtuCam10Path); }
+                                // ch:R46 未受理要 Forget，否则该通道对同一方案串永久不再重试
+                                try { if (!xinghao_qiehuan(modbusrtuCam10Path, "modbusrtu")) _cam10Tracker.Forget("modbusrtu"); }
                                 catch (Exception ex) { MsgErroeLog.WriteLog("异常:" + ex.Message); }
                                 finally { modbusrtu.qiehuanzhong = 0; }
                             });
@@ -9485,6 +9490,7 @@ namespace WindowsFormsApplication1
         //   同一通道值不变时不再重复切换；否则两个 PLC 各保持不同方案串会 A/B 无限互切。
         //   配置层同时由 SchemeSwitchConfig 拒绝多通道同时启用 cam10（勾选时检查）。
         private readonly Cam10ChangeTracker _cam10Tracker = new Cam10ChangeTracker();
+        private int _lastSwitchAbortMsgMs = 0; // ch:R46 排空中止弹窗限流（重试不再每次弹窗）
         private int _detectingCount = 0; // ch:正在执行 block.Run 的检测帧数（参考正常版本，切换方案排空等待用，Interlocked 操作）
         private int _lastDropLogMs = 0; // ch:回调丢帧限频日志时间戳（防呆，避免静默丢帧无法排查）
 
@@ -9506,20 +9512,20 @@ namespace WindowsFormsApplication1
         private static int _perfReporting = 0;                        // ch:窗口汇总单线程保护
         private static readonly System.Diagnostics.Stopwatch _perfSw = System.Diagnostics.Stopwatch.StartNew();
         private static readonly long[] _lastProcMs = new long[8];  // ch:每相机上次开始处理的时刻(ms)，封程限速用
-        private void xinghao_qiehuan(string a)
+        private bool xinghao_qiehuan(string a, string source = null)
         {
             // ch:R43 P1-2 三条通讯通道在 Task.Run 里调用本方法：DeviceListAcq/bnClose_Click 等会直接操作
             //   WinForms 集合与控件，必须先整体封送到 UI 线程（原实现被 CheckForIllegalCrossThreadCalls=false 掩盖）。
             if (InvokeRequired)
             {
-                try { Invoke(new Action<string>(xinghao_qiehuan), a); }
+                try { return (bool)Invoke(new Func<string, string, bool>(xinghao_qiehuan), a, source); }
                 catch (Exception ex)
                 {
                     // ch:R43 N4 封送失败说明本次切换并未在 UI 线程执行，闩不是本次置上的；
                     //   此时绝不能清 qiehuanzhong，否则会放行另一路正在进行的切换
                     MsgErroeLog.WriteLog("方案切换封送UI失败:" + ex.Message);
+                    return false;
                 }
-                return;
             }
             // ch:P2 方案切换闩改原子 check-then-set：原 if(==0){=1;} 是 TOCTOU——
             //   三条通讯通道的 cam10 事件可各自通过外层预筛(==0)后同时进到这里，导致两个 xinghao_qiehuan 并发做 Shutdown/重载。
@@ -9556,7 +9562,8 @@ namespace WindowsFormsApplication1
                         try { Frm2.start = 1; } catch { }
                     }
                 }
-                if (preOk)
+                if (!preOk)
+                    return false; // ch:R46 前置步骤失败：本次未执行切换，调用方 Forget 后可重试
                 Task.Run(() =>
                 {
                     myjob1.baoguang = 0;
@@ -9581,18 +9588,26 @@ namespace WindowsFormsApplication1
                             if (!WaitDetectDrain(10000))
                             {
                                 MsgErroeLog.WriteLog("P1-06 切换：二次排空仍超时(累计15000ms)，检测线程卡死；已中止方案切换（未 Shutdown/未加载新方案，请重启软件）");
+                                // ch:R46 中止不算“已处理”：忘掉该通道历史，检测线程恢复后同一方案串仍会重试；
+                                //   弹窗按 60s 限流，避免轮询每次重试都弹一次
+                                _cam10Tracker.Forget(source);
                                 Volatile.Write(ref qiehuanzhong, 0); // ch:R38 解锁切换闩，避免后续操作被永久挡在门闩外
                                 if (omron.qiehuanzhong == 0)
                                 {
                                     try { Frm2.start = 1; } catch { } // ch:R38 收尾进度窗（与 catch 分支同手法）
                                 }
-                                try
+                                int nowMs = Environment.TickCount;
+                                if (unchecked(nowMs - _lastSwitchAbortMsgMs) >= 60000)
                                 {
-                                    this.BeginInvoke(new Action(() =>
-                                        MessageBox.Show("检测线程卡死，方案切换已中止（当前方案未变）。请重启软件后重试。", "方案切换中止", MessageBoxButtons.OK, MessageBoxIcon.Error)
-                                    ));
+                                    _lastSwitchAbortMsgMs = nowMs;
+                                    try
+                                    {
+                                        this.BeginInvoke(new Action(() =>
+                                            MessageBox.Show("检测线程卡死，方案切换已中止（当前方案未变）。检测恢复后将自动重试。", "方案切换中止", MessageBoxButtons.OK, MessageBoxIcon.Error)
+                                        ));
+                                    }
+                                    catch { }
                                 }
-                                catch { }
                                 return; // ch:R38 H2 中止：跳过 Shutdown/加载
                             }
                         }
@@ -10151,7 +10166,10 @@ namespace WindowsFormsApplication1
                         MsgErroeLog.WriteLog(ex.Message + "切换方案2");
                     };
                 });
+                return true; // ch:R46 已受理：Task 内若排空中止会在中止分支 Forget(source) 允许重试
             }
+            // ch:R46 闩被占用（另一通道正在切换）：本次未受理，调用方须 Forget 该通道，否则同方案串永久不再重试
+            return false;
         }
         private void 配置工具ToolStripMenuItem_Click(object sender, EventArgs e)
         {
@@ -10306,9 +10324,12 @@ namespace WindowsFormsApplication1
             {
                 if (frm3.lujing != null && frm3.lujing.Length >= 3)
                 {
-                    xinghao_qiehuan(frm3.lujing);
-                    frm3.lujing = "";
-                    frm3.zifu = "";
+                    // ch:R46 只有被受理才消费请求：闩被占用时保留 frm3.lujing，下个 Tick 再试，不再静默丢弃 Form3 的切换请求
+                    if (xinghao_qiehuan(frm3.lujing))
+                    {
+                        frm3.lujing = "";
+                        frm3.zifu = "";
+                    }
                 }
             }
             catch (Exception ex) { MsgErroeLog.WriteLog("异常:" + ex.Message); }
