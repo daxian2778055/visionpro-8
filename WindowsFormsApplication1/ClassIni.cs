@@ -208,10 +208,8 @@ namespace demo
             ReadSection(Section, Idents);
             return Idents.IndexOf(Ident) > -1;
         }
-        //确保资源的释放
-        ~ClassIni()
-        {
-            UpdateFile();
-        }
+        // ch:R48 P2-5 移除终结器：WritePrivateProfileString 本身即时落盘，UpdateFile 无缓冲可刷；
+        //   在终结器里做 P/Invoke 会在 GC 线程执行文件 IO，且实例未初始化时 FileName 可能为 null。
+        //   需要显式刷新时由调用方直接调用 UpdateFile()。
     }
 }

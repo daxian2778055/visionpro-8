@@ -283,6 +283,13 @@ namespace WindowsFormsApplication1
             {
             try
             {
+                // ch:R48 P2-6 FC10 数据区必须整寄存器（偶数字节）：原实现奇数长度时按 floor 计寄存器数、
+                //   却把奇数字节全部发出，从站按字节数校验会回异常，尾字节也被静默丢弃。显式拒绝并记日志。
+                if (value == null || value.Length == 0 || (value.Length & 1) != 0)
+                {
+                    MsgErroeLog.WriteLog("WriteRegisters 拒绝：FC10 数据字节数必须为正偶数，实际=" + (value == null ? "null" : value.Length.ToString()));
+                    return 0;
+                }
                 int registerCount = value.Length / 2;
                 byte[] cmdHead = new byte[7 + value.Length];
                 cmdHead[0] = (byte)stationID;            

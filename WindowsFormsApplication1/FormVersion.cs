@@ -10,13 +10,14 @@ namespace WindowsFormsApplication1
     public partial class FormVersion : Form
     {
         // 当前版本（与推送仓库的 git tag 一一对应）：语义化版本 + 发布日期
-        public const string AppVersion = "1.3.47";
+        public const string AppVersion = "1.3.48";
         public const string AppVersionDate = "2026-11-04";
         public const string AppRepoName = "正泰 VP八相机连续海康（M4 - 加密）";
 
         // 版本时间线：与仓库 git tag 一一对应（新版本在最前）
         private static readonly string[] VersionTimeline = new string[] 
         {
+            "v1.3.48  2026-11-04  第16轮(全量复查修复)：①P1 检测队列静默丢帧——DetectWorkerLoop 由「读槽→置null→置忙」改为 Interlocked.Exchange 原子取任务，回调登记改为 CompareExchange(null→job)；槽位已有待检任务时本帧按背压丢弃并释放 Bitmap 槽位，避免新任务被随后的置 null 抹掉（同时保证 job.jieshouZifu 不被后帧覆盖）；②P1-8 trriger_set——新增 ReadBlockInputStringSafe，8 路相机 triggermode 读取统一持 blockLock，消除与检测线程 block.Run 的 Inputs 并发竞争，并去掉同一输入重复读取；③P2-2 授权检查——daoqi_jiankong 线程池内的 MessageBox 改 ShowAlertFromBackground（UI 线程直弹、后台 BeginInvoke、句柄未建退化为日志），Form1_Load 两处授权异常提示同步接入；④P2-5 ClassIni——移除在 GC 线程做 P/Invoke 文件 IO 的终结器，UpdateFile 保留显式调用；⑤P2-6 Modbus FC10——数据区字节数非正偶数时显式拒绝并记日志，不再静默丢尾字节；⑥P2-7 Frm2.start 改 volatile。构建 0 error、单测 78/78。",
             "v1.3.47  2026-11-04  第15轮热修：①P1-A 方案切换静默丢失——ShouldSwitch 先记账，抢闩失败或排空中止后同方案串本会话不再重试；xinghao_qiehuan 改返回 bool，未受理即 Forget(source)，排空中止分支同样 Forget 并把中止弹窗按 60s 限流；②P1-B timer10 原无条件清 frm3.lujing，抢闩被占时 Form3 切换请求被静默丢弃；改为受理后才消费，未受理保留请求下个 Tick 重试；③P1-C 为误报——button15_Click 未被任何控件绑定（设计器实际绑定 button15_Click_1），timer10 不会被永久关闭；④P1-D mode4 语义——恢复 R19 串口 RTU 回退（与已删除的 frm3 ModbusTCP 无关）：FormModbus 未激活且数据落在 serial 端时仍按 frm3.mdcan 写寄存器，避免现场 mode4+串口 RTU 组合升级后静默零输出；⑤P2 为误报——Cam10ChangeTracker/SchemeSwitchConfig/SerialSchemeSection 均已有单测。构建 0 error、单测 78/78。",
             "v1.3.46  2026-11-04  第15轮：①相机10方案切换防呆——勾选时拒绝第二通道（撤销勾选并写回 false），存量 ini 多通道使能在启动时告警，运行期 Cam10ChangeTracker 按通道记住已处理方案路径，同一通道值不变不再重复切换，杜绝两个 PLC 各保持不同方案串时 A/B 无限互切；②方案表按协议分家——Form3 改用 change_serial/path_serial（新段无 count 回退旧段、count=0 不回退），保存只写新段，与 Omron 的 change/path 互不覆盖；③Form3 移除 ModbusTCP 全链路（连接/断开/读写测试/轮询/Getfloat/busTcpClient 及全部 TCP 控件），mode4 与 mode6 统一走 FormModbus，串口 RTU 参数 style/gongnengma/xie/du/xieyi 迁到 [serial] 且缺失回退旧 [modbustcp] 键、保存不再覆盖 FormModbus 的 ip/port/en，旧值 modbus_RTU 归一化为 modbus-RTU；④修复 Form3 装载只赋 ComboBox.Text 不回填 qiehuan_fangshi，导致重启后按 PLC 报文自动切方案失效。构建 0 error、单测 78/78。",
             "v1.3.45  2026-11-03  第14轮续 方案表易用性：①修复『添加方案行』空表时视觉无反馈——原实现先把行裁到有效数(0)再加 1 行、补齐又回 8 行；改为按屏显行数追加并滚动定位+直接进编辑态；②UI 打磨：白底细框/斑马纹/固定行高 26/表头加粗/统一选中色、路径列自动吃满剩余宽度、行号列显示 1..N(即 ini 键序)；③底栏新增『保存方案表到配置』按钮(SaveRequested 钩子接各窗体原保存逻辑：Modbus/Omron=button7、RTU=b3、Form3=button5『保存设置』)，无需切回数据配置页找保存；④说明：网格默认至少 8 行=历史 8 槽兼容，空行不参与匹配、不计入有效方案数。构建 0 error、单测 58/58。",

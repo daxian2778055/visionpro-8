@@ -13,7 +13,8 @@ namespace WindowsFormsApplication1
 {
     public partial class Frm2 : Form
     {
-        public int start;
+        // ch:R48 P2-7 后台线程写、UI 定时器读：volatile 保证可见性，避免刷不出 start=1 导致进度窗不关闭
+        public volatile int start;
         public int end;
         public Frm2()
         {

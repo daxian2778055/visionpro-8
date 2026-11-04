@@ -3024,7 +3024,7 @@ namespace WindowsFormsApplication1
             }
             catch (Exception ex)
             {
-                MessageBox.Show(ex.Message + ":1488");
+                ShowAlertFromBackground(ex.Message + ":1488");
             }
             string code1 = duini.ReadString("1", "2", "");
             string code2 = duini.ReadString("1", "3", "");
@@ -3058,7 +3058,7 @@ namespace WindowsFormsApplication1
                         }
                         catch (Exception ex)
                         {
-                            MessageBox.Show(ex.Message + ":1501:" + code);
+                            ShowAlertFromBackground(ex.Message + ":1501:" + code);
                         }
                     }
                     if (dayt >= 0)
@@ -6644,6 +6644,24 @@ namespace WindowsFormsApplication1
             }
         }
 
+        // ch:R47 P1-4 相机统计表头统一在 UI 线程追加：原实现相机2~8 在方案切换 Task 的后台线程直写
+        //   listBox2.Items，与 UI 线程重绘/枚举并发会抛 InvalidOperationException；异常被内层 catch
+        //   吞成"无流程4"，后续相机半装载仍继续运行。封送后集合访问只在 UI 线程发生。
+        private void AddCameraStatsHeaderToListBox(int camIndex)
+        {
+            if (InvokeRequired)
+            {
+                Invoke(new Action<int>(AddCameraStatsHeaderToListBox), camIndex);
+                return;
+            }
+            listBox2.Items.Add("产品类型:相机" + camIndex);
+            listBox2.Items.Add("检测数:");
+            listBox2.Items.Add("OK数:");
+            listBox2.Items.Add("NG数:");
+            listBox2.Items.Add("合格率:");
+            listBox2.Items.Add("~~~~~~~~~");
+        }
+
 
         private void Form1_MinimumSizeChanged(object sender, EventArgs e)
         {
@@ -9657,6 +9675,8 @@ namespace WindowsFormsApplication1
                                 MessageBox.Show("方案文件加载失败，请检查方案路径配置：" + ex.Message, "方案加载失败", MessageBoxButtons.OK, MessageBoxIcon.Error)
                             ));
                         }
+                        bool jobLoadFailed = false;
+                        string jobLoadError = "";
                         try
                         {
                             manager1.UserQueueFlush();
@@ -9667,15 +9687,7 @@ namespace WindowsFormsApplication1
                             try { if (myjob1.Cogbmp != null) myjob1.Cogbmp.Close(); } catch (Exception ex) { new ErrorLog().WriteLog(ex.ToString()); }
                             myjob1.Cogbmp = new CogImageFileBMP();
                             myIndependentJob.RealTimeQueueFlush();
-                            this.Invoke(new Action(() =>
-                            {
-                                listBox2.Items.Add("产品类型:相机1");
-                                listBox2.Items.Add("检测数:");
-                                listBox2.Items.Add("OK数:");
-                                listBox2.Items.Add("NG数:");
-                                listBox2.Items.Add("合格率:");
-                                listBox2.Items.Add("~~~~~~~~~");
-                            }));
+                            AddCameraStatsHeaderToListBox(1);
 
                             group_1 = myjob1.job.VisionTool as CogToolGroup;
                             block_1 = group_1.Tools["CogToolBlock1"] as CogToolBlock;
@@ -9727,12 +9739,7 @@ namespace WindowsFormsApplication1
                                 try { if (myjob2.Cogbmp != null) myjob2.Cogbmp.Close(); } catch (Exception ex) { new ErrorLog().WriteLog(ex.ToString()); }
                                 myjob2.Cogbmp = new CogImageFileBMP();
                                 myIndependentJob.RealTimeQueueFlush();
-                                listBox2.Items.Add("产品类型:相机2");
-                                listBox2.Items.Add("检测数:");
-                                listBox2.Items.Add("OK数:");
-                                listBox2.Items.Add("NG数:");
-                                listBox2.Items.Add("合格率:");
-                                listBox2.Items.Add("~~~~~~~~~");
+                                AddCameraStatsHeaderToListBox(2);
 
                                 group_2 = myjob2.job.VisionTool as CogToolGroup;
                                 block_2 = group_2.Tools["CogToolBlock1"] as CogToolBlock;
@@ -9788,12 +9795,7 @@ namespace WindowsFormsApplication1
                                 try { if (myjob3.Cogbmp != null) myjob3.Cogbmp.Close(); } catch (Exception ex) { new ErrorLog().WriteLog(ex.ToString()); }
                                 myjob3.Cogbmp = new CogImageFileBMP();
                                 myIndependentJob.RealTimeQueueFlush();
-                                listBox2.Items.Add("产品类型:相机3");
-                                listBox2.Items.Add("检测数:");
-                                listBox2.Items.Add("OK数:");
-                                listBox2.Items.Add("NG数:");
-                                listBox2.Items.Add("合格率:");
-                                listBox2.Items.Add("~~~~~~~~~");
+                                AddCameraStatsHeaderToListBox(3);
                                 group_3 = myjob3.job.VisionTool as CogToolGroup;
                                 bbtemp = 7462;
                                 block_3 = group_3.Tools["CogToolBlock1"] as CogToolBlock;
@@ -9827,12 +9829,7 @@ namespace WindowsFormsApplication1
                                 try { if (myjob4.Cogbmp != null) myjob4.Cogbmp.Close(); } catch (Exception ex) { new ErrorLog().WriteLog(ex.ToString()); }
                                 myjob4.Cogbmp = new CogImageFileBMP();
                                 myIndependentJob.RealTimeQueueFlush();
-                                listBox2.Items.Add("产品类型:相机4");
-                                listBox2.Items.Add("检测数:");
-                                listBox2.Items.Add("OK数:");
-                                listBox2.Items.Add("NG数:");
-                                listBox2.Items.Add("合格率:");
-                                listBox2.Items.Add("~~~~~~~~~");
+                                AddCameraStatsHeaderToListBox(4);
                                 group_4 = myjob4.job.VisionTool as CogToolGroup;
                                 block_4 = group_4.Tools["CogToolBlock1"] as CogToolBlock;
 
@@ -9862,12 +9859,7 @@ namespace WindowsFormsApplication1
                                 try { if (myjob5.Cogbmp != null) myjob5.Cogbmp.Close(); } catch (Exception ex) { new ErrorLog().WriteLog(ex.ToString()); }
                                 myjob5.Cogbmp = new CogImageFileBMP();
                                 myIndependentJob.RealTimeQueueFlush();
-                                listBox2.Items.Add("产品类型:相机5");
-                                listBox2.Items.Add("检测数:");
-                                listBox2.Items.Add("OK数:");
-                                listBox2.Items.Add("NG数:");
-                                listBox2.Items.Add("合格率:");
-                                listBox2.Items.Add("~~~~~~~~~");
+                                AddCameraStatsHeaderToListBox(5);
                                 //listBox14.Items.Add("record");
                                 //listBox14.Items.Add("record");
                                 //listBox14.Items.Add("record");
@@ -9902,12 +9894,7 @@ namespace WindowsFormsApplication1
                                 try { if (myjob6.Cogbmp != null) myjob6.Cogbmp.Close(); } catch (Exception ex) { new ErrorLog().WriteLog(ex.ToString()); }
                                 myjob6.Cogbmp = new CogImageFileBMP();
                                 myIndependentJob.RealTimeQueueFlush();
-                                listBox2.Items.Add("产品类型:相机6");
-                                listBox2.Items.Add("检测数:");
-                                listBox2.Items.Add("OK数:");
-                                listBox2.Items.Add("NG数:");
-                                listBox2.Items.Add("合格率:");
-                                listBox2.Items.Add("~~~~~~~~~");
+                                AddCameraStatsHeaderToListBox(6);
                                 //listBox15.Items.Add("record");
                                 //listBox15.Items.Add("record");
                                 //listBox15.Items.Add("record");
@@ -9942,12 +9929,7 @@ namespace WindowsFormsApplication1
                                 try { if (myjob7.Cogbmp != null) myjob7.Cogbmp.Close(); } catch (Exception ex) { new ErrorLog().WriteLog(ex.ToString()); }
                                 myjob7.Cogbmp = new CogImageFileBMP();
                                 myIndependentJob.RealTimeQueueFlush();
-                                listBox2.Items.Add("产品类型:相机7");
-                                listBox2.Items.Add("检测数:");
-                                listBox2.Items.Add("OK数:");
-                                listBox2.Items.Add("NG数:");
-                                listBox2.Items.Add("合格率:");
-                                listBox2.Items.Add("~~~~~~~~~");
+                                AddCameraStatsHeaderToListBox(7);
                                 //listBox18.Items.Add("record");
                                 //listBox18.Items.Add("record");
                                 //listBox18.Items.Add("record");
@@ -9982,12 +9964,7 @@ namespace WindowsFormsApplication1
                                 try { if (myjob8.Cogbmp != null) myjob8.Cogbmp.Close(); } catch (Exception ex) { new ErrorLog().WriteLog(ex.ToString()); }
                                 myjob8.Cogbmp = new CogImageFileBMP();
                                 myIndependentJob.RealTimeQueueFlush();
-                                listBox2.Items.Add("产品类型:相机8");
-                                listBox2.Items.Add("检测数:");
-                                listBox2.Items.Add("OK数:");
-                                listBox2.Items.Add("NG数:");
-                                listBox2.Items.Add("合格率:");
-                                listBox2.Items.Add("~~~~~~~~~");
+                                AddCameraStatsHeaderToListBox(8);
                                 //listBox17.Items.Add("record");
                                 //listBox17.Items.Add("record");
                                 //listBox17.Items.Add("record");
@@ -10006,11 +9983,41 @@ namespace WindowsFormsApplication1
                                 // td8.Start();
                             }
                         }
-                        catch
+                        catch (Exception ex)
                         {
-                            MsgErroeLog.WriteLog("无流程4");
+                            // ch:R47 P1-4 原 catch 无参数、只记"无流程4"：跨线程写 listBox2 的异常被整段吞掉，
+                            //   相机3~8 半装载仍继续运行且无从定位。改为记录真实异常并中止本次切换。
+                            jobLoadFailed = true;
+                            jobLoadError = ex.Message;
+                            MsgErroeLog.WriteLog("方案装载失败(相机Job/Block):" + ex);
+                            // 旧 manager 已在上面 Shutdown，半装载的 job/block 可能仍指向已失效对象；
+                            //   全部清空，防止检测线程继续 Run 旧 block（数据级风险）
+                            myjob1.job = null; myjob1.block = null;
+                            myjob2.job = null; myjob2.block = null;
+                            myjob3.job = null; myjob3.block = null;
+                            myjob4.job = null; myjob4.block = null;
+                            myjob5.job = null; myjob5.block = null;
+                            myjob6.job = null; myjob6.block = null;
+                            myjob7.job = null; myjob7.block = null;
+                            myjob8.job = null; myjob8.block = null;
                         }
-                        listBox2.Visible = true;
+                        if (jobLoadFailed)
+                        {
+                            // ch:R47 装载失败不进入下面的开设备/启采（原实现会带着半配置继续跑）：
+                            //   复位切换闩、收尾进度窗、恢复统计窗可见性并提示，由操作员检查方案后重试
+                            try { this.Invoke(new Action(() => listBox2.Visible = true)); } catch { }
+                            Volatile.Write(ref qiehuanzhong, 0);
+                            if (omron.qiehuanzhong == 0) { try { Frm2.start = 1; } catch { } }
+                            try
+                            {
+                                this.BeginInvoke(new Action(() =>
+                                    MessageBox.Show("方案装载失败，本次切换已中止，相机任务已清空。\r\n请检查方案文件后重新切换。\r\n\r\n" + jobLoadError,
+                                        "方案装载失败", MessageBoxButtons.OK, MessageBoxIcon.Error)));
+                            }
+                            catch { }
+                            return;
+                        }
+                        this.Invoke(new Action(() => listBox2.Visible = true));
                         // ch:方案 JobCount 不足的相机清空 job/block，防止执行悬垂的旧 block（参考正常版本：en 按 JobCount 收敛）
                         if (manager1.JobCount < 8) { myjob8.job = null; myjob8.block = null; }
                         if (manager1.JobCount < 7) { myjob7.job = null; myjob7.block = null; }
@@ -12587,10 +12594,12 @@ namespace WindowsFormsApplication1
                 catch (Exception ex) { new ErrorLog().WriteLog(ex.ToString()); }
                 if (closing)
                     break;
-                Myjob job = _pendingDetectJob[idx];
+                // ch:R48 P1-1 原子取走待检任务：原"读字段→置 null→置忙"三步之间，
+                //   回调可通过背压检查(只查 bmp/_detectBusy)覆写槽位，随后置 null 把新任务抹掉，造成静默丢帧。
+                //   先 Exchange 清槽，再置忙；回调侧用 CompareExchange(null→job) 保证不覆盖尚未取走的任务。
+                Myjob job = (Myjob)System.Threading.Interlocked.Exchange(ref _pendingDetectJob[idx], null);
                 if (job == null)
                     continue;
-                _pendingDetectJob[idx] = null;
                 // ch:P0-① 置"检测中"门闩：整段 getrecord（含渲染/存图）期间回调端不再接收新帧，等价于原回调线程串行语义
                 System.Threading.Volatile.Write(ref _detectBusy[idx], 1);
                 try
@@ -12773,7 +12782,14 @@ namespace WindowsFormsApplication1
                     {
                         job.jieshouZifu = "null";
                         // ch:P0-① 只登记待检并通知工作线程，检测不再占用 SDK 取流线程
-                        _pendingDetectJob[nIndex] = job;
+                        // ch:R48 P1-1 仅当槽位为空时才登记：若工作线程尚未取走上一任务，
+                        //   直接赋值会覆盖待检任务；CAS 失败说明已有任务在排队，本帧按背压丢弃并释放槽位。
+                        if (System.Threading.Interlocked.CompareExchange(ref _pendingDetectJob[nIndex], job, null) != null)
+                        {
+                            _perfDrop[nIndex]++;
+                            ReleaseBmpSlotNow(nIndex);
+                            return;
+                        }
                         try { _detectSignal[nIndex].Set(); }
                         catch (Exception ex) { MsgErroeLog.WriteLog("检测通知异常:" + ex.Message); }
                     }
@@ -15830,6 +15846,17 @@ namespace WindowsFormsApplication1
                 catch (Exception ex) { MsgErroeLog.WriteLog("异常:" + ex.Message); }
             }));
         }
+        // ch:R47 P1-8 读 ToolBlock.Inputs 必须与检测线程的 block.Run 同锁：ToolBlock 非线程安全，
+        //   原 trriger_set 在 Invoke 内直接多次读取 triggermode，排空只保证 Run 会停、不保证此刻没有 Run。
+        private string ReadBlockInputStringSafe(Myjob job, string inputName)
+        {
+            if (job == null) return null;
+            lock (job.blockLock)
+            {
+                if (job.block == null || !job.block.Inputs.Contains(inputName)) return null;
+                return job.block.Inputs[inputName].Value.ToString();
+            }
+        }
         private void trriger_set()
         {
             this.Invoke(new Action(() =>
@@ -15838,147 +15865,179 @@ namespace WindowsFormsApplication1
                 {
                     try
                     {
-                        if (myjob1.block != null && myjob1.block.Inputs.Contains("triggermode") && (myjob1.block.Inputs["triggermode"].Value.ToString() == "触发拍照" || myjob1.block.Inputs["triggermode"].Value.ToString() == "连续运行" || myjob1.block.Inputs["triggermode"].Value.ToString() == "通讯触发"))
+                        string tm1 = ReadBlockInputStringSafe(myjob1, "triggermode");
+                        if (tm1 == "触发拍照" || tm1 == "连续运行" || tm1 == "通讯触发")
                         {
-                            comboBox1.Text = myjob1.block.Inputs["triggermode"].Value.ToString();
-                            myjob1.triggerMode = myjob1.block.Inputs["triggermode"].Value.ToString().Replace("\0", "");
+                            comboBox1.Text = tm1.Replace("\0", "");
+                            myjob1.triggerMode = tm1.Replace("\0", "");
                         }
                         else
                         {
-                            comboBox1.Text = canshuIni.ReadString("camera1", "triggermode", "连续运行").Replace("\0", "");
-                            myjob1.triggerMode = canshuIni.ReadString("camera1", "triggermode", "连续运行").Replace("\0", "");
+                            string fallback = canshuIni.ReadString("camera1", "triggermode", "连续运行").Replace("\0", "");
+                            comboBox1.Text = fallback;
+                            myjob1.triggerMode = fallback;
                         }
                     }
-                    catch
+                    catch (Exception ex)
                     {
-                        comboBox1.Text = canshuIni.ReadString("camera1", "triggermode", "连续运行").Replace("\0", "");
-                        myjob1.triggerMode = canshuIni.ReadString("camera1", "triggermode", "连续运行").Replace("\0", "");
+                        string fallback = canshuIni.ReadString("camera1", "triggermode", "连续运行").Replace("\0", "");
+                        comboBox1.Text = fallback;
+                        myjob1.triggerMode = fallback;
+                        MsgErroeLog.WriteLog("trriger_set camera1:" + ex.Message);
                     }
                     try
                     {
-                        if (myjob2.block != null && myjob2.block.Inputs.Contains("triggermode") && (myjob2.block.Inputs["triggermode"].Value.ToString() == "触发拍照" || myjob2.block.Inputs["triggermode"].Value.ToString() == "连续运行" || myjob2.block.Inputs["triggermode"].Value.ToString() == "通讯触发"))
+                        string tm2 = ReadBlockInputStringSafe(myjob2, "triggermode");
+                        if (tm2 == "触发拍照" || tm2 == "连续运行" || tm2 == "通讯触发")
                         {
-                            comboBox4.Text = myjob2.block.Inputs["triggermode"].Value.ToString().Replace("\0", "");
-                            myjob2.triggerMode = myjob2.block.Inputs["triggermode"].Value.ToString().Replace("\0", "");
+                            comboBox4.Text = tm2.Replace("\0", "");
+                            myjob2.triggerMode = tm2.Replace("\0", "");
                         }
                         else
                         {
-                            comboBox4.Text = canshuIni.ReadString("camera2", "triggermode", "连续运行").Replace("\0", "");
-                            myjob2.triggerMode = canshuIni.ReadString("camera2", "triggermode", "连续运行").Replace("\0", "");
+                            string fallback = canshuIni.ReadString("camera2", "triggermode", "连续运行").Replace("\0", "");
+                            comboBox4.Text = fallback;
+                            myjob2.triggerMode = fallback;
                         }
                     }
-                    catch
+                    catch (Exception ex)
                     {
-                        comboBox4.Text = canshuIni.ReadString("camera2", "triggermode", "连续运行").Replace("\0", "");
-                        myjob2.triggerMode = canshuIni.ReadString("camera2", "triggermode", "连续运行").Replace("\0", "");
+                        string fallback = canshuIni.ReadString("camera2", "triggermode", "连续运行").Replace("\0", "");
+                        comboBox4.Text = fallback;
+                        myjob2.triggerMode = fallback;
+                        MsgErroeLog.WriteLog("trriger_set camera2:" + ex.Message);
                     }
                     try
                     {
-                        if (myjob3.block != null && myjob3.block.Inputs.Contains("triggermode") && (myjob3.block.Inputs["triggermode"].Value.ToString() == "触发拍照" || myjob3.block.Inputs["triggermode"].Value.ToString() == "连续运行" || myjob3.block.Inputs["triggermode"].Value.ToString() == "通讯触发"))
+                        string tm3 = ReadBlockInputStringSafe(myjob3, "triggermode");
+                        if (tm3 == "触发拍照" || tm3 == "连续运行" || tm3 == "通讯触发")
                         {
-                            comboBox5.Text = myjob3.block.Inputs["triggermode"].Value.ToString().Replace("\0", "");
-                            myjob3.triggerMode = myjob3.block.Inputs["triggermode"].Value.ToString().Replace("\0", "");
+                            comboBox5.Text = tm3.Replace("\0", "");
+                            myjob3.triggerMode = tm3.Replace("\0", "");
                         }
                         else
                         {
-                            comboBox5.Text = canshuIni.ReadString("camera3", "triggermode", "连续运行").Replace("\0", "");
-                            myjob3.triggerMode = canshuIni.ReadString("camera3", "triggermode", "连续运行").Replace("\0", "");
+                            string fallback = canshuIni.ReadString("camera3", "triggermode", "连续运行").Replace("\0", "");
+                            comboBox5.Text = fallback;
+                            myjob3.triggerMode = fallback;
                         }
                     }
-                    catch
+                    catch (Exception ex)
                     {
-                        comboBox5.Text = canshuIni.ReadString("camera3", "triggermode", "连续运行").Replace("\0", "");
-                        myjob3.triggerMode = canshuIni.ReadString("camera3", "triggermode", "连续运行").Replace("\0", "");
+                        string fallback = canshuIni.ReadString("camera3", "triggermode", "连续运行").Replace("\0", "");
+                        comboBox5.Text = fallback;
+                        myjob3.triggerMode = fallback;
+                        MsgErroeLog.WriteLog("trriger_set camera3:" + ex.Message);
                     }
                     try
                     {
-                        if (myjob4.block != null && myjob4.block.Inputs.Contains("triggermode") && (myjob4.block.Inputs["triggermode"].Value.ToString() == "触发拍照" || myjob4.block.Inputs["triggermode"].Value.ToString() == "连续运行" || myjob4.block.Inputs["triggermode"].Value.ToString() == "通讯触发"))
+                        string tm4 = ReadBlockInputStringSafe(myjob4, "triggermode");
+                        if (tm4 == "触发拍照" || tm4 == "连续运行" || tm4 == "通讯触发")
                         {
-                            comboBox8.Text = myjob4.block.Inputs["triggermode"].Value.ToString();
-                            myjob4.triggerMode = myjob4.block.Inputs["triggermode"].Value.ToString();
+                            comboBox8.Text = tm4.Replace("\0", "");
+                            myjob4.triggerMode = tm4.Replace("\0", "");
                         }
                         else
                         {
-                            comboBox8.Text = canshuIni.ReadString("camera4", "triggermode", "连续运行").Replace("\0", "");
-                            myjob4.triggerMode = canshuIni.ReadString("camera4", "triggermode", "连续运行").Replace("\0", "");
+                            string fallback = canshuIni.ReadString("camera4", "triggermode", "连续运行").Replace("\0", "");
+                            comboBox8.Text = fallback;
+                            myjob4.triggerMode = fallback;
                         }
                     }
-                    catch
+                    catch (Exception ex)
                     {
-                        comboBox8.Text = canshuIni.ReadString("camera4", "triggermode", "连续运行").Replace("\0", "");
-                        myjob4.triggerMode = canshuIni.ReadString("camera4", "triggermode", "连续运行").Replace("\0", "");
+                        string fallback = canshuIni.ReadString("camera4", "triggermode", "连续运行").Replace("\0", "");
+                        comboBox8.Text = fallback;
+                        myjob4.triggerMode = fallback;
+                        MsgErroeLog.WriteLog("trriger_set camera4:" + ex.Message);
                     }
                     try
                     {
-                        if (myjob5.block != null && myjob5.block.Inputs.Contains("triggermode") && ((myjob5.block.Inputs["triggermode"].Value.ToString() == "触发拍照" || myjob5.block.Inputs["triggermode"].Value.ToString() == "连续运行" || myjob5.block.Inputs["triggermode"].Value.ToString() == "通讯触发")))
+                        string tm5 = ReadBlockInputStringSafe(myjob5, "triggermode");
+                        if (tm5 == "触发拍照" || tm5 == "连续运行" || tm5 == "通讯触发")
                         {
-                            comboBox25.Text = myjob5.block.Inputs["triggermode"].Value.ToString();
-                            myjob5.triggerMode = myjob5.block.Inputs["triggermode"].Value.ToString().Replace("\0", "");
+                            comboBox25.Text = tm5.Replace("\0", "");
+                            myjob5.triggerMode = tm5.Replace("\0", "");
                         }
                         else
                         {
-                            comboBox25.Text = canshuIni.ReadString("camera5", "triggermode", "连续运行").Replace("\0", "");
-                            myjob5.triggerMode = canshuIni.ReadString("camera5", "triggermode", "连续运行").Replace("\0", "");
+                            string fallback = canshuIni.ReadString("camera5", "triggermode", "连续运行").Replace("\0", "");
+                            comboBox25.Text = fallback;
+                            myjob5.triggerMode = fallback;
                         }
                     }
-                    catch
+                    catch (Exception ex)
                     {
-                        comboBox25.Text = canshuIni.ReadString("camera5", "triggermode", "连续运行").Replace("\0", "");
-                        myjob5.triggerMode = canshuIni.ReadString("camera5", "triggermode", "连续运行").Replace("\0", "");
+                        string fallback = canshuIni.ReadString("camera5", "triggermode", "连续运行").Replace("\0", "");
+                        comboBox25.Text = fallback;
+                        myjob5.triggerMode = fallback;
+                        MsgErroeLog.WriteLog("trriger_set camera5:" + ex.Message);
                     }
                     try
                     {
-                        if (myjob6.block != null && myjob6.block.Inputs.Contains("triggermode") && ((myjob6.block.Inputs["triggermode"].Value.ToString() == "触发拍照" || myjob6.block.Inputs["triggermode"].Value.ToString() == "连续运行" || myjob6.block.Inputs["triggermode"].Value.ToString() == "通讯触发")))
+                        string tm6 = ReadBlockInputStringSafe(myjob6, "triggermode");
+                        if (tm6 == "触发拍照" || tm6 == "连续运行" || tm6 == "通讯触发")
                         {
-                            comboBox28.Text = myjob6.block.Inputs["triggermode"].Value.ToString().Replace("\0", "");
-                            myjob6.triggerMode = myjob6.block.Inputs["triggermode"].Value.ToString().Replace("\0", "");
+                            comboBox28.Text = tm6.Replace("\0", "");
+                            myjob6.triggerMode = tm6.Replace("\0", "");
                         }
                         else
                         {
-                            comboBox28.Text = canshuIni.ReadString("camera6", "triggermode", "连续运行").Replace("\0", "");
-                            myjob6.triggerMode = canshuIni.ReadString("camera6", "triggermode", "连续运行").Replace("\0", "");
+                            string fallback = canshuIni.ReadString("camera6", "triggermode", "连续运行").Replace("\0", "");
+                            comboBox28.Text = fallback;
+                            myjob6.triggerMode = fallback;
                         }
                     }
-                    catch
+                    catch (Exception ex)
                     {
-                        comboBox28.Text = canshuIni.ReadString("camera6", "triggermode", "连续运行").Replace("\0", "");
-                        myjob6.triggerMode = canshuIni.ReadString("camera6", "triggermode", "连续运行").Replace("\0", "");
+                        string fallback = canshuIni.ReadString("camera6", "triggermode", "连续运行").Replace("\0", "");
+                        comboBox28.Text = fallback;
+                        myjob6.triggerMode = fallback;
+                        MsgErroeLog.WriteLog("trriger_set camera6:" + ex.Message);
                     }
                     try
                     {
-                        if (myjob7.block != null && myjob7.block.Inputs.Contains("triggermode") && ((myjob7.block.Inputs["triggermode"].Value.ToString() == "触发拍照" || myjob7.block.Inputs["triggermode"].Value.ToString() == "连续运行" || myjob7.block.Inputs["triggermode"].Value.ToString() == "通讯触发")))
+                        string tm7 = ReadBlockInputStringSafe(myjob7, "triggermode");
+                        if (tm7 == "触发拍照" || tm7 == "连续运行" || tm7 == "通讯触发")
                         {
-                            comboBox31.Text = myjob7.block.Inputs["triggermode"].Value.ToString().Replace("\0", "");
-                            myjob7.triggerMode = myjob7.block.Inputs["triggermode"].Value.ToString().Replace("\0", "");
+                            comboBox31.Text = tm7.Replace("\0", "");
+                            myjob7.triggerMode = tm7.Replace("\0", "");
                         }
                         else
                         {
-                            comboBox31.Text = canshuIni.ReadString("camera7", "triggermode", "连续运行").Replace("\0", "");
-                            myjob7.triggerMode = canshuIni.ReadString("camera7", "triggermode", "连续运行").Replace("\0", "");
+                            string fallback = canshuIni.ReadString("camera7", "triggermode", "连续运行").Replace("\0", "");
+                            comboBox31.Text = fallback;
+                            myjob7.triggerMode = fallback;
                         }
                     }
-                    catch
+                    catch (Exception ex)
                     {
-                        comboBox31.Text = canshuIni.ReadString("camera7", "triggermode", "连续运行").Replace("\0", "");
-                        myjob7.triggerMode = canshuIni.ReadString("camera7", "triggermode", "连续运行").Replace("\0", "");
+                        string fallback = canshuIni.ReadString("camera7", "triggermode", "连续运行").Replace("\0", "");
+                        comboBox31.Text = fallback;
+                        myjob7.triggerMode = fallback;
+                        MsgErroeLog.WriteLog("trriger_set camera7:" + ex.Message);
                     }
                     try
                     {
-                        if (myjob8.block != null && myjob8.block.Inputs.Contains("triggermode") && ((myjob8.block.Inputs["triggermode"].Value.ToString() == "触发拍照" || myjob8.block.Inputs["triggermode"].Value.ToString() == "连续运行" || myjob8.block.Inputs["triggermode"].Value.ToString() == "通讯触发")))
+                        string tm8 = ReadBlockInputStringSafe(myjob8, "triggermode");
+                        if (tm8 == "触发拍照" || tm8 == "连续运行" || tm8 == "通讯触发")
                         {
-                            comboBox34.Text = myjob8.block.Inputs["triggermode"].Value.ToString();
-                            myjob8.triggerMode = myjob8.block.Inputs["triggermode"].Value.ToString();
+                            comboBox34.Text = tm8.Replace("\0", "");
+                            myjob8.triggerMode = tm8.Replace("\0", "");
                         }
                         else
                         {
-                            comboBox34.Text = canshuIni.ReadString("camera8", "triggermode", "连续运行").Replace("\0", "");
-                            myjob8.triggerMode = canshuIni.ReadString("camera8", "triggermode", "连续运行").Replace("\0", "");
+                            string fallback = canshuIni.ReadString("camera8", "triggermode", "连续运行").Replace("\0", "");
+                            comboBox34.Text = fallback;
+                            myjob8.triggerMode = fallback;
                         }
                     }
-                    catch
+                    catch (Exception ex)
                     {
-                        comboBox34.Text = canshuIni.ReadString("camera8", "triggermode", "连续运行").Replace("\0", "");
-                        myjob8.triggerMode = canshuIni.ReadString("camera8", "triggermode", "连续运行").Replace("\0", "");
+                        string fallback = canshuIni.ReadString("camera8", "triggermode", "连续运行").Replace("\0", "");
+                        comboBox34.Text = fallback;
+                        myjob8.triggerMode = fallback;
+                        MsgErroeLog.WriteLog("trriger_set camera8:" + ex.Message);
                     }
                 }
             }));
@@ -16366,6 +16425,41 @@ namespace WindowsFormsApplication1
             }
             finally { UnlockAllCameras(); }
         }
+        private int _lastSaveBmpFailLogMs = 0; // ch:R47 P1-7 存图失败日志限流（3s 一条，避免磁盘满时每帧刷日志）
+        // ch:R47 P1-7 Open/Append/Close 三连原无 try/finally：Append 抛异常（磁盘满、文件被占用、像素格式异常）时
+        //   Close 被跳过，CogImageFileBMP 的 COM 文件句柄泄漏，连续 NG 会累积到句柄耗尽并锁死目标目录。
+        //   本方法保证无论 Open/Append 是否成功都尝试 Close，失败只记限流日志（存图属旁路，不打断检测）。
+        private void WriteBmpFileSafe(CogImageFileBMP cogbmp, string filePath, ICogImage image, int jobNumber)
+        {
+            try
+            {
+                cogbmp.Open(filePath, CogImageFileModeConstants.Write);
+                cogbmp.Append(image);
+            }
+            catch (Exception ex)
+            {
+                int now = Environment.TickCount;
+                if (unchecked(now - _lastSaveBmpFailLogMs) >= 3000)
+                {
+                    _lastSaveBmpFailLogMs = now;
+                    MsgErroeLog.WriteLog("存图失败 cam=" + jobNumber + " 文件=" + filePath + ":" + ex.Message);
+                }
+            }
+            finally
+            {
+                try { cogbmp.Close(); }
+                catch (Exception ex)
+                {
+                    int now = Environment.TickCount;
+                    if (unchecked(now - _lastSaveBmpFailLogMs) >= 3000)
+                    {
+                        _lastSaveBmpFailLogMs = now;
+                        MsgErroeLog.WriteLog("存图关闭失败 cam=" + jobNumber + ":" + ex.Message);
+                    }
+                }
+            }
+        }
+
         private void cuntu_fangfa(CogImageFileBMP cogbmp, int FileLength, int JobNumber, string Jobpath, string cuowuma, string temptime, ICogImage cogimage)
         {
             try
@@ -16384,9 +16478,7 @@ namespace WindowsFormsApplication1
                 {
                     if (FileLength < zhangshu || cuntu == 1)
                     {
-                        cogbmp.Open(Jobpath + day1 + "\\" + cuowuma + ttt1 + "#" + JobNumber + ".bmp", CogImageFileModeConstants.Write);
-                        cogbmp.Append(cogimage);
-                        cogbmp.Close();
+                        WriteBmpFileSafe(cogbmp, Jobpath + day1 + "\\" + cuowuma + ttt1 + "#" + JobNumber + ".bmp", cogimage, JobNumber);
                     }
                     else
                     {
@@ -16409,9 +16501,7 @@ namespace WindowsFormsApplication1
                         //如果有子文件删除文件
                         if (ffff != "f")
                             File.Delete(ffff);
-                        cogbmp.Open(Jobpath + day1 + "\\" + cuowuma + ttt1 + "#" + JobNumber + ".bmp", CogImageFileModeConstants.Write);
-                        cogbmp.Append(cogimage);
-                        cogbmp.Close();
+                        WriteBmpFileSafe(cogbmp, Jobpath + day1 + "\\" + cuowuma + ttt1 + "#" + JobNumber + ".bmp", cogimage, JobNumber);
                     }
                 }
             }
@@ -16473,6 +16563,32 @@ namespace WindowsFormsApplication1
                 groupBox22.Visible = false;
             }));
         }
+        // ch:R48 P2-2 daoqi_jiankong 运行在线程池线程：原实现直接 MessageBox.Show（无属主、阻塞池线程，
+        //   定时检查期间可叠加多个弹窗）。统一封送 UI 线程；句柄未建立/窗体已释放时退化为日志。
+        private void ShowAlertFromBackground(string message)
+        {
+            try
+            {
+                if (IsDisposed || !IsHandleCreated)
+                {
+                    MsgErroeLog.WriteLog("后台告警(未弹窗):" + message);
+                    return;
+                }
+                Action show = () =>
+                {
+                    if (!IsDisposed)
+                        MessageBox.Show(message);
+                };
+                if (InvokeRequired)
+                    BeginInvoke(show);
+                else
+                    show();
+            }
+            catch (Exception ex)
+            {
+                MsgErroeLog.WriteLog("后台告警封送失败:" + ex.Message + " 原消息:" + message);
+            }
+        }
         private void daoqi_jiankong()
         {
             int dayt = 0;
@@ -16487,7 +16603,7 @@ namespace WindowsFormsApplication1
                 if (code == "")
                 {
                     MsgErroeLog.WriteLog("未读到");
-                    MessageBox.Show("未读到");
+                    ShowAlertFromBackground("未读到");
                 }
             }
             try
@@ -16496,7 +16612,7 @@ namespace WindowsFormsApplication1
             }
             catch (Exception ex)
             {
-                MessageBox.Show(ex.Message + ":1488");
+                ShowAlertFromBackground(ex.Message + ":1488");
             }
             string code1 = duini.ReadString("1", "2", "");
             string code2 = duini.ReadString("1", "3", "");
@@ -16530,7 +16646,7 @@ namespace WindowsFormsApplication1
                         }
                         catch (Exception ex)
                         {
-                            MessageBox.Show(ex.Message + ":1501:" + code);
+                            ShowAlertFromBackground(ex.Message + ":1501:" + code);
                         }
                     }
                     if (dayt >= 0)
