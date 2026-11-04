@@ -138,6 +138,10 @@ namespace WindowsFormsApplication1
         private int x = 999;
         private int y = 999;
         Dictionary<string, string[]> fins_dic = new Dictionary<string, string[]>();
+        // ch:v1.3.50 P2-10 fins_dic 跨线程保护（与 Omron/RTU 同款）：UI 线程 Clear/Add 与检测线程
+        //   xie/XieWuWriteOne 的 foreach 并发会抛"集合已修改"整轮丢弃。约定：所有增删入 finsDicLock，
+        //   后台线程一律在锁内取快照或锁内查表；锁序固定 modbusIoLock → finsDicLock（反序路径不存在）。
+        private readonly object finsDicLock = new object();
         public Dictionary<int, string[]> camera_dic = new Dictionary<int, string[]>();
         Dictionary<int, int[]> fins_name = new Dictionary<int, int[]>();
         Dictionary<int, int[]> fins_data = new Dictionary<int, int[]>();
@@ -316,7 +320,8 @@ namespace WindowsFormsApplication1
                     fins_length = Math.Max(0, Math.Min(1000, IniDec(wdini.ReadString((i + 1).ToString() + "_modbustcp", "changdu", "0"), 0))); // ch:R11-2 内层循环上界，夹 [0,1000]（IniDec 已取整）
                     ABCD = wdini.ReadString((i + 1).ToString() + "_modbustcp", "gaodiwei", "触发").Replace("\0", "");
                     fins_style = wdini.ReadString((i + 1).ToString() + "_modbustcp", "geshi", "int").Replace("\0", "");
-                    fins_dic.Add(fins_mingcheng, new string[] { fins_mingcheng, fins_qishi.ToString(), fins_length.ToString(), ABCD, fins_style });
+                    lock (finsDicLock)
+                        fins_dic.Add(fins_mingcheng, new string[] { fins_mingcheng, fins_qishi.ToString(), fins_length.ToString(), ABCD, fins_style });
                     for (int j = 0; j < fins_length; j++)
                     {
                         xuanzhong_temp = fins_qishi - address_qishi + j;
@@ -1288,7 +1293,7 @@ namespace WindowsFormsApplication1
             {
             dataGridView1.Visible = false;
             wdini.WriteString("modbustcp", "geshu", "0");
-            fins_dic.Clear();
+            lock (finsDicLock) { fins_dic.Clear(); }
             // ch:清掉相机反馈映射，使检测结果输出彻底停止（fins_dic 为空时本不会写，双保险）
             for (int i = 1; i <= 8; i++)
             {
@@ -1389,7 +1394,8 @@ namespace WindowsFormsApplication1
                                     }
                                     else
                                     {
-                                        fins_dic.Add(nmAdd, new string[] { nmAdd, qAdd.ToString(), lenAdd.ToString(), comboBox2.Text, comboBox3.Text });
+                                        lock (finsDicLock)
+                                            fins_dic.Add(nmAdd, new string[] { nmAdd, qAdd.ToString(), lenAdd.ToString(), comboBox2.Text, comboBox3.Text });
                                         for (int i = 0; i < lenAdd; i++)
                                         {
                                             xuanzhong_temp = qAdd - Math.Truncate(numericUpDown1.Value) + i;
@@ -1703,7 +1709,11 @@ namespace WindowsFormsApplication1
         {
             try
             {
-                if (!chushihua || !fins_en || fins_dic.Count == 0) return;
+                if (!chushihua || !fins_en) return;
+                // ch:v1.3.50 P2-10 检测线程写回改遍历锁内快照：UI 线程增删通道时不再抛"集合已修改"整轮丢弃
+                Dictionary<string, string[]> finsSnapshot;
+                lock (finsDicLock) { finsSnapshot = new Dictionary<string, string[]>(fins_dic); }
+                if (finsSnapshot.Count == 0) return;
 
                 lock (modbusIoLock)
                 {
@@ -1723,7 +1733,7 @@ namespace WindowsFormsApplication1
                             if (NotePendingWriteFailed(pat.Key)) pat.Value[5] = "无";
                             continue;
                         }
-                        foreach (var par in fins_dic)
+                        foreach (var par in finsSnapshot)
                         {
                             if (pat.Value[5] == par.Value[0])
                             {
@@ -2079,7 +2089,12 @@ namespace WindowsFormsApplication1
                         if (name.Length == 0 || name == "无" || name == "0")
                             continue;
                         string[] fd;
-                        if (fins_dic.TryGetValue(name, out fd) && fd != null && fd.Length > 4)
+                        bool found;
+                        lock (finsDicLock) // ch:v1.3.50 P2-10 查表入锁：调用方可能来自检测线程（覆盖层格式解析）
+                        {
+                            found = fins_dic.TryGetValue(name, out fd);
+                        }
+                        if (found && fd != null && fd.Length > 4)
                         {
                             string f = (fd[4] ?? "").Trim().ToLowerInvariant();
                             if (f == "int" || f == "long" || f == "float" || f == "string")
@@ -2213,12 +2228,15 @@ namespace WindowsFormsApplication1
             string fbName = pat[5];
             if (string.IsNullOrEmpty(fbName) || fbName == "无") return;
             string[] par = null;
-            foreach (var kv in fins_dic)
+            lock (finsDicLock) // ch:v1.3.50 P2-10 极速写在检测线程查表，锁内完成避免与 UI 增删并发
             {
-                if (kv.Value[0] == fbName)
+                foreach (var kv in fins_dic)
                 {
-                    par = kv.Value;
-                    break;
+                    if (kv.Value[0] == fbName)
+                    {
+                        par = kv.Value;
+                        break;
+                    }
                 }
             }
             if (par == null) { pat[5] = "无"; return; } // ch:P1-⑧ 无匹配寄存器，永久无法写，清理避免重复重试
