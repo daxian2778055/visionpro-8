@@ -7,10 +7,10 @@ namespace WindowsFormsApplication1
     /// ch:v1.3.54 串口无协议帧累积器（纯字节、无 WinForms 依赖，Tests 直链同源回归）。
     ///   一次解决三件事：分包半帧丢触发、GBK 双字节被切开、以及 "1"/"12" 前缀串跨读取误切。
     ///   语义（前缀锚定精确匹配，绝不做子串切分，避免"帧头+触发串+帧尾"里的子串误触发）：
-    ///   - pending 开头完整等于某已知串 P，且 pending 比 P 长 → 立即产出 P（后面还有字节，P 已确定）；
-    ///   - pending 恰等于 P，但 P 同时是某更长已知串 Q 的前缀 → 暂不产出（可能是 Q 的分包前半），
-    ///     直到等出 Q、或连续 PrefixWaitMaxPolls 轮无新字节才产出 P（短串 settle，代价约 200ms）；
-    ///   - pending 是某更长已知串的真前缀 → 继续等（未凑齐前绝不产出，也就不解码，避开 GBK 半字）；
+    ///   - pending 开头完整等于某已知串 P，且 pending 已比 P 长（后面还有字节，P 已确定完整）→ 立即产出 P；
+    ///   - pending 以某已知串 P 开头（P 完整命中），但 pending 同时仍是某更长已知串 Q 的前缀（如 "12" 之于 "1"/"123"）
+    ///     → 暂不产出（P 可能是 Q 的分包前半），直到等出 Q、或连续 PrefixWaitMaxPolls 轮无新字节才产出 P（短串 settle，代价约 200ms）；
+    ///   - pending 是某更长已知串的真前缀（尚未凑齐任何完整串）→ 继续等（未凑齐前绝不产出，也就不解码，避开 GBK 半字）；
     ///   - pending 既非任何串前缀、开头也无完整命中 → 未知数据，连续 IdleFlushPolls 轮无新字节后整段产出一帧（交 getData）。
     ///   产出帧后从 pending 移除对应字节，循环处理（支持一次读入多帧）。超 MaxFrame 硬截断并整段产出。
     /// </summary>
@@ -29,32 +29,64 @@ namespace WindowsFormsApplication1
         /// <summary>
         /// 投入本轮读到的字节（readCount 可为 0 表示本轮无新字节，用于空闲判定），返回本轮可派发的完整帧。
         /// patterns 为已知串（方案载图串 ∪ 相机 triggerZifu）的 GB2312 字节集合。
+        /// ch:v1.3.55 P1-2：readCount 可达 4096（Form3 读缓冲）而 MaxFrame=1024，旧写法把 readBuf 尾部
+        ///   超出上限的字节静默丢弃＝数据丢失。改为按 MaxFrame 分片：每片先入 pending 再 DrainPending，
+        ///   DrainPending 产出/溢出释放空间后下一片继续，保证「已产出帧 + 剩余 pending == readCount」字节守恒。
         /// </summary>
         public List<byte[]> Append(int readCount, byte[] readBuf, List<byte[]> patterns)
         {
             var frames = new List<byte[]>();
-            if (readCount > 0)
+            if (readCount <= 0)
             {
-                int take = readCount;
-                if (_pending.Count + take > MaxFrame)
-                    take = Math.Max(0, MaxFrame - _pending.Count); // 硬上限：超出部分本轮不追加，下面按溢出处置
-                for (int k = 0; k < take; k++) _pending.Add(readBuf[k]);
-                _idlePolls = 0;
-            }
-            else
-            {
-                _idlePolls++;
+                _idlePolls++;                 // 空闲轮：仅推进 settle / 未知数据整段产出判定
+                DrainPending(frames, patterns);
+                return frames;
             }
 
+            _idlePolls = 0;
+            int offset = 0;
+            while (offset < readCount)
+            {
+                int free = MaxFrame - _pending.Count;         // DrainPending 保证回到此处时 pending 未满
+                int take = free < (readCount - offset) ? free : (readCount - offset);
+                if (take <= 0)                                // 防御：绝不静默丢尾字节，pending 满则先整段产出腾空间
+                {
+                    frames.Add(_pending.ToArray());
+                    _pending.Clear();
+                    continue;
+                }
+                for (int k = 0; k < take; k++) _pending.Add(readBuf[offset + k]);
+                offset += take;
+                DrainPending(frames, patterns);
+            }
+            return frames;
+        }
+
+        // ch:v1.3.55 pending 消费循环（前缀锚定精确匹配，绝不做子串切分）。
+        //   P1-1 根治：原等待条件要求 hit.Length == _pending.Count（短串恰吃满 pending 才等），
+        //   于是 patterns "1"/"123" 分包成 "12"+"3" 时，"12" 里头部完整命中 "1" 但 pending 未吃满 → 提前派发 "1"，
+        //   残留 "2" 与后续 "3" 拼不成 "123"，长串永远切不到。改为：只要 pending 是任一更长串的严格前缀就等
+        //   （不再要求吃满），等出更长串或连续 PrefixWaitMaxPolls 轮无新字节(settle)后再派发头部短串。
+        // ch:v1.3.55 P2-4：CR/LF 常被设备用作帧分隔符。旧逻辑只在 pending 头部锚定匹配，一帧读入
+        //   "AB\r\nCD\r\n" 时第二帧被前面残留的 "\r\n" 挡住，永不单独派发（整段被当未知数据空闲 flush）。
+        //   改为每次匹配前先剥离 pending 头部连续的 CR/LF（0x0D/0x0A），分隔符后的每一帧即可逐个头部命中并派发。
+        //   安全：GBK 双字节的尾字节范围 0x40–0xFE、首字节 0x81–0xFE，均不含 0x0D/0x0A，剥离不会截断多字节字符；
+        //   已知载图串也不以 CR/LF 开头，故剥离的字节只可能是分隔符或纯空白帧，交给原 IsWhitespaceOnly 也是跳过。
+        private void DrainPending(List<byte[]> frames, List<byte[]> patterns)
+        {
             while (_pending.Count > 0)
             {
+                while (_pending.Count > 0 && (_pending[0] == 0x0D || _pending[0] == 0x0A))
+                    _pending.RemoveAt(0);
+                if (_pending.Count == 0) break;
+
                 byte[] hit = LongestCompleteMatch(patterns);
                 bool strictPrefix = IsStrictPrefixOfAny(patterns);
 
                 if (hit != null)
                 {
-                    // 短串恰好吃满 pending，且它仍是某更长串的前缀 → 未 settle 则等待，避免 "1"/"12" 跨读取误切
-                    if (hit.Length == _pending.Count && strictPrefix && _idlePolls < PrefixWaitMaxPolls)
+                    // pending(可能比 hit 长)仍是某更长串的前缀 → 未 settle、未溢出则继续等待，防跨读取误切
+                    if (strictPrefix && _pending.Count < MaxFrame && _idlePolls < PrefixWaitMaxPolls)
                         break;
                     byte[] frame = _pending.GetRange(0, hit.Length).ToArray();
                     _pending.RemoveRange(0, hit.Length);
@@ -75,7 +107,6 @@ namespace WindowsFormsApplication1
                 }
                 break;
             }
-            return frames;
         }
 
         private byte[] LongestCompleteMatch(List<byte[]> patterns)

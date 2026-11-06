@@ -151,34 +151,47 @@ namespace WindowsFormsApplication1
         /// <summary>
         /// ch:v1.3.54 前缀冲突扫描：某载图串是另一载图串的开头前缀（如 "1"/"12"、"相机1"/"相机10"）。
         ///   无分隔符协议下前缀关系在分包时会误切（收到 "1" 无法判断是短串还是长串前半），运行期靠
-        ///   SerialFrameAccumulator 的 settle 等待兜底，但配置层应尽早拒绝。返回冲突描述（含两条串+行号），无冲突返回 null。
+        ///   SerialFrameAccumulator 的 settle 等待兜底，但配置层应尽早拒绝。返回冲突描述（含两条串+来源），无冲突返回 null。
         ///   extraKeys 为各相机 triggerZifu 等外部已知串，一并纳入前缀交叉检查（可为 null）。
+        /// ch:v1.3.55 P2-1：旧实现只查 rows→rows 与 rows→extra(长方向)，漏 extra→rows(短 extra 是行串前缀)
+        ///   与 extra↔extra。改为把 rows 与 extra 合并成一个「带来源标签」的键集，两两全序检查严格前缀关系，四向覆盖。
+        ///   注：仅串口/Form3 这类前缀锚定通道应在保存时据此拒绝；精确相等匹配通道(TCP/PLC)不受前缀歧义影响，不调用本方法。
         /// </summary>
         public static string FindPrefixConflicts(List<string[]> rows, string[] extraKeys)
         {
-            if (rows == null) return null;
-            List<string> conflicts = new List<string>();
-            for (int i = 0; i < rows.Count; i++)
+            var keys = new List<string>();
+            var labels = new List<string>();
+            if (rows != null)
             {
-                string a = rows[i] == null ? null : rows[i][0];
-                if (string.IsNullOrEmpty(a)) continue;
-                for (int j = 0; j < rows.Count; j++)
+                for (int i = 0; i < rows.Count; i++)
+                {
+                    string a = rows[i] == null ? null : rows[i][0];
+                    if (string.IsNullOrEmpty(a)) continue;
+                    keys.Add(a);
+                    labels.Add("第" + (i + 1) + "行");
+                }
+            }
+            if (extraKeys != null)
+            {
+                for (int k = 0; k < extraKeys.Length; k++)
+                {
+                    string e = extraKeys[k];
+                    if (string.IsNullOrEmpty(e)) continue;
+                    keys.Add(e);
+                    labels.Add("相机触发串");
+                }
+            }
+
+            List<string> conflicts = new List<string>();
+            for (int i = 0; i < keys.Count; i++)
+            {
+                string a = keys[i];
+                for (int j = 0; j < keys.Count; j++)
                 {
                     if (i == j) continue;
-                    string b = rows[j] == null ? null : rows[j][0];
-                    if (string.IsNullOrEmpty(b)) continue;
+                    string b = keys[j];
                     if (b.Length > a.Length && b.StartsWith(a, StringComparison.Ordinal))
-                        conflicts.Add("[" + a + "](第" + (i + 1) + "行) 是 [" + b + "](第" + (j + 1) + "行) 的前缀");
-                }
-                if (extraKeys != null)
-                {
-                    for (int k = 0; k < extraKeys.Length; k++)
-                    {
-                        string e = extraKeys[k];
-                        if (string.IsNullOrEmpty(e) || e == a) continue;
-                        if (e.Length > a.Length && e.StartsWith(a, StringComparison.Ordinal))
-                            conflicts.Add("[" + a + "](第" + (i + 1) + "行) 是相机触发串 [" + e + "] 的前缀");
-                    }
+                        conflicts.Add("[" + a + "](" + labels[i] + ") 是 [" + b + "](" + labels[j] + ") 的前缀");
                 }
             }
             return conflicts.Count > 0 ? string.Join("；", conflicts.ToArray()) : null;

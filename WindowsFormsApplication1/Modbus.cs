@@ -40,11 +40,14 @@ namespace WindowsFormsApplication1
                 }
                 // ch:R43 只读取一帧：粘包时切出第一帧，剩余字节留在串口缓冲由下一次事务读取；
                 //   短读在窗口内拼满再校验；写回执(FC06/FC10)同样先过 CRC 才返回成功
-                int frameLen = ReadOneFrame(buffer, buffer.Length);
+                string failReason;
+                int frameLen = ReadOneFrame(buffer, buffer.Length, out failReason);
                 if (frameLen <= 0)
                 {
                     // ch:v1.3.54 P2-2 半帧/无响应原来静默返回 0，调用方"详见 Modbus 日志"却无记录 → 补限流日志
-                    LogReadTimeoutThrottled(station, "半帧/无响应超时");
+                    // ch:v1.3.55 P3 失败原因细分：ReadOneFrame 把"无字节/超时"与"读到帧但功能码未知/声明长度超限"都返回 -1，
+                    //   旧实现统一记"半帧/无响应超时"会误导排查（现场收到 0x?? 功能码回的是畸形帧而非超时）；改用真实原因串。
+                    LogReadTimeoutThrottled(station, failReason);
                     try { port.DiscardInBuffer(); } catch { } // 半截/未知帧无法定界，丢弃以恢复同步
                     return 0;
                 }
@@ -116,10 +119,20 @@ namespace WindowsFormsApplication1
 
         // ch:R43 按功能码读出完整一帧（绝不预读下一帧）：FC03 先读字节数再读数据；FC06/FC10=8；异常响应=5。
         //   未知功能码无法定界，丢弃输入缓冲并返回 -1，由下一次事务重新同步。
-        private int ReadOneFrame(byte[] buffer, int maxLen)
+        // ch:v1.3.55 P3 失败经 failReason 出参带回真实原因（无字节/未知功能码/声明长度超限/续读不足），调用方据此记日志。
+        private int ReadOneFrame(byte[] buffer, int maxLen, out string failReason)
         {
-            if (maxLen < 5 || !ReadExact(buffer, 0, 2))
+            failReason = null;
+            if (maxLen < 5)
+            {
+                failReason = "缓冲区过小";
                 return -1;
+            }
+            if (!ReadExact(buffer, 0, 2))
+            {
+                failReason = "半帧/无响应超时";
+                return -1;
+            }
             byte func = buffer[1];
             int total;
             int nextIndex; // ch:R43 N5 续读起点：FC03 已填到 [2]，其余功能码只填到 [1]
@@ -131,7 +144,10 @@ namespace WindowsFormsApplication1
             else if (func == 0x03)
             {
                 if (!ReadExact(buffer, 2, 1))
+                {
+                    failReason = "半帧/无响应超时";
                     return -1;
+                }
                 total = 3 + buffer[2] + 2;
                 nextIndex = 3;
             }
@@ -141,13 +157,22 @@ namespace WindowsFormsApplication1
                 nextIndex = 2;
             }
             else
+            {
+                failReason = "未知功能码 func=0x" + func.ToString("X2");
                 return -1;
+            }
             if (total < 5 || total > maxLen)
+            {
+                failReason = "声明长度超限 total=" + total;
                 return -1;
+            }
             // ch:R43 N5 从“已填入的下一字节”续读：FC06/FC10(8字节)与异常响应(5字节)必须从下标2读 total-2，
             //   原实现统一从下标3读 total-3 会少读1字节，CRC 必失败且串口残留本帧最后一字节导致后续失步
             if (!ReadExact(buffer, nextIndex, total - nextIndex))
+            {
+                failReason = "半帧超时(续读不足 func=0x" + func.ToString("X2") + ")";
                 return -1;
+            }
             return total;
         }
         // ch:R42 响应帧 CRC 校验：复用 ModbusCrc.Append（单测直链回归的那份实现，帧尾 [低,高]）。

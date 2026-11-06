@@ -69,6 +69,18 @@ public class SerialFrameAccumulatorTests
     }
 
     [Fact]
+    public void PrefixConfig_1and123_SplitsAtNonBoundary_StillDispatchesLong()
+    {
+        // ch:v1.3.55 P1-1：v1.3.54 的等待要求 hit.Length==pending.Count，故 "12"(半帧) 头部已完整命中 "1"
+        //   却因 pending 未吃满而提前派发 "1"，残留 "2"+"3" 拼不回 "123"。放宽条件后必须整帧切到 "123"。
+        var acc = new SerialFrameAccumulator();
+        Assert.Empty(acc.Append(2, Encoding.ASCII.GetBytes("12"), P("1", "123"))); // "12" 是 "123" 前缀 → 等待，绝不派发 "1"
+        var f = acc.Append(1, Encoding.ASCII.GetBytes("3"), P("1", "123"));         // "3" 到齐 → 整帧 "123"
+        Assert.Single(f);
+        Assert.Equal("123", S(f[0]));
+    }
+
+    [Fact]
     public void GenuineShortString_SettlesAfterPrefixWait()
     {
         // 设备确实只发 "1"（"12" 也配置）：连续空读到 settle 上限后产出短串 "1"
@@ -114,6 +126,42 @@ public class SerialFrameAccumulatorTests
     }
 
     [Fact]
+    public void MaxFrame_OverRead_ConservesEveryByte()
+    {
+        // ch:v1.3.55 P1-2：Form3 读缓冲 4096 > MaxFrame 1024。旧 take 钳制把超上限的尾部静默丢弃＝丢数据。
+        //   分片处理后必须「已产出帧总字节 + 剩余 pending == 投入字节」，一字节都不许少。
+        var acc = new SerialFrameAccumulator();
+        int n = SerialFrameAccumulator.MaxFrame + 500;      // 1524 > MaxFrame
+        var big = new byte[n];
+        for (int i = 0; i < n; i++) big[i] = (byte)'A';      // 全 'A'，无匹配模式
+        var f = acc.Append(n, big, P("ZZ"));
+        long emitted = 0;
+        foreach (var fr in f) emitted += fr.Length;
+        Assert.Equal(n, emitted + acc.PendingCount);         // 字节守恒
+        Assert.True(acc.PendingCount <= SerialFrameAccumulator.MaxFrame);
+
+        // 有匹配模式时溢出分片同样守恒：1000 帧 "AB"(=2000 字节) 一次性投入(>MaxFrame)
+        var acc2 = new SerialFrameAccumulator();
+        var two = new byte[2000];
+        for (int i = 0; i < 1000; i++) { two[2 * i] = (byte)'A'; two[2 * i + 1] = (byte)'B'; }
+        var f2 = acc2.Append(two.Length, two, P("AB"));
+        long emitted2 = 0;
+        foreach (var fr in f2) emitted2 += fr.Length;
+        Assert.Equal(two.Length, emitted2 + acc2.PendingCount); // 全部是合法 "AB"，应几乎全部产出
+        Assert.Equal(1000, f2.Count);                            // 每帧都是 "AB"
+    }
+
+    [Fact]
+    public void CrLfDelimited_MultipleFrames_EachDispatched()
+    {
+        // ch:v1.3.55 P2-4：设备用 CR/LF 作帧分隔符，一次读入 "AB\r\nCD\r\n"。旧逻辑头部锚定，
+        //   第二帧被前面残留的 "\r\n" 挡住永不单独派发。剥离头部 CR/LF 后应逐帧切出 AB、CD。
+        var acc = new SerialFrameAccumulator();
+        var f = acc.Append(8, Encoding.ASCII.GetBytes("AB\r\nCD\r\n"), P("AB", "CD"));
+        Assert.Equal(new[] { "AB", "CD" }, System.Array.ConvertAll(f.ToArray(), S));
+    }
+
+    [Fact]
     public void Reset_ClearsPending()
     {
         var acc = new SerialFrameAccumulator();
@@ -146,5 +194,23 @@ public class SerialFrameAccumulatorTests
         string c = SchemeStore.FindPrefixConflicts(rows, new[] { "10" }); // 相机触发串 "10" 以方案串 "1" 开头
         Assert.NotNull(c);
         Assert.Contains("相机触发串", c);
+    }
+
+    [Fact]
+    public void FindPrefixConflicts_ExtraIsPrefixOfRow_Detected()
+    {
+        // ch:v1.3.55 P2-1：旧实现 rows→extra 只查"extra 比行串长"方向，漏掉"短触发串是行串前缀"(extra→rows)。
+        var rows = new List<string[]> { new[] { "12", "p1" } };
+        string c = SchemeStore.FindPrefixConflicts(rows, new[] { "1" }); // 相机触发串 "1" 是方案串 "12" 的前缀
+        Assert.NotNull(c);
+    }
+
+    [Fact]
+    public void FindPrefixConflicts_ExtraVsExtra_Detected()
+    {
+        // ch:v1.3.55 P2-1：旧实现完全不查 extra↔extra。两条相机触发串 "1"/"10" 互为前缀也应拒绝。
+        var rows = new List<string[]> { new[] { "X", "p1" } }; // 行串本身无冲突
+        string c = SchemeStore.FindPrefixConflicts(rows, new[] { "1", "10" });
+        Assert.NotNull(c);
     }
 }

@@ -981,6 +981,22 @@ namespace WindowsFormsApplication1
                     MessageBox.Show(msg + "\r\n\r\n无分隔符协议下前缀串无法区分（如 \"1\" 与 \"12\"），请改用互不为前缀的载图串后再保存。", "载图串前缀冲突", MessageBoxButtons.OK, MessageBoxIcon.Warning);
                 return false;
             }
+            // ch:v1.3.55 P3 载图串字节长度上限：SerialFrameAccumulator 累积上限 MaxFrame=1024 字节，
+            //   超过该长度的载图串在运行期永不可能凑齐 → 静默不触发（现场最难查的一类"配了没反应"）。保存层尽早拒绝。
+            for (int i = 0; i < rows.Count; i++)
+            {
+                string k = rows[i] == null ? null : rows[i][0];
+                if (string.IsNullOrEmpty(k)) continue;
+                if (_protoEncoding.GetByteCount(k) > SerialFrameAccumulator.MaxFrame)
+                {
+                    string msg = "载图串过长（第" + (i + 1) + "行 [" + k.Substring(0, Math.Min(20, k.Length)) + "…] GB2312 字节数超过串口帧上限 "
+                        + SerialFrameAccumulator.MaxFrame + "），运行期永远凑不齐、不会触发。";
+                    MsgErroeLog.WriteLog(msg);
+                    if (showUi)
+                        MessageBox.Show(msg + "\r\n\r\n请缩短该载图串后再保存。", "载图串超长", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                    return false;
+                }
+            }
             Dictionary<string, bool> seen = new Dictionary<string, bool>();
             for (int i = 0; i < rows.Count; i++)
             {
@@ -1301,16 +1317,23 @@ namespace WindowsFormsApplication1
                 // ch:置位退出标志，接收线程本轮结束后自然退出；不再使用已废弃的 Thread.Abort（易致句柄未释放/状态不一致）
                 bAccpet = false;
                 _serialRxAccumulator.Reset(); // ch:v1.3.54 P2-1 停止接收清累积；排队中的 AcceptData 由入口 !bAccpet 守卫直接退出，不再追加
-                try
+                // ch:v1.3.55 P2-2 不在 UI 线程 Join(1000)：接收线程此刻可能正阻塞在 this.Invoke(AcceptData) 上，
+                //   UI 线程一旦占住消息泵去 Join，那个 Invoke 就永远等不到服务 → 直到 Join 超时(1s)界面才恢复（可感知卡顿）。
+                //   置位后立即返回让消息泵继续跑，排队的 Invoke/入口 !bAccpet 早退守卫会让线程尽快自然退出；
+                //   重开路径(见上文 IsAlive 守卫)已禁止旧线程未退出时新建，故无需同步等待，仅后台兜底记录"迟迟未退出"。
+                Thread receiver = getRecevice;
+                if (receiver != null && receiver.IsAlive)
                 {
-                    if (getRecevice != null && getRecevice.IsAlive)
+                    Task.Run(() =>
                     {
-                        // 只等待，不强制终止；线程在退出前可能正阻塞在 Begin/Invoke 上，超时后由 UI 线程恢复即自行结束
-                        if (!getRecevice.Join(1000))
-                            MsgErroeLog.WriteLog("接收线程未在 1s 内退出，将继续后台自行结束");
-                    }
+                        try
+                        {
+                            if (!receiver.Join(3000))
+                                MsgErroeLog.WriteLog("接收线程未在 3s 内退出（UI 已恢复，不影响停止），将继续后台自行结束");
+                        }
+                        catch (Exception ex) { MsgErroeLog.WriteLog("接收线程 Join 异常:" + ex.Message); }
+                    });
                 }
-                catch (Exception ex) { MsgErroeLog.WriteLog("异常:" + ex.Message); }
                 btnReceive.Text = "接收数据";
             }
         }

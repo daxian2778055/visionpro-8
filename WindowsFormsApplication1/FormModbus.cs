@@ -3394,6 +3394,8 @@ namespace WindowsFormsApplication1
             {
                 // ch:R12 方案表全量保存（≤100 行）：重复载图串拒绝保存（与 Form3 R43 语义一致）；先写 1..N 行、最后写 count。
                 //   老 ini 无 count 键也走此路径后自动补齐；表尾连续空行落盘前剔除。
+                //   ch:v1.3.55 P2-3 本通道经 _schemes.TryResolve→SchemeMatcher 精确相等匹配，"1"与"12"共存
+                //   完全确定无歧义，不做前缀拒绝（那是串口/Form3 累积器的语义）——旧的前缀拒绝已移除。
                 List<string[]> schemeRows = _schemePanel != null ? _schemePanel.GetNormalizedRows() : _schemes.GetRows();
                 schemeRows = SchemeStore.TrimTrailingEmpty(schemeRows);
                 string dupMsg = SchemeStore.FindDuplicates(schemeRows);
@@ -3401,14 +3403,6 @@ namespace WindowsFormsApplication1
                 {
                     MsgErroeLog.WriteLog("载图串重复拒绝保存:" + dupMsg);
                     MessageBox.Show("载图触发串重复，无法确定切换目标：" + dupMsg + "\r\n\r\n请修改重复的载图串后再保存。", "载图串冲突", MessageBoxButtons.OK, MessageBoxIcon.Warning);
-                    return;
-                }
-                // ch:v1.3.54 P1 前缀冲突拒绝（"1"/"12" 分包误切）
-                string prefixMsg = SchemeStore.FindPrefixConflicts(schemeRows, null);
-                if (prefixMsg != null)
-                {
-                    MsgErroeLog.WriteLog("载图串前缀冲突拒绝保存:" + prefixMsg);
-                    MessageBox.Show("载图串存在前缀关系，分包时会误切方案：" + prefixMsg + "\r\n\r\n请改用互不为前缀的载图串后再保存。", "载图串前缀冲突", MessageBoxButtons.OK, MessageBoxIcon.Warning);
                     return;
                 }
                 _schemes.SetRows(schemeRows);
