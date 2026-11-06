@@ -62,7 +62,6 @@
             this.txtReceive = new System.Windows.Forms.TextBox();
             this.txtFileName = new System.Windows.Forms.TextBox();
             this.timer1 = new System.Windows.Forms.Timer(this.components);
-            this.timer2 = new System.Windows.Forms.Timer(this.components);
             this.btn_Ok = new System.Windows.Forms.Button();
             this.textBox9 = new System.Windows.Forms.TextBox();
             this.checkBox1 = new System.Windows.Forms.CheckBox();
@@ -408,10 +407,6 @@
             // timer1
             // 
             this.timer1.Tick += new System.EventHandler(this.timer1_Tick);
-            // 
-            // timer2
-            // 
-            this.timer2.Tick += new System.EventHandler(this.timer2_Tick);
             // 
             // btn_Ok
             // 
@@ -989,7 +984,6 @@
         private System.Windows.Forms.TextBox txtReceive;
         private System.Windows.Forms.TextBox txtFileName;
         private System.Windows.Forms.Timer timer1;
-        private System.Windows.Forms.Timer timer2;
         private System.Windows.Forms.Button btn_Ok;
         public System.Windows.Forms.TextBox textBox9;
         private System.Windows.Forms.CheckBox checkBox1;

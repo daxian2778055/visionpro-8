@@ -4732,14 +4732,25 @@ namespace WindowsFormsApplication1
                                                     string a = "";
                                                     int.TryParse(out1temp[i], out indata);
                                                     frm3.Getint(indata, out tempdata);
+                                                    // ch:v1.3.53 P2-2 Getint 恒返回 4 字节(偶数)，WriteRegisters 的"字节数非正偶数"
+                                                    //   拒绝分支在本调用点不可达；返回 0 的真实来源是超时/短帧/站号/CRC/异常——
+                                                    //   这些 Modbus.ReadData 内部已按站号限流记日志。调用方只补"哪路相机本帧未写出"，
+                                                    //   并按相机限流避免每寄存器每帧刷屏。
+                                                    int writeRet;
                                                     if (frm3.gongnengma == "06")
-                                                        frm3.mdcan.WriteRegister(1, (ushort)(add_temp + i * jinzhi), indata, out a);
+                                                        writeRet = frm3.mdcan.WriteRegister(1, (ushort)(add_temp + i * jinzhi), indata, out a);
                                                     else if (frm3.gongnengma == "10")
+                                                        writeRet = frm3.mdcan.WriteRegisters(1, (ushort)(add_temp + i * jinzhi), tempdata, out a);
+                                                    else
+                                                        writeRet = 1;
+                                                    if (writeRet == 0)
                                                     {
-                                                        // ch:v1.3.51 ⑥ 调用方留"本帧未输出"上下文：WriteRegisters 返回 0=数据字节数非法被拒
-                                                        //   （内部限流日志只说"拒绝"，不报是哪路相机/本帧没写出去）
-                                                        if (frm3.mdcan.WriteRegisters(1, (ushort)(add_temp + i * jinzhi), tempdata, out a) == 0)
-                                                            MsgErroeLog.WriteLog("FC10 写回被拒(字节数非正偶数)：相机" + myjob.path_number + " 本帧该寄存器未输出 addr=" + (add_temp + i * jinzhi).ToString());
+                                                        int nowMs = Environment.TickCount;
+                                                        if (unchecked(nowMs - _fcWriteFailLogMs) >= 5000)
+                                                        {
+                                                            _fcWriteFailLogMs = nowMs;
+                                                            MsgErroeLog.WriteLog("串口写回失败(无响应/校验未过，详见 Modbus 日志)：相机" + myjob.path_number + " 功能码=" + frm3.gongnengma + " addr=" + (add_temp + i * jinzhi).ToString() + " 本帧该寄存器未输出");
+                                                        }
                                                     }
                                                     // ch:后台 Task 写 frm3 控件，转 UI 线程
                                                     if (frm3.InvokeRequired)
@@ -4997,79 +5008,65 @@ namespace WindowsFormsApplication1
                                                 }
                                                 #endregion
                                                 #region 界面表格统计
+                                                // ch:v1.3.53 P3-1 8 路 CheckState 读取移入 BeginInvoke（UI 线程）：
+                                                //   原在池线程直接读 checkBoxN.CheckState 属不受支持的跨线程访问，可能读到过期值。
                                                 switch (myjob.path_number)
                                                 {
                                                     case "1":
-                                                        if (checkBox11.CheckState == CheckState.Checked)
+                                                        this.BeginInvoke(new Action(() =>
                                                         {
-                                                            this.BeginInvoke(new Action(() =>
-                                                            {
+                                                            if (checkBox11.CheckState == CheckState.Checked)
                                                                 UpdateDefectTable(d1, myjob1.myTable, cuowu1); // ch:R13 增量更新：原地改计数/追加，去掉 Visible 开关与 Rows.Clear 全量重建
-                                                            }));
-                                                        }
+                                                        }));
                                                         break;
                                                     case "2":
-                                                        if (checkBox8.CheckState == CheckState.Checked)
+                                                        this.BeginInvoke(new Action(() =>
                                                         {
-                                                            this.BeginInvoke(new Action(() =>
-                                                            {
-                                                                UpdateDefectTable(d2, myjob2.myTable, cuowu1); // ch:R13 增量更新：原地改计数/追加，去掉 Visible 开关与 Rows.Clear 全量重建
-                                                            }));
-                                                        }
+                                                            if (checkBox8.CheckState == CheckState.Checked)
+                                                                UpdateDefectTable(d2, myjob2.myTable, cuowu1);
+                                                        }));
                                                         break;
                                                     case "3":
-                                                        if (checkBox56.CheckState == CheckState.Checked)
+                                                        this.BeginInvoke(new Action(() =>
                                                         {
-                                                            this.BeginInvoke(new Action(() =>
-                                                            {
-                                                                UpdateDefectTable(d3, myjob3.myTable, cuowu1); // ch:R13 增量更新：原地改计数/追加，去掉 Visible 开关与 Rows.Clear 全量重建
-                                                            }));
-                                                        }
+                                                            if (checkBox56.CheckState == CheckState.Checked)
+                                                                UpdateDefectTable(d3, myjob3.myTable, cuowu1);
+                                                        }));
                                                         break;
                                                     case "4":
-                                                        if (checkBox57.CheckState == CheckState.Checked)
+                                                        this.BeginInvoke(new Action(() =>
                                                         {
-                                                            this.BeginInvoke(new Action(() =>
-                                                            {
-                                                                UpdateDefectTable(d4, myjob4.myTable, cuowu1); // ch:R13 增量更新：原地改计数/追加，去掉 Visible 开关与 Rows.Clear 全量重建
-                                                            }));
-                                                        }
+                                                            if (checkBox57.CheckState == CheckState.Checked)
+                                                                UpdateDefectTable(d4, myjob4.myTable, cuowu1);
+                                                        }));
                                                         break;
                                                     case "5":
-                                                        if (checkBox58.CheckState == CheckState.Checked)
+                                                        this.BeginInvoke(new Action(() =>
                                                         {
-                                                            this.BeginInvoke(new Action(() =>
-                                                            {
-                                                                UpdateDefectTable(d5, myjob5.myTable, cuowu1); // ch:R13 增量更新：原地改计数/追加，去掉 Visible 开关与 Rows.Clear 全量重建
-                                                            }));
-                                                        }
+                                                            if (checkBox58.CheckState == CheckState.Checked)
+                                                                UpdateDefectTable(d5, myjob5.myTable, cuowu1);
+                                                        }));
                                                         break;
                                                     case "6":
-                                                        if (checkBox59.CheckState == CheckState.Checked)
+                                                        this.BeginInvoke(new Action(() =>
                                                         {
-                                                            this.BeginInvoke(new Action(() =>
-                                                            {
-                                                                UpdateDefectTable(d6, myjob6.myTable, cuowu1); // ch:R13 增量更新：原地改计数/追加，去掉 Visible 开关与 Rows.Clear 全量重建
-                                                            }));
-                                                        }
+                                                            if (checkBox59.CheckState == CheckState.Checked)
+                                                                UpdateDefectTable(d6, myjob6.myTable, cuowu1);
+                                                        }));
                                                         break;
                                                     case "7":
-                                                        if (checkBox60.CheckState == CheckState.Checked)
+                                                        this.BeginInvoke(new Action(() =>
                                                         {
-                                                            this.BeginInvoke(new Action(() =>
-                                                            {
-                                                                UpdateDefectTable(d7, myjob7.myTable, cuowu1); // ch:R13 增量更新：原地改计数/追加，去掉 Visible 开关与 Rows.Clear 全量重建
-                                                            }));
-                                                        }
+                                                            if (checkBox60.CheckState == CheckState.Checked)
+                                                                UpdateDefectTable(d7, myjob7.myTable, cuowu1);
+                                                        }));
                                                         break;
                                                     case "8":
-                                                        if (checkBox61.CheckState == CheckState.Checked)
+                                                        this.BeginInvoke(new Action(() =>
                                                         {
-                                                            this.BeginInvoke(new Action(() =>
-                                                            {
-                                                                UpdateDefectTable(d8, myjob8.myTable, cuowu1); // ch:R13 增量更新：原地改计数/追加，去掉 Visible 开关与 Rows.Clear 全量重建
-                                                            }));
-                                                        }
+                                                            if (checkBox61.CheckState == CheckState.Checked)
+                                                                UpdateDefectTable(d8, myjob8.myTable, cuowu1);
+                                                        }));
                                                         break;
                                                 }
                                             }
@@ -6550,6 +6547,11 @@ namespace WindowsFormsApplication1
         }
         private void UpdateRecentRecords(string pth, string rec)
         {
+            // ch:v1.3.53 P3-2 关闭过程中 listBox/checkBox 可能已释放：投递侧虽有 IsHandleCreated 守卫，
+            //   但入队后到执行前窗口仍可能 Dispose，回调体加 IsDisposed 早退 + 整体 try/catch，避免 UI 线程抛异常走 ThreadException。
+            if (IsDisposed) return;
+            try
+            {
             ListBox lb; CheckBox cb;
             switch (pth)
             {
@@ -6562,6 +6564,8 @@ namespace WindowsFormsApplication1
                 case "7": cb = checkBox55; lb = listBox18; if (cb.CheckState == CheckState.Checked) { string v3 = StatItemAt(lb, 3), v2 = StatItemAt(lb, 2), v1 = StatItemAt(lb, 1), v0 = StatItemAt(lb, 0); setbox12(v3, 4); setbox12(v2, 3); setbox12(v1, 2); setbox12(v0, 1); setbox12(rec, 0); } break;
                 case "8": cb = checkBox53; lb = listBox17; if (cb.CheckState == CheckState.Checked) { string v3 = StatItemAt(lb, 3), v2 = StatItemAt(lb, 2), v1 = StatItemAt(lb, 1), v0 = StatItemAt(lb, 0); setbox13(v3, 4); setbox13(v2, 3); setbox13(v1, 2); setbox13(v0, 1); setbox13(rec, 0); } break;
             }
+            }
+            catch (Exception ex) { MsgErroeLog.WriteLog("最近5次记录更新失败:" + ex.Message); }
         }
         private void setbox12(string aa, int bb)
         {
@@ -9457,6 +9461,7 @@ namespace WindowsFormsApplication1
         //   配置层同时由 SchemeSwitchConfig 拒绝多通道同时启用 cam10（勾选时检查）。
         private readonly Cam10ChangeTracker _cam10Tracker = new Cam10ChangeTracker();
         private int _lastSwitchAbortMsgMs = 0; // ch:R46 排空中止弹窗限流（重试不再每次弹窗）
+        private int _fcWriteFailLogMs = 0; // ch:v1.3.53 P2-2 串口写回失败日志限流（每 5s 一条，避免每寄存器每帧刷屏）
         private int _detectingCount = 0; // ch:正在执行 block.Run 的检测帧数（参考正常版本，切换方案排空等待用，Interlocked 操作）
         private int _lastDropLogMs = 0; // ch:回调丢帧限频日志时间戳（防呆，避免静默丢帧无法排查）
 
@@ -13730,7 +13735,7 @@ namespace WindowsFormsApplication1
         }
 
         // ch:点击保存图片按钮 | en:Click on Save Image Button
-        private readonly int[] _saveBmpCamBusy = new int[8]; // ch:v1.3.51 ⑤ 每相机同一时刻只允许一个后台保存任务（5MP 彩色一帧拷贝约 120MB，防重复点击内存尖峰）
+        private readonly int[] _saveBmpCamBusy = new int[8]; // ch:v1.3.51 ⑤ 每相机同一时刻只允许一个后台保存任务（5MP 彩色一帧拷贝约 15MB，8 路同时约 120MB，防重复点击内存尖峰）
         private void bnSaveBmp_Click(object sender, EventArgs e)
         {
             for (int i = 0; i < 8; ++i)

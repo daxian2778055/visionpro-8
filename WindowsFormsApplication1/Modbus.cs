@@ -17,7 +17,7 @@ namespace WindowsFormsApplication1
         //   同一 SerialPort 的"写请求+读响应"事务必须原子；Form3 的直接 port.Write 复用本锁。
         public readonly object PortLock = new object();
         ErrorLog MsgErroeLog = new ErrorLog();
-        private static int _fc10RejectLogMs = 0; // ch:v1.3.51 ⑥ FC10 拒绝日志 5s 限流（配置性错误每帧命中）
+        private int _fc10RejectLogMs = 0; // ch:v1.3.53 P2-2 改实例字段：原 static 被 Form3/FormModbus/Omron/RTU 四实例共享，一路配置错误会压掉其它路 5s 内的日志
         // ch:P1-⑤ 响应判定改为按发送站号匹配，消除站号硬编码 0x01 的地雷（默认 0x01 兼容既有 station-1 现场）
         // ch:P1-⑥ 增加读取超时（2s），避免 PLC 无响应时 while 永久阻塞挂死调用线程
         // ch:修复：原 buffer1 = buffer 为引用别名（非拷贝，buffer1 与 buffer 同体），且轮询内层判定仍硬编码 0x01；

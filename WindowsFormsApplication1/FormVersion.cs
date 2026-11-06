@@ -10,13 +10,14 @@ namespace WindowsFormsApplication1
     public partial class FormVersion : Form
     {
         // 当前版本（与推送仓库的 git tag 一一对应）：语义化版本 + 发布日期
-        public const string AppVersion = "1.3.52";
+        public const string AppVersion = "1.3.53";
         public const string AppVersionDate = "2026-11-04";
         public const string AppRepoName = "正泰 VP八相机连续海康（M4 - 加密）";
 
         // 版本时间线：与仓库 git tag 一一对应（新版本在最前）
         private static readonly string[] VersionTimeline = new string[] 
         {
+            "v1.3.53  2026-11-04  第19轮(朋友二次复核6条落实)：①P1-1 串口分包/GBK 累积匹配——v1.3.52 单次 Read 整串精确匹配在 9600 波特率+USB 转串口分包下，读取边界落在方案串中间(前后两半都不匹配)、GBK 双字节被切开变 U+FFFD 拼不回；改字节累积+前缀锚定精确匹配：pending 与已知串(GB2312 字节)全等立即派发、真前缀继续等(未凑齐不解码)、非前缀未知数据空闲≥2 轮整段走 getData、前缀等待超 200ms 强制派发、累积上限 1024；仍不做子串切分(避免帧头尾误触发)，会话启停/关闭清累积。②P2-2 FC10/FC06 日志——Getint 恒 4 字节故'字节数非正偶数'分支在此调用点不可达，删错误文案改'串口写回失败(无响应/校验未过)'并按相机 5s 限流(原每寄存器每帧刷屏)，FC06 补返回值检查，Modbus._fc10RejectLogMs 由 static 改实例(四通道不再互相压日志)。③P3-1 界面表格统计 8 路 CheckState 读移入 BeginInvoke(UI 线程)。④P3-2 UpdateRecentRecords 加 IsDisposed 早退+try/catch(关闭中控件已释放不再走 ThreadException)。⑤P3-3 存图内存注释更正为约 15MB/帧×8 路≈120MB。⑥P3-4 删除死代码 timer2/timer2_Tick(无锁 ReadExisting 会抢字节)。P3-5 存图持 _cameraLocks 写盘为已知取舍未改。构建 0 error、单测 78/78。",
             "v1.3.52  2026-11-04  第18轮补正(串口组帧退回精确匹配)：v1.3.49 曾把串口无协议接收也接入 ProtoFrameAssembler(子串切分)，与 TCP 统一。复核确认该改动在串口上收益近零、风险为正——串口慢且点对点，几字符的触发串几乎不会被驱动拆包(那是 TCP 40fps 才有的问题)，而子串切分会把「帧头+触发串+帧尾」报文里的子串误判为触发，可能误切方案。现串口无协议退回整串精确匹配(qiehuan 全等)，保留 R43 的 PortLock 与显式 GBK 解码；移除串口组帧器字段与三处 Reset。组帧器仅保留在 TCP 两路(拆包/粘包真实存在)。Modbus RTU 走 mdcan 定长事务+CRC，与此无关、未动。构建 0 error、单测 78/78。",
             "v1.3.51  2026-11-04  第18轮(朋友复核6条落实)：①P2-13 补全——「最近5次记录」8 路统一并入统计 Task 的一次 BeginInvoke，在 UI 线程先读满旧值再移位写入(原 1~6 路仍在池线程直读 Items/CheckState，读到前帧排队前的旧值、未来 Clear 会越界；原 7/8 路数组快照为 Clone 后逐格写，相邻帧 Task 并发互相覆盖)；删除 _statRecordsCam7/8 数组，每帧 UI 消息由 5 条降为 1 条；②串口组帧时序——停接收时 Reset 移到 Join 之后再清，避免已排队 AcceptData 在 Reset 后追加半帧；③jieshouZifu 清值移到 CAS 成功之后——背压丢弃帧不再改写仍在排队的旧任务共享字段(补 v1.3.48「不被后帧覆盖」的收尾)；④存图后台化兜底——AllocHGlobal/Task 调度失败均释放每相机忙位与拷贝，新增 _saveBmpCamBusy 每相机忙位防重复点击内存尖峰(5MP 一帧拷贝约120MB)；⑤FC10 拒绝日志 5s 限流 + 调用方(Form1 mode4 串口寄存器写回)留「本帧该寄存器未输出」上下文；⑥修正 P1-8 注释表述(读侧 getrecord 初判在锁外，NRE 由内层 catch 记故障帧)、Form3 保存失败不回滚 store 的决策注释(回滚会造成界面/内存/ini 三方不一致)。构建 0 error、单测 78/78。",
             "v1.3.50  2026-11-04  第17轮补漏(P2-10 同类遗漏)：FormModbus 补 finsDicLock——①UI 线程三处增删(Load 319/清除 1296/手动新增 1398)全部入锁；②检测线程 xie() 入口取锁内 Dictionary 快照，改为遍历快照，消除 UI 增删与写回 foreach 并发导致的「集合已修改」整轮丢弃；③极速写 XieWuWriteOne 的通道查表改为锁内完成（逐帧调用，不额外分配字典）；④GetCamOutFormat 的 TryGetValue 入锁，覆盖可能来自检测线程的覆盖层格式解析。至此 FormModbus/Omron/RTU 三窗 fins_dic 跨线程访问口径一致。构建 0 error、单测 78/78。",
