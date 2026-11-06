@@ -147,5 +147,41 @@ namespace WindowsFormsApplication1
             }
             return dups.Count > 0 ? string.Join("；", dups.ToArray()) : null;
         }
+
+        /// <summary>
+        /// ch:v1.3.54 前缀冲突扫描：某载图串是另一载图串的开头前缀（如 "1"/"12"、"相机1"/"相机10"）。
+        ///   无分隔符协议下前缀关系在分包时会误切（收到 "1" 无法判断是短串还是长串前半），运行期靠
+        ///   SerialFrameAccumulator 的 settle 等待兜底，但配置层应尽早拒绝。返回冲突描述（含两条串+行号），无冲突返回 null。
+        ///   extraKeys 为各相机 triggerZifu 等外部已知串，一并纳入前缀交叉检查（可为 null）。
+        /// </summary>
+        public static string FindPrefixConflicts(List<string[]> rows, string[] extraKeys)
+        {
+            if (rows == null) return null;
+            List<string> conflicts = new List<string>();
+            for (int i = 0; i < rows.Count; i++)
+            {
+                string a = rows[i] == null ? null : rows[i][0];
+                if (string.IsNullOrEmpty(a)) continue;
+                for (int j = 0; j < rows.Count; j++)
+                {
+                    if (i == j) continue;
+                    string b = rows[j] == null ? null : rows[j][0];
+                    if (string.IsNullOrEmpty(b)) continue;
+                    if (b.Length > a.Length && b.StartsWith(a, StringComparison.Ordinal))
+                        conflicts.Add("[" + a + "](第" + (i + 1) + "行) 是 [" + b + "](第" + (j + 1) + "行) 的前缀");
+                }
+                if (extraKeys != null)
+                {
+                    for (int k = 0; k < extraKeys.Length; k++)
+                    {
+                        string e = extraKeys[k];
+                        if (string.IsNullOrEmpty(e) || e == a) continue;
+                        if (e.Length > a.Length && e.StartsWith(a, StringComparison.Ordinal))
+                            conflicts.Add("[" + a + "](第" + (i + 1) + "行) 是相机触发串 [" + e + "] 的前缀");
+                    }
+                }
+            }
+            return conflicts.Count > 0 ? string.Join("；", conflicts.ToArray()) : null;
+        }
     }
 }

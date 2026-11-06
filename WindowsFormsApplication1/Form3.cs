@@ -42,21 +42,13 @@ namespace WindowsFormsApplication1
         public string gongnengma="06";
         public string serial_xieyi = "无协议";
         public string qiehuan_fangshi = "";
-        bool bAccpet = false;
+        volatile bool bAccpet = false; // ch:v1.3.54 P2-1 跨线程可见性：接收线程 fun 循环与停止/关闭路径读改
        // SerialPortmdcan.port = new SerialPort();
        public  Modbus mdcan = new Modbus();
-        // ch:v1.3.53 串口无协议帧累积器：v1.3.52 的单次 Read 整串精确匹配在 9600 波特率/USB 转串口分包下，
-        //   读取边界会落在方案串中间（前后两半都匹配不上），且 GBK 双字节被切开两半都变 U+FFFD 拼不回。
-        //   改为跨读取累积字节 + 前缀锚定精确匹配：pending 与某已知串(GB2312 字节)全等→立即派发；
-        //   pending 是某已知串的真前缀→继续等(未凑齐前不解码，彻底避开 GBK 拆字)；
-        //   非任何已知串前缀的未知数据→空闲≥2 轮(≈20ms)整段解码走 getData(与旧行为一致，不静默丢)。
-        //   不做子串切分，避免"帧头+触发串+帧尾"里的子串误触发(那是 TCP 组帧器的语义)。
+        // ch:v1.3.54 串口无协议帧累积器抽到 Core\SerialFrameAccumulator（纯字节、可单测）：
+        //   分包/GBK/前缀串误切三类问题统一在此处理，AcceptData 固定在 UI 线程执行（fun 循环 Invoke），累积器 UI 线程独占无需加锁。
         private readonly byte[] _serialReadBuffer = new byte[4096];
-        private readonly System.Collections.Generic.List<byte> _serialRxPending = new System.Collections.Generic.List<byte>();
-        private int _serialRxIdlePolls = 0;
-        private const int SerialMaxFrame = 1024;       // 累积上限：防未知数据无限增长
-        private const int SerialIdlePollsToFlush = 2;  // 连续 2 轮空读(≈20ms)判定帧结束
-        private const int SerialMaxWaitPolls = 20;     // 前缀等待最长 20 轮(≈200ms)：分包迟迟不齐也强制整段派发，避免卡死
+        private readonly SerialFrameAccumulator _serialRxAccumulator = new SerialFrameAccumulator();
         public int modbus_qufan = 0;
         public static string strportName = "";
         public static string strbaudRate = "";
@@ -663,7 +655,7 @@ namespace WindowsFormsApplication1
         public void CloseResources()
         {
             try { bAccpet = false; } catch (Exception ex) { new ErrorLog().WriteLog(ex.ToString()); }
-            _serialRxPending.Clear(); _serialRxIdlePolls = 0; // ch:v1.3.53 关闭时丢弃半截累积帧
+            _serialRxAccumulator.Reset(); // ch:v1.3.53 关闭时丢弃半截累积帧
             try { if (mdcan != null && mdcan.port != null && mdcan.port.IsOpen) mdcan.port.Close(); } catch (Exception ex) { new ErrorLog().WriteLog(ex.ToString()); }
             // ch:R11-3 关闭/置空与 Send/重连同入 _clientSocketLock：原不加锁会在 Send 持锁进行中并发置空，违背本轮"串行化"不变量
             try { lock (_clientSocketLock) { if (socketClient != null) { socketClient.Close(); socketClient = null; } } } catch (Exception exInner) { new ErrorLog().WriteLog(exInner.ToString()); }
@@ -971,6 +963,24 @@ namespace WindowsFormsApplication1
                     MessageBox.Show(msg + "\r\n\r\n请修改重复的载图串后再保存。", "载图串冲突", MessageBoxButtons.OK, MessageBoxIcon.Warning);
                 return false;
             }
+            // ch:v1.3.54 P1 前缀冲突：无分隔符协议下 "1"/"12"、"相机1"/"相机10" 这类前缀关系在分包时会误切，
+            //   运行期靠 SerialFrameAccumulator settle 等待兜底，但配置层尽早拒绝更稳。
+            string[] extraTriggers = null;
+            try
+            {
+                Func<string[]> ext = framePatternsProvider;
+                if (ext != null) extraTriggers = ext();
+            }
+            catch (Exception ex) { new ErrorLog().WriteLog(ex.ToString()); }
+            string prefix = SchemeStore.FindPrefixConflicts(rows, extraTriggers);
+            if (prefix != null)
+            {
+                string msg = "载图串存在前缀关系，分包时会误切方案：" + prefix;
+                MsgErroeLog.WriteLog(msg);
+                if (showUi)
+                    MessageBox.Show(msg + "\r\n\r\n无分隔符协议下前缀串无法区分（如 \"1\" 与 \"12\"），请改用互不为前缀的载图串后再保存。", "载图串前缀冲突", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                return false;
+            }
             Dictionary<string, bool> seen = new Dictionary<string, bool>();
             for (int i = 0; i < rows.Count; i++)
             {
@@ -981,20 +991,16 @@ namespace WindowsFormsApplication1
             List<string> cross = new List<string>();
             try
             {
-                Func<string[]> ext = framePatternsProvider;
-                if (ext != null)
+                string[] more = extraTriggers;
+                if (more != null)
                 {
-                    string[] more = ext();
-                    if (more != null)
+                    foreach (string t in more)
                     {
-                        foreach (string t in more)
+                        if (!string.IsNullOrEmpty(t) && seen.ContainsKey(t))
                         {
-                            if (!string.IsNullOrEmpty(t) && seen.ContainsKey(t))
-                            {
-                                string m = "载图串[" + t + "]与相机方案 triggerZifu 相同：同一帧只会切方案并跳过 getData，相机不会触发";
-                                cross.Add(m);
-                                LogTriggerConflictThrottled(m);
-                            }
+                            string m = "载图串[" + t + "]与相机方案 triggerZifu 相同：同一帧只会切方案并跳过 getData，相机不会触发";
+                            cross.Add(m);
+                            LogTriggerConflictThrottled(m);
                         }
                     }
                 }
@@ -1281,7 +1287,7 @@ namespace WindowsFormsApplication1
                         return;
                     }
                     bAccpet = true;
-                    _serialRxPending.Clear(); _serialRxIdlePolls = 0; // ch:v1.3.53 新接收会话从空累积开始
+                    _serialRxAccumulator.Reset(); // ch:v1.3.53 新接收会话从空累积开始
                     getRecevice = new Thread(new ThreadStart(testdelegate));
                     getRecevice.IsBackground = true; // ch:防止主程序退出后进程残留
                     getRecevice.Start();
@@ -1294,7 +1300,7 @@ namespace WindowsFormsApplication1
             {
                 // ch:置位退出标志，接收线程本轮结束后自然退出；不再使用已废弃的 Thread.Abort（易致句柄未释放/状态不一致）
                 bAccpet = false;
-                _serialRxPending.Clear(); _serialRxIdlePolls = 0; // ch:v1.3.53 停止接收丢弃半截累积帧（Join 之后 pending 不再被追加）
+                _serialRxAccumulator.Reset(); // ch:v1.3.54 P2-1 停止接收清累积；排队中的 AcceptData 由入口 !bAccpet 守卫直接退出，不再追加
                 try
                 {
                     if (getRecevice != null && getRecevice.IsAlive)
@@ -1326,6 +1332,13 @@ namespace WindowsFormsApplication1
         private int _lastSerialErrLogMs = 0; // ch:R10-7 串口接收异常限流日志（5s 一条），原空 catch 使故障完全不可见
         void AcceptData()
         {
+            // ch:v1.3.54 P2-1 入口先判 bAccpet：停止/关闭时若本委托已在 UI 队列排队，Join 返回后仍会执行——
+            //   原实现此时会重新 Read 追加到刚清空的 pending 并派发多一帧。这里在停止后直接清空退出。
+            if (!bAccpet)
+            {
+                _serialRxAccumulator.Reset();
+                return;
+            }
             if (txtReceive.InvokeRequired)
             {
                 try
@@ -1364,51 +1377,16 @@ namespace WindowsFormsApplication1
             }
         }
 
-        // ch:v1.3.53 串口帧累积处理：读到的字节先入 pending，再按前缀锚定精确匹配消费完整帧。
-        //   只有整段与已知串全等才解码派发（避开 GBK 半字），非前缀的未知数据靠空闲超时整段交 getData。
+        // ch:v1.3.54 帧累积逻辑抽到 SerialFrameAccumulator；此处仅取模式表(方案串∪相机触发串)并派发产出的完整帧。
+        //   readCount=0 且 pending 空时直接返回，避免空闲每 10ms 无谓重建模式表（P3 优化）。
         private void ProcessSerialBytes(int readCount)
         {
-            if (readCount > 0)
-            {
-                for (int k = 0; k < readCount; k++) _serialRxPending.Add(_serialReadBuffer[k]);
-                _serialRxIdlePolls = 0;
-            }
-            List<byte[]> patterns = BuildFramePatterns(); // 方案载图串 ∪ 各相机 triggerZifu（GB2312 字节）
-            // 贪心消费"以某个完整已知串开头"的帧（最长优先，避免 AB/ABC 误判）
-            while (_serialRxPending.Count > 0)
-            {
-                byte[] hit = null;
-                for (int p = 0; p < patterns.Count; p++)
-                {
-                    byte[] pat = patterns[p];
-                    if (pat.Length > 0 && pat.Length <= _serialRxPending.Count && SerialPendingStartsWith(pat))
-                    {
-                        if (hit == null || pat.Length > hit.Length) hit = pat;
-                    }
-                }
-                if (hit == null) break; // 开头不是任何完整已知串
-                byte[] frame = _serialRxPending.GetRange(0, hit.Length).ToArray();
-                _serialRxPending.RemoveRange(0, hit.Length);
-                DispatchSerialFrame(frame);
-            }
-            if (_serialRxPending.Count == 0)
-            {
-                _serialRxIdlePolls = 0;
+            if (readCount <= 0 && _serialRxAccumulator.PendingCount == 0)
                 return;
-            }
-            // 仍有残留：判断是否为某更长已知串的真前缀（分包未齐，继续等）
-            bool waitingForMore = SerialPendingIsStrictPrefixOfAny(patterns);
-            if (readCount == 0) _serialRxIdlePolls++;
-            // 溢出、或空闲判帧、或前缀等待超时：整段作为一帧交 getData（非方案串时 qiehuan 返回 0）
-            if (_serialRxPending.Count >= SerialMaxFrame
-                || (waitingForMore && _serialRxIdlePolls >= SerialMaxWaitPolls)
-                || (!waitingForMore && _serialRxIdlePolls >= SerialIdlePollsToFlush))
-            {
-                byte[] frame = _serialRxPending.ToArray();
-                _serialRxPending.Clear();
-                _serialRxIdlePolls = 0;
-                DispatchSerialFrame(frame);
-            }
+            List<byte[]> patterns = BuildFramePatterns(); // 方案载图串 ∪ 各相机 triggerZifu（GB2312 字节）
+            List<byte[]> frames = _serialRxAccumulator.Append(readCount, _serialReadBuffer, patterns);
+            for (int f = 0; f < frames.Count; f++)
+                DispatchSerialFrame(frames[f]);
         }
 
         private void DispatchSerialFrame(byte[] frame)
@@ -1417,7 +1395,9 @@ namespace WindowsFormsApplication1
             if (jinzhi == 1)
                 strReceive = strReceive.Replace('\0', '0');
             txtReceive.AppendText(strReceive);
-            if (qiehuan_fangshi == "Serial")
+            // ch:v1.3.54 P3 纯 CR/LF/空白/空帧只作显示，不派发 getData：否则设备以 CR/LF 作帧尾时，
+            //   触发串被消费后残留的 "\r\n" 会覆盖 8 路 block 的 jieshou 输入（Form1 DataChange 写 jieshou）。
+            if (qiehuan_fangshi == "Serial" && !IsWhitespaceOnly(strReceive))
             {
                 if (qiehuan(strReceive) == 0)
                 {
@@ -1427,27 +1407,15 @@ namespace WindowsFormsApplication1
             }
         }
 
-        private bool SerialPendingStartsWith(byte[] pat)
+        private static bool IsWhitespaceOnly(string s)
         {
-            for (int i = 0; i < pat.Length; i++)
-                if (_serialRxPending[i] != pat[i]) return false;
-            return true;
-        }
-
-        private bool SerialPendingIsStrictPrefixOfAny(List<byte[]> patterns)
-        {
-            for (int p = 0; p < patterns.Count; p++)
+            if (string.IsNullOrEmpty(s)) return true;
+            for (int i = 0; i < s.Length; i++)
             {
-                byte[] pat = patterns[p];
-                if (pat.Length > _serialRxPending.Count)
-                {
-                    bool all = true;
-                    for (int i = 0; i < _serialRxPending.Count; i++)
-                        if (pat[i] != _serialRxPending[i]) { all = false; break; }
-                    if (all) return true;
-                }
+                char c = s[i];
+                if (c != '\r' && c != '\n' && c != '\0' && c != ' ' && c != '\t') return false;
             }
-            return false;
+            return true;
         }
 
         private void btn_Ok_Click(object sender, EventArgs e)

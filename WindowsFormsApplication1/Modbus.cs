@@ -17,7 +17,7 @@ namespace WindowsFormsApplication1
         //   同一 SerialPort 的"写请求+读响应"事务必须原子；Form3 的直接 port.Write 复用本锁。
         public readonly object PortLock = new object();
         ErrorLog MsgErroeLog = new ErrorLog();
-        private int _fc10RejectLogMs = 0; // ch:v1.3.53 P2-2 改实例字段：原 static 被 Form3/FormModbus/Omron/RTU 四实例共享，一路配置错误会压掉其它路 5s 内的日志
+        private int _fc10RejectLogMs = 0; // ch:v1.3.54 P2-2 改实例字段（本类仅 Form3 一处 new Modbus()；实例化更贴合语义，真正需按相机拆分的是 Form1._fcWriteFailLogMs）
         // ch:P1-⑤ 响应判定改为按发送站号匹配，消除站号硬编码 0x01 的地雷（默认 0x01 兼容既有 station-1 现场）
         // ch:P1-⑥ 增加读取超时（2s），避免 PLC 无响应时 while 永久阻塞挂死调用线程
         // ch:修复：原 buffer1 = buffer 为引用别名（非拷贝，buffer1 与 buffer 同体），且轮询内层判定仍硬编码 0x01；
@@ -43,6 +43,8 @@ namespace WindowsFormsApplication1
                 int frameLen = ReadOneFrame(buffer, buffer.Length);
                 if (frameLen <= 0)
                 {
+                    // ch:v1.3.54 P2-2 半帧/无响应原来静默返回 0，调用方"详见 Modbus 日志"却无记录 → 补限流日志
+                    LogReadTimeoutThrottled(station, "半帧/无响应超时");
                     try { port.DiscardInBuffer(); } catch { } // 半截/未知帧无法定界，丢弃以恢复同步
                     return 0;
                 }
@@ -88,7 +90,8 @@ namespace WindowsFormsApplication1
             catch (Exception ex)
             {
                 b = "";
-                MsgErroeLog.WriteLog(ex.Message);
+                // ch:v1.3.54 P2-2 原每次事务都无条件记 ex.Message（PLC 掉线时刷屏）；改带站号+10s 限流
+                LogReadTimeoutThrottled(station, "读响应异常:" + ex.Message);
                 try { port.DiscardInBuffer(); } catch { }
                 return 0;
             }
@@ -159,7 +162,11 @@ namespace WindowsFormsApplication1
             return withCrc[len - 2] == frame[len - 2] && withCrc[len - 1] == frame[len - 1];
         }
         // ch:R42 CRC 失败日志 10s 限流：坏线况下每次收包都可能失败，避免日志被刷爆
-        private static int _lastCrcFailLogTick = 0;
+        // ch:v1.3.54 P2-2 改实例字段（本类仅 Form3 一处 new Modbus()，原 static 说法"四实例共享"不准确——FormModbus/RTU 走 HSL 的 ModbusTcpNet/ModbusRtu，Omron 走 MelsecFins，均非本类）；
+        //   且 CRC 与帧不匹配各用独立时间戳，不再互相压制。
+        private int _lastCrcFailLogTick = 0;
+        private int _lastFrameMismatchLogTick = 0;
+        private int _lastReadTimeoutLogTick = 0;
         private void LogCrcFailThrottled(byte station)
         {
             int now = Environment.TickCount;
@@ -168,16 +175,25 @@ namespace WindowsFormsApplication1
             _lastCrcFailLogTick = now;
             MsgErroeLog.WriteLog("Modbus 响应 CRC 校验失败(站号" + station.ToString("X2") + ")：帧已丢弃，继续等待下一帧");
         }
-        // ch:R43 帧不匹配日志（站号/功能码/长度），与 CRC 日志共用 10s 限流
+        // ch:R43 帧不匹配日志（站号/功能码/长度），v1.3.54 起独立 10s 限流窗口
         private void LogFrameMismatchThrottled(byte station, int len, byte func, string reason)
         {
             int now = Environment.TickCount;
-            if (unchecked(now - _lastCrcFailLogTick) < 10000)
+            if (unchecked(now - _lastFrameMismatchLogTick) < 10000)
                 return;
-            _lastCrcFailLogTick = now;
+            _lastFrameMismatchLogTick = now;
             MsgErroeLog.WriteLog("Modbus 响应帧不匹配(期望站号0x" + station.ToString("X2")
                 + " len=" + len + " func=0x" + func.ToString("X2") + " 原因=" + reason
                 + ")：该帧已完整消费，剩余字节保留给下次事务");
+        }
+        // ch:v1.3.54 P2-2 无响应/半帧超时日志（原来静默返回 0，调用方"详见 Modbus 日志"却无对应记录）
+        private void LogReadTimeoutThrottled(byte station, string reason)
+        {
+            int now = Environment.TickCount;
+            if (unchecked(now - _lastReadTimeoutLogTick) < 10000)
+                return;
+            _lastReadTimeoutLogTick = now;
+            MsgErroeLog.WriteLog("Modbus 读响应失败(站号0x" + station.ToString("X2") + " " + reason + ")：本事务无有效回执");
         }
 
         /// <summary>

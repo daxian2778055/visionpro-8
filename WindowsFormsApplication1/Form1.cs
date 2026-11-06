@@ -4745,11 +4745,15 @@ namespace WindowsFormsApplication1
                                                         writeRet = 1;
                                                     if (writeRet == 0)
                                                     {
+                                                        // ch:v1.3.54 P2-2 每相机独立 5s 限流（原单 int 共用，相机1失败会压掉相机2~8）
+                                                        int camIdx = 0;
+                                                        int.TryParse(myjob.path_number, out camIdx);
+                                                        if (camIdx < 1) camIdx = 1; if (camIdx > 8) camIdx = 8;
                                                         int nowMs = Environment.TickCount;
-                                                        if (unchecked(nowMs - _fcWriteFailLogMs) >= 5000)
+                                                        if (unchecked(nowMs - _fcWriteFailLogMs[camIdx]) >= 5000)
                                                         {
-                                                            _fcWriteFailLogMs = nowMs;
-                                                            MsgErroeLog.WriteLog("串口写回失败(无响应/校验未过，详见 Modbus 日志)：相机" + myjob.path_number + " 功能码=" + frm3.gongnengma + " addr=" + (add_temp + i * jinzhi).ToString() + " 本帧该寄存器未输出");
+                                                            _fcWriteFailLogMs[camIdx] = nowMs;
+                                                            MsgErroeLog.WriteLog("串口写回失败(无响应/校验未过)：相机" + myjob.path_number + " 功能码=" + frm3.gongnengma + " addr=" + (add_temp + i * jinzhi).ToString() + " 本帧该寄存器未输出");
                                                         }
                                                     }
                                                     // ch:后台 Task 写 frm3 控件，转 UI 线程
@@ -9461,7 +9465,7 @@ namespace WindowsFormsApplication1
         //   配置层同时由 SchemeSwitchConfig 拒绝多通道同时启用 cam10（勾选时检查）。
         private readonly Cam10ChangeTracker _cam10Tracker = new Cam10ChangeTracker();
         private int _lastSwitchAbortMsgMs = 0; // ch:R46 排空中止弹窗限流（重试不再每次弹窗）
-        private int _fcWriteFailLogMs = 0; // ch:v1.3.53 P2-2 串口写回失败日志限流（每 5s 一条，避免每寄存器每帧刷屏）
+        private int[] _fcWriteFailLogMs = new int[9]; // ch:v1.3.54 P2-2 串口写回失败日志每相机独立 5s 限流（索引 1..8）
         private int _detectingCount = 0; // ch:正在执行 block.Run 的检测帧数（参考正常版本，切换方案排空等待用，Interlocked 操作）
         private int _lastDropLogMs = 0; // ch:回调丢帧限频日志时间戳（防呆，避免静默丢帧无法排查）
 

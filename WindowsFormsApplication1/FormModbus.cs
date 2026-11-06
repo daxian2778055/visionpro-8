@@ -3403,6 +3403,14 @@ namespace WindowsFormsApplication1
                     MessageBox.Show("载图触发串重复，无法确定切换目标：" + dupMsg + "\r\n\r\n请修改重复的载图串后再保存。", "载图串冲突", MessageBoxButtons.OK, MessageBoxIcon.Warning);
                     return;
                 }
+                // ch:v1.3.54 P1 前缀冲突拒绝（"1"/"12" 分包误切）
+                string prefixMsg = SchemeStore.FindPrefixConflicts(schemeRows, null);
+                if (prefixMsg != null)
+                {
+                    MsgErroeLog.WriteLog("载图串前缀冲突拒绝保存:" + prefixMsg);
+                    MessageBox.Show("载图串存在前缀关系，分包时会误切方案：" + prefixMsg + "\r\n\r\n请改用互不为前缀的载图串后再保存。", "载图串前缀冲突", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                    return;
+                }
                 _schemes.SetRows(schemeRows);
                 // ch:R13-3 四窗体统一"先写 1..N 行、最后写 count"：半程断电时旧 count 仍生效，
                 //   扩容的新行不会读到写了一半的脏值；超出新 count 的旧键留在 ini 但读取端按 count 截断，不会被复活。

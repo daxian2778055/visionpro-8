@@ -2227,6 +2227,13 @@ namespace WindowsFormsApplication1
                     MessageBox.Show("载图触发串重复，无法确定切换目标：" + dupMsg + "\r\n\r\n请修改重复的载图串后再保存。", "载图串冲突", MessageBoxButtons.OK, MessageBoxIcon.Warning);
                     return;
                 }
+                string prefixMsg = SchemeStore.FindPrefixConflicts(schemeRows, null); // ch:v1.3.54 P1 前缀冲突拒绝
+                if (prefixMsg != null)
+                {
+                    MsgErroeLog.WriteLog("载图串前缀冲突拒绝保存:" + prefixMsg);
+                    MessageBox.Show("载图串存在前缀关系，分包时会误切方案：" + prefixMsg + "\r\n\r\n请改用互不为前缀的载图串后再保存。", "载图串前缀冲突", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                    return;
+                }
                 _schemes.SetRows(schemeRows);
                 // ch:R13-3 统一"先写 1..N 行、最后写 count"（半程断电时旧 count 生效，超新 count 的旧键不会被读到）
                 for (int i = 0; i < schemeRows.Count; i++)
