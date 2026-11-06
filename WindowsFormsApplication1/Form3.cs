@@ -1292,7 +1292,6 @@ namespace WindowsFormsApplication1
             {
                 // ch:置位退出标志，接收线程本轮结束后自然退出；不再使用已废弃的 Thread.Abort（易致句柄未释放/状态不一致）
                 bAccpet = false;
-                _serialFrameAssembler.Reset(); // ch:v1.3.49 P2-11 丢弃半截组帧缓冲，重新开始接收时从头组帧
                 try
                 {
                     if (getRecevice != null && getRecevice.IsAlive)
@@ -1303,6 +1302,7 @@ namespace WindowsFormsApplication1
                     }
                 }
                 catch (Exception ex) { MsgErroeLog.WriteLog("异常:" + ex.Message); }
+                _serialFrameAssembler.Reset(); // ch:v1.3.51 ② Join 之后再清缓冲：原先 Reset 时已排队的 AcceptData 可能再追加半帧（下次启动也会 Reset，无持久影响，仅收紧时序）
                 btnReceive.Text = "接收数据";
             }
         }
@@ -1662,6 +1662,8 @@ namespace WindowsFormsApplication1
             }
             catch (Exception ex)
             {
+                // ch:v1.3.51 ⑥ 决策注释：不回滚 _schemes——store 与界面本就"编辑即时生效"（面板 TextChanged 已实时同步），
+                //   回滚反而造成"界面显示 A、内存表 B"的三方不一致；ini 半写以"重新保存"收敛（下方提示已引导）。
                 MsgErroeLog.WriteLog("串口/方案配置保存失败:" + ex);
                 MessageBox.Show("配置未完整保存：" + ex.Message + "\r\n\r\n部分键可能已写入，请确认 test.ini 未被占用/只读后重新保存。",
                     "保存失败", MessageBoxButtons.OK, MessageBoxIcon.Warning);

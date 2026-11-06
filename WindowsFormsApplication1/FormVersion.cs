@@ -10,13 +10,14 @@ namespace WindowsFormsApplication1
     public partial class FormVersion : Form
     {
         // 当前版本（与推送仓库的 git tag 一一对应）：语义化版本 + 发布日期
-        public const string AppVersion = "1.3.50";
+        public const string AppVersion = "1.3.51";
         public const string AppVersionDate = "2026-11-04";
         public const string AppRepoName = "正泰 VP八相机连续海康（M4 - 加密）";
 
         // 版本时间线：与仓库 git tag 一一对应（新版本在最前）
         private static readonly string[] VersionTimeline = new string[] 
         {
+            "v1.3.51  2026-11-04  第18轮(朋友复核6条落实)：①P2-13 补全——「最近5次记录」8 路统一并入统计 Task 的一次 BeginInvoke，在 UI 线程先读满旧值再移位写入(原 1~6 路仍在池线程直读 Items/CheckState，读到前帧排队前的旧值、未来 Clear 会越界；原 7/8 路数组快照为 Clone 后逐格写，相邻帧 Task 并发互相覆盖)；删除 _statRecordsCam7/8 数组，每帧 UI 消息由 5 条降为 1 条；②串口组帧时序——停接收时 Reset 移到 Join 之后再清，避免已排队 AcceptData 在 Reset 后追加半帧；③jieshouZifu 清值移到 CAS 成功之后——背压丢弃帧不再改写仍在排队的旧任务共享字段(补 v1.3.48「不被后帧覆盖」的收尾)；④存图后台化兜底——AllocHGlobal/Task 调度失败均释放每相机忙位与拷贝，新增 _saveBmpCamBusy 每相机忙位防重复点击内存尖峰(5MP 一帧拷贝约120MB)；⑤FC10 拒绝日志 5s 限流 + 调用方(Form1 mode4 串口寄存器写回)留「本帧该寄存器未输出」上下文；⑥修正 P1-8 注释表述(读侧 getrecord 初判在锁外，NRE 由内层 catch 记故障帧)、Form3 保存失败不回滚 store 的决策注释(回滚会造成界面/内存/ini 三方不一致)。构建 0 error、单测 78/78。",
             "v1.3.50  2026-11-04  第17轮补漏(P2-10 同类遗漏)：FormModbus 补 finsDicLock——①UI 线程三处增删(Load 319/清除 1296/手动新增 1398)全部入锁；②检测线程 xie() 入口取锁内 Dictionary 快照，改为遍历快照，消除 UI 增删与写回 foreach 并发导致的「集合已修改」整轮丢弃；③极速写 XieWuWriteOne 的通道查表改为锁内完成（逐帧调用，不额外分配字典）；④GetCamOutFormat 的 TryGetValue 入锁，覆盖可能来自检测线程的覆盖层格式解析。至此 FormModbus/Omron/RTU 三窗 fins_dic 跨线程访问口径一致。构建 0 error、单测 78/78。",
             "v1.3.49  2026-11-04  第17轮(待修7条收口)：①新1 装载失败清 job/block 的可见性——新增 ClearJobBlockSafe，8 路失败分支与 JobCount 不足分支统一在 blockLock 内清空 job/block，写侧不再绕过读侧锁的内存栅栏；②P2-12 回调登记顺序——ImageCallBack 先取 nIndex、置 perfIdx、Interlocked.Increment(_cbActive) 再判 closing/切换，关闭路径读到 0 的窗口消除，判定不过由 finally 统一递减；③P2-9 四窗体保存异常保护——FormModbus/FormOmron/FormModbusRtu/Form3 的保存按钮整体 try/catch，失败记日志并提示「配置未完整保存」，不再半程写入后弹裸异常框；④P2-10 Omron/RTU 轮询 fins_dic 并发——新增 finsDicLock，所有 Clear/Add 入锁，轮询线程每轮取 Dictionary 快照，检测线程写回(xie/xie_wu)同用快照，消除「集合已修改」整轮丢通道；⑤P2-13 统计 Task 直读 UI——相机7/8「最近5次记录」改由 setbox12/13 维护 _statRecordsCam7/8 数组，统计 Task 只读锁内快照，不再回读 listBox18/17.Items；⑥P2-14 bnSaveBmp 持锁跑 SDK——锁内仅拷贝帧到 HGlobal，MV_CC_SaveImageToFile_NET 移后台并持 _cameraLocks 与关相机互斥，finally 释放拷贝，取流回调不再被磁盘 IO 拖住；⑦P2-11 串口无组帧——AcceptData 改 BytesToRead+Read(byte[]) 按字节读，统一喂 ProtoFrameAssembler 组帧后逐帧 qiehuan/getData（与 TCP 两路一致），接收启停/关闭时 Reset 半帧缓冲。构建 0 error、单测 78/78。",
             "v1.3.48  2026-11-04  第16轮(全量复查修复)：①P1 检测队列静默丢帧——DetectWorkerLoop 由「读槽→置null→置忙」改为 Interlocked.Exchange 原子取任务，回调登记改为 CompareExchange(null→job)；槽位已有待检任务时本帧按背压丢弃并释放 Bitmap 槽位，避免新任务被随后的置 null 抹掉（同时保证 job.jieshouZifu 不被后帧覆盖）；②P1-8 trriger_set——新增 ReadBlockInputStringSafe，8 路相机 triggermode 读取统一持 blockLock，消除与检测线程 block.Run 的 Inputs 并发竞争，并去掉同一输入重复读取；③P2-2 授权检查——daoqi_jiankong 线程池内的 MessageBox 改 ShowAlertFromBackground（UI 线程直弹、后台 BeginInvoke、句柄未建退化为日志），Form1_Load 两处授权异常提示同步接入；④P2-5 ClassIni——移除在 GC 线程做 P/Invoke 文件 IO 的终结器，UpdateFile 保留显式调用；⑤P2-6 Modbus FC10——数据区字节数非正偶数时显式拒绝并记日志，不再静默丢尾字节；⑥P2-7 Frm2.start 改 volatile。构建 0 error、单测 78/78。",

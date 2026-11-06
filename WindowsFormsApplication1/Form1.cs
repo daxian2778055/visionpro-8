@@ -4735,7 +4735,12 @@ namespace WindowsFormsApplication1
                                                     if (frm3.gongnengma == "06")
                                                         frm3.mdcan.WriteRegister(1, (ushort)(add_temp + i * jinzhi), indata, out a);
                                                     else if (frm3.gongnengma == "10")
-                                                        frm3.mdcan.WriteRegisters(1, (ushort)(add_temp + i * jinzhi), tempdata, out a);
+                                                    {
+                                                        // ch:v1.3.51 ⑥ 调用方留"本帧未输出"上下文：WriteRegisters 返回 0=数据字节数非法被拒
+                                                        //   （内部限流日志只说"拒绝"，不报是哪路相机/本帧没写出去）
+                                                        if (frm3.mdcan.WriteRegisters(1, (ushort)(add_temp + i * jinzhi), tempdata, out a) == 0)
+                                                            MsgErroeLog.WriteLog("FC10 写回被拒(字节数非正偶数)：相机" + myjob.path_number + " 本帧该寄存器未输出 addr=" + (add_temp + i * jinzhi).ToString());
+                                                    }
                                                     // ch:后台 Task 写 frm3 控件，转 UI 线程
                                                     if (frm3.InvokeRequired)
                                                         frm3.BeginInvoke(new Action(() => frm3.texSend.Text = a));
@@ -4976,101 +4981,19 @@ namespace WindowsFormsApplication1
                                             if (myjob.trrigerEn == true || myjob.triggerMode == "通讯触发")
                                             {
                                                 #region 最近5次记录
-                                                switch (myjob.path_number)
+                                                // ch:v1.3.51 P2-13 8 路统一：整段并入一次 BeginInvoke，在 UI 线程读控件+写控件。
+                                                //   原 1~6 路在池线程直读 Items/CheckState（可能读到前帧排队写入前的旧值，未来若 Clear 还会越界）；
+                                                //   原 7/8 路数组快照为"Clone 后逐格写"，相邻帧 Task 并发会互相覆盖（非原子移位）。
+                                                //   合并后每帧 UI 消息从 5 条降为 1 条，后台不再触碰控件集合。
                                                 {
-                                                    case "1":
-
-                                                        if (checkBox7.CheckState == CheckState.Checked)
-                                                        {
-                                                         
-                                                            setbox5(listBox1.Items[3].ToString(), 4);
-                                                            setbox5(listBox1.Items[2].ToString(), 3);
-                                                            setbox5(listBox1.Items[1].ToString(), 2);
-                                                            setbox5(listBox1.Items[0].ToString(), 1);
-                                                            setbox5(temptime + ":" + cuowu1 + ":" + jobnumber, 0);
-                                                        }
-                                                        break;
-                                                    case "2":
-                                                        if (checkBox6.CheckState == CheckState.Checked)
-                                                        {
-                                                            setbox6(listBox3.Items[3].ToString(), 4);
-                                                            setbox6(listBox3.Items[2].ToString(), 3);
-                                                            setbox6(listBox3.Items[1].ToString(), 2);
-                                                            setbox6(listBox3.Items[0].ToString(), 1);
-                                                            setbox6(temptime + ":" + cuowu1 + ":" + jobnumber, 0);
-                                                        }
-                                                        break;
-                                                    case "3":
-                                                        if (checkBox14.CheckState == CheckState.Checked)
-                                                        {
-                                                            setbox7(listBox7.Items[3].ToString(), 4);
-                                                            setbox7(listBox7.Items[2].ToString(), 3);
-                                                            setbox7(listBox7.Items[1].ToString(), 2);
-                                                            setbox7(listBox7.Items[0].ToString(), 1);
-                                                            setbox7(temptime + ":" + cuowu1 + ":" + jobnumber, 0);
-                                                        }
-                                                        break;
-                                                    case "4":
-
-                                                        if (checkBox12.CheckState == CheckState.Checked)
-                                                        {
-                                                            setbox8(listBox6.Items[3].ToString(), 4);
-                                                            setbox8(listBox6.Items[2].ToString(), 3);
-                                                            setbox8(listBox6.Items[1].ToString(), 2);
-                                                            setbox8(listBox6.Items[0].ToString(), 1);
-                                                            setbox8(temptime + ":" + cuowu1 + ":" + jobnumber, 0);
-                                                        }
-
-                                                        break;
-                                                    case "5":
-                                                        if (checkBox35.CheckState == CheckState.Checked)
-                                                        {
-                                                            setbox10(listBox14.Items[3].ToString(), 4);
-                                                            setbox10(listBox14.Items[2].ToString(), 3);
-                                                            setbox10(listBox14.Items[1].ToString(), 2);
-                                                            setbox10(listBox14.Items[0].ToString(), 1);
-                                                            setbox10(temptime + ":" + cuowu1 + ":" + jobnumber, 0);
-                                                        }
-
-                                                        break;
-                                                    case "6":
-
-                                                        if (checkBox41.CheckState == CheckState.Checked)
-                                                        {
-                                                            setbox11(listBox15.Items[3].ToString(), 4);
-                                                            setbox11(listBox15.Items[2].ToString(), 3);
-                                                            setbox11(listBox15.Items[1].ToString(), 2);
-                                                            setbox11(listBox15.Items[0].ToString(), 1);
-                                                            setbox11(temptime + ":" + cuowu1 + ":" + jobnumber, 0);
-                                                        }
-
-                                                        break;
-                                                    case "7":
-
-                                                        if (checkBox55.CheckState == CheckState.Checked)
-                                                        {
-                                                            string[] recent7 = SnapshotStatRecords(_statRecordsCam7);
-                                                            setbox12(recent7[3], 4);
-                                                            setbox12(recent7[2], 3);
-                                                            setbox12(recent7[1], 2);
-                                                            setbox12(recent7[0], 1);
-                                                            setbox12(temptime + ":" + cuowu1 + ":" + jobnumber, 0);
-                                                        }
-
-                                                        break;
-                                                    case "8":
-
-                                                        if (checkBox53.CheckState == CheckState.Checked)
-                                                        {
-                                                            string[] recent8 = SnapshotStatRecords(_statRecordsCam8);
-                                                            setbox13(recent8[3], 4);
-                                                            setbox13(recent8[2], 3);
-                                                            setbox13(recent8[1], 2);
-                                                            setbox13(recent8[0], 1);
-                                                            setbox13(temptime + ":" + cuowu1 + ":" + jobnumber, 0);
-                                                        }
-
-                                                        break;
+                                                    string statPath = myjob.path_number;
+                                                    string statRec = temptime + ":" + cuowu1 + ":" + jobnumber;
+                                                    try
+                                                    {
+                                                        if (IsHandleCreated)
+                                                            BeginInvoke(new Action(() => UpdateRecentRecords(statPath, statRec)));
+                                                    }
+                                                    catch (Exception ex) { MsgErroeLog.WriteLog("最近5次记录投递失败:" + ex.Message); }
                                                 }
                                                 #endregion
                                                 #region 界面表格统计
@@ -6617,22 +6540,31 @@ namespace WindowsFormsApplication1
                     listBox15.Items[bb] = aa;
             }
         }
-        // ch:v1.3.49 P2-13 相机7/8"最近5次记录"快照：原统计 Task 在纯线程池线程直读 listBox18/17.Items，
-        //   UI 线程并发重置/清理时可能读到短列表 -> ArgumentOutOfRange，异常被 Task 外层 catch 吞掉导致当帧统计行丢失。
-        //   现由 setbox12/13 同步维护字符串数组，统计 Task 只读数组快照，不再回读控件集合。
-        private readonly object _statRecordsLock = new object();
-        private readonly string[] _statRecordsCam7 = new string[5] { "record", "record", "record", "record", "record" };
-        private readonly string[] _statRecordsCam8 = new string[5] { "record", "record", "record", "record", "record" };
-        private string[] SnapshotStatRecords(string[] source)
+        // ch:v1.3.51 P2-13 原 _statRecordsCam7/8 数组快照为"Clone 后逐格写"的非原子移位，且 1~6 路仍后台读控件；
+        //   现 8 路统一：统计 Task 一次 BeginInvoke，在 UI 线程先读满旧值再移位写入（单线程无竞态，越界有守卫）。
+        private static string StatItemAt(ListBox lb, int idx)
         {
-            lock (_statRecordsLock) { return (string[])source.Clone(); }
+            if (lb == null || idx < 0 || idx >= lb.Items.Count) return "record";
+            object it = lb.Items[idx];
+            return it == null ? "record" : it.ToString();
+        }
+        private void UpdateRecentRecords(string pth, string rec)
+        {
+            ListBox lb; CheckBox cb;
+            switch (pth)
+            {
+                case "1": cb = checkBox7; lb = listBox1; if (cb.CheckState == CheckState.Checked) { string v3 = StatItemAt(lb, 3), v2 = StatItemAt(lb, 2), v1 = StatItemAt(lb, 1), v0 = StatItemAt(lb, 0); setbox5(v3, 4); setbox5(v2, 3); setbox5(v1, 2); setbox5(v0, 1); setbox5(rec, 0); } break;
+                case "2": cb = checkBox6; lb = listBox3; if (cb.CheckState == CheckState.Checked) { string v3 = StatItemAt(lb, 3), v2 = StatItemAt(lb, 2), v1 = StatItemAt(lb, 1), v0 = StatItemAt(lb, 0); setbox6(v3, 4); setbox6(v2, 3); setbox6(v1, 2); setbox6(v0, 1); setbox6(rec, 0); } break;
+                case "3": cb = checkBox14; lb = listBox7; if (cb.CheckState == CheckState.Checked) { string v3 = StatItemAt(lb, 3), v2 = StatItemAt(lb, 2), v1 = StatItemAt(lb, 1), v0 = StatItemAt(lb, 0); setbox7(v3, 4); setbox7(v2, 3); setbox7(v1, 2); setbox7(v0, 1); setbox7(rec, 0); } break;
+                case "4": cb = checkBox12; lb = listBox6; if (cb.CheckState == CheckState.Checked) { string v3 = StatItemAt(lb, 3), v2 = StatItemAt(lb, 2), v1 = StatItemAt(lb, 1), v0 = StatItemAt(lb, 0); setbox8(v3, 4); setbox8(v2, 3); setbox8(v1, 2); setbox8(v0, 1); setbox8(rec, 0); } break;
+                case "5": cb = checkBox35; lb = listBox14; if (cb.CheckState == CheckState.Checked) { string v3 = StatItemAt(lb, 3), v2 = StatItemAt(lb, 2), v1 = StatItemAt(lb, 1), v0 = StatItemAt(lb, 0); setbox10(v3, 4); setbox10(v2, 3); setbox10(v1, 2); setbox10(v0, 1); setbox10(rec, 0); } break;
+                case "6": cb = checkBox41; lb = listBox15; if (cb.CheckState == CheckState.Checked) { string v3 = StatItemAt(lb, 3), v2 = StatItemAt(lb, 2), v1 = StatItemAt(lb, 1), v0 = StatItemAt(lb, 0); setbox11(v3, 4); setbox11(v2, 3); setbox11(v1, 2); setbox11(v0, 1); setbox11(rec, 0); } break;
+                case "7": cb = checkBox55; lb = listBox18; if (cb.CheckState == CheckState.Checked) { string v3 = StatItemAt(lb, 3), v2 = StatItemAt(lb, 2), v1 = StatItemAt(lb, 1), v0 = StatItemAt(lb, 0); setbox12(v3, 4); setbox12(v2, 3); setbox12(v1, 2); setbox12(v0, 1); setbox12(rec, 0); } break;
+                case "8": cb = checkBox53; lb = listBox17; if (cb.CheckState == CheckState.Checked) { string v3 = StatItemAt(lb, 3), v2 = StatItemAt(lb, 2), v1 = StatItemAt(lb, 1), v0 = StatItemAt(lb, 0); setbox13(v3, 4); setbox13(v2, 3); setbox13(v1, 2); setbox13(v0, 1); setbox13(rec, 0); } break;
+            }
         }
         private void setbox12(string aa, int bb)
         {
-            if (bb >= 0 && bb < _statRecordsCam7.Length)
-            {
-                lock (_statRecordsLock) { _statRecordsCam7[bb] = aa; }
-            }
             if (listBox18.InvokeRequired)
             {
                 ltbox12 l5 = setbox12;
@@ -6647,10 +6579,6 @@ namespace WindowsFormsApplication1
         }
         private void setbox13(string aa, int bb)
         {
-            if (bb >= 0 && bb < _statRecordsCam8.Length)
-            {
-                lock (_statRecordsLock) { _statRecordsCam8[bb] = aa; }
-            }
             if (listBox17.InvokeRequired)
             {
                 ltbox13 l5 = setbox13;
@@ -12802,16 +12730,18 @@ namespace WindowsFormsApplication1
                     }
                     if (job != null)
                     {
-                        job.jieshouZifu = "null";
                         // ch:P0-① 只登记待检并通知工作线程，检测不再占用 SDK 取流线程
                         // ch:R48 P1-1 仅当槽位为空时才登记：若工作线程尚未取走上一任务，
                         //   直接赋值会覆盖待检任务；CAS 失败说明已有任务在排队，本帧按背压丢弃并释放槽位。
+                        // ch:v1.3.51 ④ jieshouZifu 移到 CAS 成功之后：背压丢弃帧不得改写仍在排队的旧任务共享字段
+                        //   （v1.3.48 版本说明"保证不被后帧覆盖"的收尾）
                         if (System.Threading.Interlocked.CompareExchange(ref _pendingDetectJob[nIndex], job, null) != null)
                         {
                             _perfDrop[nIndex]++;
                             ReleaseBmpSlotNow(nIndex);
                             return;
                         }
+                        job.jieshouZifu = "null";
                         try { _detectSignal[nIndex].Set(); }
                         catch (Exception ex) { MsgErroeLog.WriteLog("检测通知异常:" + ex.Message); }
                     }
@@ -13800,6 +13730,7 @@ namespace WindowsFormsApplication1
         }
 
         // ch:点击保存图片按钮 | en:Click on Save Image Button
+        private readonly int[] _saveBmpCamBusy = new int[8]; // ch:v1.3.51 ⑤ 每相机同一时刻只允许一个后台保存任务（5MP 彩色一帧拷贝约 120MB，防重复点击内存尖峰）
         private void bnSaveBmp_Click(object sender, EventArgs e)
         {
             for (int i = 0; i < 8; ++i)
@@ -13808,65 +13739,101 @@ namespace WindowsFormsApplication1
                 //   或把 A 相机的缓冲存成 B 相机文件。改为固定 8 槽位并逐槽判空/判缓冲。
                 if (m_MyCamera[i] == null)
                     continue;
-                MyCamera.MV_SAVE_IMG_TO_FILE_PARAM stSaveParam = new MyCamera.MV_SAVE_IMG_TO_FILE_PARAM();
-                int camIndex = i;
-                MyCamera cam = m_MyCamera[i];
-                IntPtr frameCopy = IntPtr.Zero;
-                // ch:v1.3.49 P2-14 原实现 UI 线程持 m_BufForSaveImageLock[i] 同步调 MV_CC_SaveImageToFile_NET：
-                //   磁盘 IO 期间取流回调取同一把锁 → 取图排队/丢帧，UI 也卡住。改为锁内只做像素拷贝 + 参数快照，
-                //   文件写入移到后台线程；拷贝保证保存期间原缓冲被新帧覆写也不影响输出。
-                lock (m_BufForSaveImageLock[i])
+                if (System.Threading.Interlocked.CompareExchange(ref _saveBmpCamBusy[i], 1, 0) != 0)
                 {
-                    if (m_pSaveImageBuf[i] == IntPtr.Zero || m_stFrameInfo[i].nFrameLen == 0 || m_stFrameInfo[i].nWidth == 0 || m_stFrameInfo[i].nHeight == 0)
-                    {
-                        MsgErroeLog.WriteLog("保存图片跳过：相机" + (i + 1) + " 无有效帧缓冲");
-                        continue;
-                    }
-                    int dataLen = (int)m_stFrameInfo[i].nFrameLen;
-                    frameCopy = Marshal.AllocHGlobal(dataLen);
-                    CopyMemory(frameCopy, m_pSaveImageBuf[i], (uint)dataLen); // 拷贝到独立缓冲，锁外/后台保存不受覆写影响
-                    stSaveParam.enImageType = MyCamera.MV_SAVE_IAMGE_TYPE.MV_Image_Bmp;
-                    stSaveParam.enPixelType = m_stFrameInfo[i].enPixelType;
-                    stSaveParam.pData = frameCopy;
-                    stSaveParam.nDataLen = m_stFrameInfo[i].nFrameLen;
-                    stSaveParam.nHeight = m_stFrameInfo[i].nHeight;
-                    stSaveParam.nWidth = m_stFrameInfo[i].nWidth;
-                    // ch:R43 P2-6 文件名加时间戳：原仅用帧号，跨天/重启后同帧号直接覆盖旧图
-                    stSaveParam.pImagePath = "Dev" + (i + 1).ToString() + "_" + DateTime.Now.ToString("yyyyMMdd_HHmmss_fff")
-                        + "_w" + stSaveParam.nWidth.ToString() + "_h" + stSaveParam.nHeight.ToString() + "_fn" + m_stFrameInfo[i].nFrameNum.ToString() + ".bmp";
-                }
-                if (frameCopy == IntPtr.Zero)
+                    MsgErroeLog.WriteLog("保存图片跳过：相机" + (i + 1) + " 上一轮后台保存未完成");
                     continue;
-                MyCamera.MV_SAVE_IMG_TO_FILE_PARAM param = stSaveParam;
-                string savedPath = stSaveParam.pImagePath;
-                Task.Run(() =>
+                }
+                IntPtr frameCopy = IntPtr.Zero;
+                bool queued = false;
+                int camIndex = i;
+                try
                 {
-                    try
+                    MyCamera.MV_SAVE_IMG_TO_FILE_PARAM stSaveParam = new MyCamera.MV_SAVE_IMG_TO_FILE_PARAM();
+                    MyCamera cam = m_MyCamera[i];
+                    // ch:v1.3.49 P2-14 原实现 UI 线程持 m_BufForSaveImageLock[i] 同步调 MV_CC_SaveImageToFile_NET：
+                    //   磁盘 IO 期间取流回调取同一把锁 → 取图排队/丢帧，UI 也卡住。改为锁内只做像素拷贝 + 参数快照，
+                    //   文件写入移到后台线程；拷贝保证保存期间原缓冲被新帧覆写也不影响输出。
+                    lock (m_BufForSaveImageLock[i])
                     {
-                        // 与关闭相机/断线重连互斥：后台保存期间若 CloseDevice 销毁句柄，SDK 会操作已失效设备对象
-                        lock (_cameraLocks[camIndex])
+                        if (m_pSaveImageBuf[i] == IntPtr.Zero || m_stFrameInfo[i].nFrameLen == 0 || m_stFrameInfo[i].nWidth == 0 || m_stFrameInfo[i].nHeight == 0)
                         {
-                            if (m_MyCamera[camIndex] != cam) // 关闭置空或已重开成新对象：本次拷贝对应旧句柄，跳过
-                            {
-                                MsgErroeLog.WriteLog("保存图片跳过：相机" + (camIndex + 1) + " 句柄已变更/关闭");
-                                return;
-                            }
-                            MyCamera.MV_SAVE_IMG_TO_FILE_PARAM p = param;
-                            int nRet = cam.MV_CC_SaveImageToFile_NET(ref p);
-                            if (MyCamera.MV_OK != nRet)
-                                MsgErroeLog.WriteLog("保存图片失败 相机" + (camIndex + 1) + " nRet=0x" + nRet.ToString("X8") + " path=" + savedPath);
+                            MsgErroeLog.WriteLog("保存图片跳过：相机" + (i + 1) + " 无有效帧缓冲");
+                        }
+                        else
+                        {
+                            int dataLen = (int)m_stFrameInfo[i].nFrameLen;
+                            frameCopy = Marshal.AllocHGlobal(dataLen); // ch:v1.3.51 ⑤ OOM 由外层 catch 兜底并释放忙位
+                            CopyMemory(frameCopy, m_pSaveImageBuf[i], (uint)dataLen); // 拷贝到独立缓冲，锁外/后台保存不受覆写影响
+                            stSaveParam.enImageType = MyCamera.MV_SAVE_IAMGE_TYPE.MV_Image_Bmp;
+                            stSaveParam.enPixelType = m_stFrameInfo[i].enPixelType;
+                            stSaveParam.pData = frameCopy;
+                            stSaveParam.nDataLen = m_stFrameInfo[i].nFrameLen;
+                            stSaveParam.nHeight = m_stFrameInfo[i].nHeight;
+                            stSaveParam.nWidth = m_stFrameInfo[i].nWidth;
+                            // ch:R43 P2-6 文件名加时间戳：原仅用帧号，跨天/重启后同帧号直接覆盖旧图
+                            stSaveParam.pImagePath = "Dev" + (i + 1).ToString() + "_" + DateTime.Now.ToString("yyyyMMdd_HHmmss_fff")
+                                + "_w" + stSaveParam.nWidth.ToString() + "_h" + stSaveParam.nHeight.ToString() + "_fn" + m_stFrameInfo[i].nFrameNum.ToString() + ".bmp";
                         }
                     }
-                    catch (Exception ex)
+                    if (frameCopy == IntPtr.Zero)
+                        continue; // finally 释放忙位
+                    MyCamera.MV_SAVE_IMG_TO_FILE_PARAM param = stSaveParam;
+                    string savedPath = stSaveParam.pImagePath;
+                    try
                     {
-                        MsgErroeLog.WriteLog("保存图片异常 相机" + (camIndex + 1) + ":" + ex);
+                        Task.Run(() =>
+                        {
+                            try
+                            {
+                                // 与关闭相机/断线重连互斥：后台保存期间若 CloseDevice 销毁句柄，SDK 会操作已失效设备对象
+                                lock (_cameraLocks[camIndex])
+                                {
+                                    if (m_MyCamera[camIndex] != cam) // 关闭置空或已重开成新对象：本次拷贝对应旧句柄，跳过
+                                    {
+                                        MsgErroeLog.WriteLog("保存图片跳过：相机" + (camIndex + 1) + " 句柄已变更/关闭");
+                                        return;
+                                    }
+                                    MyCamera.MV_SAVE_IMG_TO_FILE_PARAM p = param;
+                                    int nRet = cam.MV_CC_SaveImageToFile_NET(ref p);
+                                    if (MyCamera.MV_OK != nRet)
+                                        MsgErroeLog.WriteLog("保存图片失败 相机" + (camIndex + 1) + " nRet=0x" + nRet.ToString("X8") + " path=" + savedPath);
+                                }
+                            }
+                            catch (Exception ex)
+                            {
+                                MsgErroeLog.WriteLog("保存图片异常 相机" + (camIndex + 1) + ":" + ex);
+                            }
+                            finally
+                            {
+                                if (frameCopy != IntPtr.Zero)
+                                    Marshal.FreeHGlobal(frameCopy); // 保底释放：成功/失败/异常三条路径都不泄漏
+                                System.Threading.Interlocked.Exchange(ref _saveBmpCamBusy[camIndex], 0);
+                            }
+                        });
+                        queued = true;
                     }
-                    finally
+                    catch (Exception exQ)
+                    {
+                        // ch:v1.3.51 ⑤ Task 调度失败（极少，线程池耗尽等）：内部 finally 不会执行，由这里释放
+                        MsgErroeLog.WriteLog("保存图片任务派发失败 相机" + (i + 1) + ":" + exQ.Message);
+                    }
+                }
+                catch (Exception ex)
+                {
+                    MsgErroeLog.WriteLog("保存图片缓冲分配失败 相机" + (i + 1) + ":" + ex.Message);
+                }
+                finally
+                {
+                    if (!queued)
                     {
                         if (frameCopy != IntPtr.Zero)
-                            Marshal.FreeHGlobal(frameCopy); // 保底释放：成功/失败/异常三条路径都不泄漏
+                        {
+                            try { Marshal.FreeHGlobal(frameCopy); } catch (Exception exF) { MsgErroeLog.WriteLog("保存图片缓冲释放失败:" + exF.Message); }
+                        }
+                        System.Threading.Interlocked.Exchange(ref _saveBmpCamBusy[camIndex], 0);
                     }
-                });
+                }
             }
         }
         private void checkBox4_CheckedChanged_1(object sender, EventArgs e)
@@ -15917,6 +15884,9 @@ namespace WindowsFormsApplication1
                 return job.block.Inputs[inputName].Value.ToString();
             }
         }
+        // ch:v1.3.51 ⑥ 修正表述：本方法保证的是"取值在锁内 + 锁内二次判空"；
+        //   另注意 getrecord 入口的 myjob.block != null 初判在锁外（竞争时 NRE 由内层 catch 记为故障帧，不会崩溃），
+        //   装载失败/JobCount 收敛的清空走 ClearJobBlockSafe（持 blockLock）。
         // ch:R48 ① 装载失败/JobCount 不足时清空 job/block 必须持 blockLock：
         //   读侧 getrecord/Run 在锁内，锁外裸置 null 绕过内存栅栏，理论上可让检测线程仍见旧非空 block 并对已 Shutdown 对象 Run。
         private static void ClearJobBlockSafe(Myjob job)
