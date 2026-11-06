@@ -45,9 +45,8 @@ namespace WindowsFormsApplication1
         bool bAccpet = false;
        // SerialPortmdcan.port = new SerialPort();
        public  Modbus mdcan = new Modbus();
-        // ch:v1.3.49 P2-11 串口组帧器与读缓冲：AcceptData 固定在 UI 线程执行（fun 循环 Invoke），
-        //   组帧器为 UI 线程独占，无需加锁；与 TCP 两路使用的 ProtoFrameAssembler 同一组件。
-        private readonly ProtoFrameAssembler _serialFrameAssembler = new ProtoFrameAssembler();
+        // ch:v1.3.52 串口读缓冲：AcceptData 固定在 UI 线程执行（fun 循环 Invoke），按字节读入后整串精确匹配。
+        //   原 v1.3.49 的串口组帧器(ProtoFrameAssembler)已移除——子串切分只适合 TCP，串口用整串精确匹配更稳。
         private readonly byte[] _serialReadBuffer = new byte[4096];
         public int modbus_qufan = 0;
         public static string strportName = "";
@@ -655,7 +654,6 @@ namespace WindowsFormsApplication1
         public void CloseResources()
         {
             try { bAccpet = false; } catch (Exception ex) { new ErrorLog().WriteLog(ex.ToString()); }
-            try { _serialFrameAssembler.Reset(); } catch (Exception ex) { new ErrorLog().WriteLog(ex.ToString()); } // ch:v1.3.49 P2-11 关闭时丢弃半截组帧缓冲
             try { if (mdcan != null && mdcan.port != null && mdcan.port.IsOpen) mdcan.port.Close(); } catch (Exception ex) { new ErrorLog().WriteLog(ex.ToString()); }
             // ch:R11-3 关闭/置空与 Send/重连同入 _clientSocketLock：原不加锁会在 Send 持锁进行中并发置空，违背本轮"串行化"不变量
             try { lock (_clientSocketLock) { if (socketClient != null) { socketClient.Close(); socketClient = null; } } } catch (Exception exInner) { new ErrorLog().WriteLog(exInner.ToString()); }
@@ -1279,7 +1277,6 @@ namespace WindowsFormsApplication1
                         return;
                     }
                     bAccpet = true;
-                    _serialFrameAssembler.Reset(); // ch:v1.3.49 P2-11 新接收会话从空缓冲开始，避免上次残留半帧拼错
                     getRecevice = new Thread(new ThreadStart(testdelegate));
                     getRecevice.IsBackground = true; // ch:防止主程序退出后进程残留
                     getRecevice.Start();
@@ -1302,7 +1299,6 @@ namespace WindowsFormsApplication1
                     }
                 }
                 catch (Exception ex) { MsgErroeLog.WriteLog("异常:" + ex.Message); }
-                _serialFrameAssembler.Reset(); // ch:v1.3.51 ② Join 之后再清缓冲：原先 Reset 时已排队的 AcceptData 可能再追加半帧（下次启动也会 Reset，无持久影响，仅收紧时序）
                 btnReceive.Text = "接收数据";
             }
         }
@@ -1338,10 +1334,10 @@ namespace WindowsFormsApplication1
                 try
                 {
                     int readCount;
-                    // ch:R43 P1-8 串口读与 Modbus 事务共用 PortLock：原 ReadExisting 无锁会偷走 PLC 响应字节
-                    // ch:v1.3.49 P2-11 改按字节读 + 组帧：原 ReadExisting 后整串等值匹配，驱动分块到达时
-                    //   方案串/触发串被拆成两半，两头都匹配不上 → 静默丢触发。现与 TCP 两路一致，
-                    //   先由 ProtoFrameAssembler 还原完整帧，再逐帧走 qiehuan/getData。
+                    // ch:R43 P1-8 串口读与 Modbus 事务共用 PortLock：原无锁读会偷走 PLC 响应字节
+                    // ch:v1.3.52 串口退回「整串精确匹配」：组帧器(子串切分)只用于 TCP——串口慢、点对点，短触发串
+                    //   几乎不会被拆包，组帧器在串口上收益近零，却可能把"帧头+触发串+帧尾"里的子串误判为触发。
+                    //   精确匹配是现场长期已知行为，零回归风险；Modbus RTU 走 mdcan 事务，本就与此无关。
                     lock (mdcan.PortLock)
                     {
                         if (mdcan.port == null || !mdcan.port.IsOpen)
@@ -1353,20 +1349,16 @@ namespace WindowsFormsApplication1
                     }
                     if (readCount <= 0)
                         return;
-                    List<byte[]> frames = _serialFrameAssembler.Append(_serialReadBuffer, readCount, BuildFramePatterns());
-                    foreach (byte[] frameBytes in frames)
+                    string strReceive = DecodeProtoBytes(_serialReadBuffer, readCount);
+                    if (jinzhi == 1)
+                        strReceive = strReceive.Replace('\0', '0');
+                    txtReceive.AppendText(strReceive);
+                    if (qiehuan_fangshi == "Serial")
                     {
-                        string frameText = DecodeProtoBytes(frameBytes, frameBytes.Length);
-                        if (jinzhi == 1)
-                            frameText = frameText.Replace('\0', '0');
-                        txtReceive.AppendText(frameText);
-                        if (qiehuan_fangshi == "Serial")
+                        if (qiehuan(strReceive) == 0)
                         {
-                            if (qiehuan(frameText) == 0)
-                            {
-                                SelectionChangedEventArgs E = new SelectionChangedEventArgs(frameText);
-                                getData(this, E);
-                            }
+                            SelectionChangedEventArgs E = new SelectionChangedEventArgs(strReceive);
+                            getData(this, E);
                         }
                     }
                 }
