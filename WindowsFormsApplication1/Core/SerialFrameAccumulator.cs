@@ -11,13 +11,11 @@ namespace WindowsFormsApplication1
     ///   - pending 以某已知串 P 开头（P 完整命中），但 pending 同时仍是某更长已知串 Q 的前缀（如 "12" 之于 "1"/"123"）
     ///     → 暂不产出（P 可能是 Q 的分包前半），直到等出 Q、或连续 PrefixWaitMaxPolls 轮无新字节才产出 P（短串 settle，代价约 200ms）；
     ///   - pending 是某更长已知串的真前缀（尚未凑齐任何完整串）→ 继续等（未凑齐前绝不产出，也就不解码，避开 GBK 半字）；
-    ///   - pending 既非任何串前缀、开头也无完整命中 → 未知数据，连续 IdleFlushPolls 轮无新字节后整段产出一帧（交 getData）。
-    ///   产出帧后从 pending 移除对应字节，循环处理（支持一次读入多帧）。超 MaxFrame 硬截断并整段产出。
-    /// </summary>
+    ///   - pending 既非任何串前缀、开头也无完整命中 → 不可能再成长为已知串，当前轮直接整段产出一帧
+    ///     （交 getData，恢复"未知报文逐读透传"的旧语义；前缀锚定下等待没有收益）。</summary>
     public sealed class SerialFrameAccumulator
     {
         public const int MaxFrame = 1024;
-        public const int IdleFlushPolls = 2;        // 未知数据：连续 2 轮无新字节即整段产出
         public const int PrefixWaitMaxPolls = 20;   // 前缀/短串 settle：连续 20 轮无新字节(≈200ms)后产出短串
 
         private readonly List<byte> _pending = new List<byte>();
@@ -98,13 +96,13 @@ namespace WindowsFormsApplication1
                 if (strictPrefix && _pending.Count < MaxFrame && _idlePolls < PrefixWaitMaxPolls)
                     break;
 
-                // 未知数据或 settle/溢出：整段产出一帧
-                if (_idlePolls >= IdleFlushPolls || _pending.Count >= MaxFrame || (strictPrefix && _idlePolls >= PrefixWaitMaxPolls))
-                {
-                    byte[] frame = _pending.ToArray();
-                    _pending.Clear();
-                    frames.Add(frame);
-                }
+                // ch:v1.3.56 R1 未知数据当前轮立即整段产出：头部已不可能再拼成任何已知串（不做子串切分），
+                //   继续等待只会把多段未知报文/监视文本攒成一批（连续流要攒到 MaxFrame 才吐），
+                //   使 getData/jieshou 与接收框失去"逐读透传"语义。此处仅剩三种情形：
+                //   非前缀未知 / 前缀 settle 超时 / 已达 MaxFrame，均应立即产出。
+                byte[] leftover = _pending.ToArray();
+                _pending.Clear();
+                frames.Add(leftover);
                 break;
             }
         }

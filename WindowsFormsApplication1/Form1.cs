@@ -122,6 +122,48 @@ namespace WindowsFormsApplication1
         //   ③ 任何路径不得在持有较大下标锁时再去取较小下标锁（全局唯一升序约定）；
         //   ④ 相机锁与图像缓冲锁（m_BufForSaveImageLock → _bmpLocks）之间无任何嵌套，互不交叉。
         private readonly object[] _cameraLocks = new object[] { new object(), new object(), new object(), new object(), new object(), new object(), new object(), new object() };
+        // ch:v1.3.56 R3 存图句柄门闩：后台 MV_CC_SaveImageToFile_NET 只持本锁（不再持 _cameraLocks），
+        //   BMP 编码/落盘期间不再阻塞该相机软触发/停止采集/断线重连；只在 Close/Destroy 时与存图互斥。
+        //   锁序：_cameraLocks[i] → _saveBmpGates[i]；存图线程只取后者，绝不反向嵌套。
+        private readonly object[] _saveBmpGates = new object[] { new object(), new object(), new object(), new object(), new object(), new object(), new object(), new object() };
+
+        // 本组辅助方法必须在持有/未持有相机锁的 Close/Destroy 调用点统一使用：
+        //   存图线程持 gate 调 SDK 期间，任何销毁句柄路径都会在此等待，避免 SDK 操作已释放句柄。
+        //   销毁后必须在锁内把字段置空：否则 gate 释放到字段赋值之间存在"字段仍指向已销毁对象"的窗口，
+        //   后台存图可能在该窗口内通过 m_MyCamera[i] == cam 检查并调用已释放句柄。
+        private int[] CloseAndDestroyCameraUnderSaveGate(int index, ref MyCamera cam)
+        {
+            int[] ret = new int[2];
+            if (index < 0 || index >= 8)
+                return ret;
+            lock (_saveBmpGates[index])
+            {
+                if (cam != null)
+                {
+                    try { ret[0] = cam.MV_CC_CloseDevice_NET(); }
+                    catch (Exception ex) { MsgErroeLog.WriteLog("CloseDevice 异常 相机" + (index + 1) + ":" + ex.Message); }
+                    try { ret[1] = cam.MV_CC_DestroyDevice_NET(); }
+                    catch (Exception ex) { MsgErroeLog.WriteLog("DestroyDevice 异常 相机" + (index + 1) + ":" + ex.Message); }
+                }
+                cam = null; // 锁内置空：保存线程取得 gate 时绝不会看到已销毁的旧引用
+            }
+            return ret;
+        }
+
+        private void DestroyCameraUnderSaveGate(int index, ref MyCamera cam)
+        {
+            if (index < 0 || index >= 8)
+                return;
+            lock (_saveBmpGates[index])
+            {
+                if (cam != null)
+                {
+                    try { cam.MV_CC_DestroyDevice_NET(); }
+                    catch (Exception ex) { MsgErroeLog.WriteLog("DestroyDevice 异常 相机" + (index + 1) + ":" + ex.Message); }
+                }
+                cam = null;
+            }
+        }
 
         private void LockAllCameras()
         {
@@ -6677,8 +6719,7 @@ namespace WindowsFormsApplication1
                                 try
                                 {
                                     StopGrabbingSafe(0);
-                                    m_MyCamera[0].MV_CC_CloseDevice_NET();
-                                    m_MyCamera[0].MV_CC_DestroyDevice_NET();
+                                    CloseAndDestroyCameraUnderSaveGate(0, ref m_MyCamera[0]);
                                 }
                                 catch (Exception ex) { MsgErroeLog.WriteLog("异常:" + ex.Message); }
                                 nRet = OpenDeviceWithRetry(ref m_MyCamera[0], ref device1[myjob1.index]);
@@ -6730,8 +6771,7 @@ namespace WindowsFormsApplication1
                                 try
                                 {
                                     StopGrabbingSafe(1);
-                                    m_MyCamera[1].MV_CC_CloseDevice_NET();
-                                    m_MyCamera[1].MV_CC_DestroyDevice_NET();
+                                    CloseAndDestroyCameraUnderSaveGate(1, ref m_MyCamera[1]);
                                 }
                                 catch (Exception ex) { MsgErroeLog.WriteLog("异常:" + ex.Message); }
                                 nRet = OpenDeviceWithRetry(ref m_MyCamera[1], ref device1[myjob2.index]);
@@ -6783,8 +6823,7 @@ namespace WindowsFormsApplication1
                                 try
                                 {
                                     StopGrabbingSafe(2);
-                                    m_MyCamera[2].MV_CC_CloseDevice_NET();
-                                    m_MyCamera[2].MV_CC_DestroyDevice_NET();
+                                    CloseAndDestroyCameraUnderSaveGate(2, ref m_MyCamera[2]);
                                 }
                                 catch (Exception ex) { MsgErroeLog.WriteLog("异常:" + ex.Message); }
                                 nRet = OpenDeviceWithRetry(ref m_MyCamera[2], ref device1[myjob3.index]);
@@ -6837,8 +6876,7 @@ namespace WindowsFormsApplication1
                                 try
                                 {
                                     StopGrabbingSafe(3);
-                                    m_MyCamera[3].MV_CC_CloseDevice_NET();
-                                    m_MyCamera[3].MV_CC_DestroyDevice_NET();
+                                    CloseAndDestroyCameraUnderSaveGate(3, ref m_MyCamera[3]);
                                 }
                                 catch (Exception ex) { MsgErroeLog.WriteLog("异常:" + ex.Message); }
                                 nRet = OpenDeviceWithRetry(ref m_MyCamera[3], ref device1[myjob4.index]);
@@ -6889,8 +6927,7 @@ namespace WindowsFormsApplication1
                                 try
                                 {
                                     StopGrabbingSafe(4);
-                                    m_MyCamera[4].MV_CC_CloseDevice_NET();
-                                    m_MyCamera[4].MV_CC_DestroyDevice_NET();
+                                    CloseAndDestroyCameraUnderSaveGate(4, ref m_MyCamera[4]);
                                 }
                                 catch (Exception ex) { MsgErroeLog.WriteLog("异常:" + ex.Message); }
                                 nRet = OpenDeviceWithRetry(ref m_MyCamera[4], ref device1[myjob5.index]);
@@ -6941,8 +6978,7 @@ namespace WindowsFormsApplication1
                                 try
                                 {
                                     StopGrabbingSafe(5);
-                                    m_MyCamera[5].MV_CC_CloseDevice_NET();
-                                    m_MyCamera[5].MV_CC_DestroyDevice_NET();
+                                    CloseAndDestroyCameraUnderSaveGate(5, ref m_MyCamera[5]);
                                 }
                                 catch (Exception ex) { MsgErroeLog.WriteLog("异常:" + ex.Message); }
                                 nRet = OpenDeviceWithRetry(ref m_MyCamera[5], ref device1[myjob6.index]);
@@ -6993,8 +7029,7 @@ namespace WindowsFormsApplication1
                                 try
                                 {
                                     StopGrabbingSafe(6);
-                                    m_MyCamera[6].MV_CC_CloseDevice_NET();
-                                    m_MyCamera[6].MV_CC_DestroyDevice_NET();
+                                    CloseAndDestroyCameraUnderSaveGate(6, ref m_MyCamera[6]);
                                 }
                                 catch (Exception ex) { MsgErroeLog.WriteLog("异常:" + ex.Message); }
                                 nRet = OpenDeviceWithRetry(ref m_MyCamera[6], ref device1[myjob7.index]);
@@ -7045,8 +7080,7 @@ namespace WindowsFormsApplication1
                                 try
                                 {
                                     StopGrabbingSafe(7);
-                                    m_MyCamera[7].MV_CC_CloseDevice_NET();
-                                    m_MyCamera[7].MV_CC_DestroyDevice_NET();
+                                    CloseAndDestroyCameraUnderSaveGate(7, ref m_MyCamera[7]);
                                 }
                                 catch (Exception ex) { MsgErroeLog.WriteLog("异常:" + ex.Message); }
                                 nRet = OpenDeviceWithRetry(ref m_MyCamera[7], ref device1[myjob8.index]);
@@ -10664,8 +10698,7 @@ namespace WindowsFormsApplication1
                                 try
                                 {
                                     StopGrabbingSafe(int.Parse(nnn));
-                                    m_MyCamera[int.Parse(nnn)].MV_CC_CloseDevice_NET();
-                                    m_MyCamera[int.Parse(nnn)].MV_CC_DestroyDevice_NET();
+                                    CloseAndDestroyCameraUnderSaveGate(int.Parse(nnn), ref m_MyCamera[int.Parse(nnn)]);
                                 }
                                 catch (Exception ex) { MsgErroeLog.WriteLog("异常:" + ex.Message); }
                                 m_MyCamera[int.Parse(nnn)] = new MyCamera();
@@ -10692,7 +10725,7 @@ namespace WindowsFormsApplication1
                                 }
                                 else
                                     ShowErrorMsg("相机" + (int.Parse(nnn) + 1) + "打开失败!", nRet);
-                                try { m_MyCamera[int.Parse(nnn)].MV_CC_DestroyDevice_NET(); } catch (Exception ex) { new ErrorLog().WriteLog(ex.ToString()); }
+                                try { DestroyCameraUnderSaveGate(int.Parse(nnn), ref m_MyCamera[int.Parse(nnn)]); } catch (Exception ex) { new ErrorLog().WriteLog(ex.ToString()); }
                                 m_MyCamera[int.Parse(nnn)] = null; // ch:失败置空，避免残留无效句柄
                                 openedCameras.Remove("SN:" + gigeInfo.chSerialNumber); // ch:失败移除去重标记，允许重复枚举条目重试
                                 continue;
@@ -13169,8 +13202,9 @@ namespace WindowsFormsApplication1
                                 MsgErroeLog.WriteLog("关闭相机" + (i + 1) + "：回调2秒未退出，跳过 Close/Destroy 以避免释放中崩溃");
                                 continue;
                             }
-                            int r2 = m_MyCamera[i].MV_CC_CloseDevice_NET();
-                            int r3 = m_MyCamera[i].MV_CC_DestroyDevice_NET();
+                            int[] cd = CloseAndDestroyCameraUnderSaveGate(i, ref m_MyCamera[i]);
+                            int r2 = cd[0];
+                            int r3 = cd[1];
                             m_MyCamera[i] = null; // ch:释放后置空，防止悬垂引用；日志记录释放结果便于排查
                             MsgErroeLog.WriteLog("关闭相机" + (i + 1) + ": Stop=0x" + ((uint)r1).ToString("X8") + " Close=0x" + ((uint)r2).ToString("X8") + " Destroy=0x" + ((uint)r3).ToString("X8"));
                         }
@@ -13795,8 +13829,9 @@ namespace WindowsFormsApplication1
                         {
                             try
                             {
-                                // 与关闭相机/断线重连互斥：后台保存期间若 CloseDevice 销毁句柄，SDK 会操作已失效设备对象
-                                lock (_cameraLocks[camIndex])
+                                // ch:v1.3.56 R3 只与句柄销毁互斥（_saveBmpGates），不再持 _cameraLocks：
+                                //   BMP 编码/落盘期间该相机软触发、停止采集、断线重连均可继续，不再排队。
+                                lock (_saveBmpGates[camIndex])
                                 {
                                     if (m_MyCamera[camIndex] != cam) // 关闭置空或已重开成新对象：本次拷贝对应旧句柄，跳过
                                     {
@@ -14959,7 +14994,10 @@ namespace WindowsFormsApplication1
         private void 通讯界面ToolStripMenuItem_Click(object sender, EventArgs e)
         {
             if (frm3.Visible == false)
+            {
+                frm3.SuppressPrefixWarning = false; // ch:v1.3.56 R2 用户主动打开通讯界面：允许一次性前缀冲突提示
                 frm3.Visible = true;
+            }
             else
                 frm3.Visible = false;
         }

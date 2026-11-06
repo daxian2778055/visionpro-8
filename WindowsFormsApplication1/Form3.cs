@@ -49,6 +49,13 @@ namespace WindowsFormsApplication1
         //   分包/GBK/前缀串误切三类问题统一在此处理，AcceptData 固定在 UI 线程执行（fun 循环 Invoke），累积器 UI 线程独占无需加锁。
         private readonly byte[] _serialReadBuffer = new byte[4096];
         private readonly SerialFrameAccumulator _serialRxAccumulator = new SerialFrameAccumulator();
+        // ch:v1.3.56 R2 前缀冲突 fail-safe：参与前缀关系的"方案行"触发串一律拒绝自动切换，
+        //   避免存量 ini 的 "1"/"12" 在分包拼接时静默切错方案。装载/保存后刷新，只读发布（volatile 引用）。
+        private volatile HashSet<string> _ambiguousSchemeTriggers;
+        private string _prefixConflictWarning;
+        private bool _prefixWarnShown;
+        // Form1 启动时 Show()+隐藏 会触发 OnVisibleChanged；该阶段不弹窗，用户真正打开通讯界面时由 Form1 置 false
+        public bool SuppressPrefixWarning = true;
         public int modbus_qufan = 0;
         public static string strportName = "";
         public static string strbaudRate = "";
@@ -226,7 +233,9 @@ namespace WindowsFormsApplication1
             this.label7.Text = "数据位：端口未打开|";
             this.label8.Text = "停止位：端口未打开|";
             this.label9.Text = "校验: 端口未打开";
-            ValidateLoadTriggerUniqueness(false, _schemes.GetRows()); // ch:R43 装载期只记日志，不弹窗阻塞启动；ch:R12 按方案表全量校验
+            List<string[]> loadedRows = _schemes.GetRows();
+            ValidateLoadTriggerUniqueness(false, loadedRows); // ch:R43 装载期只记日志，不弹窗阻塞启动；ch:R12 按方案表全量校验
+            RefreshPrefixConflictState(loadedRows); // ch:v1.3.56 R2 建立歧义触发串黑名单（存量前缀配置 fail-safe）
             Task.Run(() =>
             {
                 chushihua();
@@ -876,6 +885,14 @@ namespace WindowsFormsApplication1
         }
         private int qiehuan(string aa)
         {
+            // ch:v1.3.56 R2 fail-safe：参与前缀关系的方案串无法在无分隔符协议下可靠定界，
+            //   一律拒绝切换（返回 2：调用方只把 0 当"未匹配"继续送 getData，2 同时抑制误送）。
+            HashSet<string> ambiguous = _ambiguousSchemeTriggers;
+            if (ambiguous != null && ambiguous.Contains(aa))
+            {
+                LogTriggerConflictThrottled("载图串[" + aa + "]存在前缀冲突，已拒绝自动切换（请修正方案表）");
+                return 2;
+            }
             // ch:R43 载图串冲突收口：同一触发串命中多路时拒绝切换（原实现总是第一路胜出，静默切错方案）
             // ch:R12 匹配走 SchemeStore 快照（≤100 行）：接收线程不再逐控件跨线程取 Text；空串不参与、多命中冲突拒绝。
             // ch:R12 匹配走 SchemeStore（≤100 行）；ch:R13-1 改 TryResolve 一次取配对快照，接收线程不再逐控件跨线程取 Text
@@ -1031,6 +1048,60 @@ namespace WindowsFormsApplication1
                 return false;
             }
             return true;
+        }
+
+        // ch:v1.3.56 R2 装载/保存后刷新"歧义触发串黑名单"与提示文案：
+        //   只拦方案行键——相机触发串本身不切方案，误拦会把它的 getData 透传一并吞掉；
+        //   集合整表替换后只读发布（volatile 引用），TCP 接收线程可安全并发读取。
+        private void RefreshPrefixConflictState(List<string[]> rows)
+        {
+            string[] extras = null;
+            try
+            {
+                Func<string[]> ext = framePatternsProvider;
+                if (ext != null) extras = ext();
+            }
+            catch (Exception ex) { new ErrorLog().WriteLog(ex.ToString()); }
+
+            List<string> conflictKeys = SchemeStore.FindPrefixConflictKeys(rows, extras);
+            HashSet<string> ambiguous = null;
+            if (conflictKeys.Count > 0)
+            {
+                var rowKeys = new HashSet<string>(StringComparer.Ordinal);
+                if (rows != null)
+                {
+                    for (int i = 0; i < rows.Count; i++)
+                    {
+                        string k = rows[i] == null ? null : rows[i][0];
+                        if (!string.IsNullOrEmpty(k)) rowKeys.Add(k);
+                    }
+                }
+                var hit = new HashSet<string>(StringComparer.Ordinal);
+                for (int i = 0; i < conflictKeys.Count; i++)
+                {
+                    if (rowKeys.Contains(conflictKeys[i])) hit.Add(conflictKeys[i]);
+                }
+                if (hit.Count > 0)
+                {
+                    ambiguous = hit;
+                    _prefixConflictWarning = SchemeStore.FindPrefixConflicts(rows, extras);
+                    MsgErroeLog.WriteLog("载图串前缀冲突，已暂停相关方案自动切换(fail-safe)：" + _prefixConflictWarning);
+                }
+            }
+            _prefixConflictWarning = ambiguous != null ? _prefixConflictWarning : null;
+            _ambiguousSchemeTriggers = ambiguous;
+        }
+
+        // 用户真正打开通讯界面时一次性醒目提示（启动 Show→隐藏阶段由 SuppressPrefixWarning 抑制）
+        protected override void OnVisibleChanged(EventArgs e)
+        {
+            base.OnVisibleChanged(e);
+            if (!Visible || _prefixWarnShown || SuppressPrefixWarning || _prefixConflictWarning == null)
+                return;
+            _prefixWarnShown = true;
+            MessageBox.Show(_prefixConflictWarning
+                + "\r\n\r\n这些载图串已暂停自动切换（fail-safe），请修正为互不为前缀的触发串后重新保存。",
+                "载图串前缀冲突", MessageBoxButtons.OK, MessageBoxIcon.Warning);
         }
         private void button3_Click(object sender, EventArgs e)
         {
@@ -1738,6 +1809,7 @@ namespace WindowsFormsApplication1
             if (!ValidateLoadTriggerUniqueness(true, schemeRows)) // ch:R43 重复载图串拒绝保存，避免运行期静默切错方案
                 return;
             _schemes.SetRows(schemeRows);
+            RefreshPrefixConflictState(schemeRows); // ch:v1.3.56 R2 保存成功后按新表刷新歧义黑名单（无冲突即清零）
             // ch:R46 Form3 已删除 ModbusTCP；串口 Modbus 参数统一写 [serial]（不再写 [modbustcp]，
             //   避免覆盖 FormModbus 的 ip/port/en 等配置）。旧 [modbustcp] 键保留不动，仅作升级回退来源。
             wdini.WriteString("serial", "style", comboBox3.Text);

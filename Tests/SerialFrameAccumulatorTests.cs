@@ -98,13 +98,25 @@ public class SerialFrameAccumulatorTests
     }
 
     [Fact]
-    public void UnknownData_FlushesWholeAfterIdle()
+    public void UnknownData_FlushesImmediately()
     {
+        // ch:v1.3.56 R1：未知报文不再等空闲轮，当前读取即整段派发（恢复逐读透传，避免攒批/监视框延迟）
         var acc = new SerialFrameAccumulator();
-        Assert.Empty(acc.Append(2, Encoding.ASCII.GetBytes("XY"), P("AB"))); // 未知，非前缀
-        Assert.Empty(acc.Append(0, new byte[0], P("AB")));                    // idle=1
-        var f = acc.Append(0, new byte[0], P("AB"));                          // idle=2 → 整段产出
+        var f = acc.Append(2, Encoding.ASCII.GetBytes("XY"), P("AB"));
+        Assert.Single(f);
         Assert.Equal("XY", S(f[0]));
+        Assert.Equal(0, acc.PendingCount);
+    }
+
+    [Fact]
+    public void UnknownData_PassesThrough_WhenNoPatterns()
+    {
+        // 未配置任何触发串时（纯串口监视/自由文本）：每轮读取立即产出，不做累积
+        var acc = new SerialFrameAccumulator();
+        var f = acc.Append(3, Encoding.ASCII.GetBytes("XYZ"), new List<byte[]>());
+        Assert.Single(f);
+        Assert.Equal("XYZ", S(f[0]));
+        Assert.Equal(0, acc.PendingCount);
     }
 
     [Fact]
@@ -188,12 +200,30 @@ public class SerialFrameAccumulatorTests
     }
 
     [Fact]
+    public void FindPrefixConflictKeys_ReturnsBothSides()
+    {
+        // ch:v1.3.56 R2：黑名单必须包含前缀对两端（短串与长串都拒绝切换），无冲突键不包含
+        var rows = new List<string[]> { new[] { "1", "p1" }, new[] { "12", "p2" }, new[] { "9", "p3" } };
+        List<string> keys = SchemeStore.FindPrefixConflictKeys(rows, null);
+        Assert.Contains("1", keys);
+        Assert.Contains("12", keys);
+        Assert.DoesNotContain("9", keys);
+    }
+
+    [Fact]
+    public void FindPrefixConflictKeys_NoConflict_Empty()
+    {
+        var rows = new List<string[]> { new[] { "A1", "p1" }, new[] { "B2", "p2" } };
+        Assert.Empty(SchemeStore.FindPrefixConflictKeys(rows, new[] { "C3" }));
+    }
+
+    [Fact]
     public void FindPrefixConflicts_CrossChecksExtraCameraTriggers()
     {
         var rows = new List<string[]> { new[] { "1", "p1" } };
         string c = SchemeStore.FindPrefixConflicts(rows, new[] { "10" }); // 相机触发串 "10" 以方案串 "1" 开头
         Assert.NotNull(c);
-        Assert.Contains("相机触发串", c);
+        Assert.Contains("相机1触发串", c); // ch:v1.3.56 R2 标签带相机序号，便于现场定位
     }
 
     [Fact]

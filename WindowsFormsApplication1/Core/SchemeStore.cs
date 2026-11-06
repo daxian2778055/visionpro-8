@@ -161,6 +161,55 @@ namespace WindowsFormsApplication1
         {
             var keys = new List<string>();
             var labels = new List<string>();
+            CollectPrefixKeys(rows, extraKeys, keys, labels);
+
+            List<string> conflicts = new List<string>();
+            for (int i = 0; i < keys.Count; i++)
+            {
+                string a = keys[i];
+                for (int j = 0; j < keys.Count; j++)
+                {
+                    if (i == j) continue;
+                    string b = keys[j];
+                    if (b.Length > a.Length && b.StartsWith(a, StringComparison.Ordinal))
+                        conflicts.Add("[" + a + "](" + labels[i] + ") 是 [" + b + "](" + labels[j] + ") 的前缀");
+                }
+            }
+            return conflicts.Count > 0 ? string.Join("；", conflicts.ToArray()) : null;
+        }
+
+        /// <summary>
+        /// ch:v1.3.56 R2 返回参与前缀关系的全部键（前缀对的两端都返回）。
+        ///   供 Form3 装载/保存后建立"歧义触发串黑名单"：这些串到达时一律拒绝自动切换（fail-safe），
+        ///   避免存量 ini 里的 "1"/"12" 在分包拼接时静默切错方案。返回空列表表示无前缀冲突。
+        /// </summary>
+        public static List<string> FindPrefixConflictKeys(List<string[]> rows, string[] extraKeys)
+        {
+            var keys = new List<string>();
+            var labels = new List<string>();
+            CollectPrefixKeys(rows, extraKeys, keys, labels);
+
+            var hit = new HashSet<string>(StringComparer.Ordinal);
+            for (int i = 0; i < keys.Count; i++)
+            {
+                string a = keys[i];
+                for (int j = 0; j < keys.Count; j++)
+                {
+                    if (i == j) continue;
+                    string b = keys[j];
+                    if (b.Length > a.Length && b.StartsWith(a, StringComparison.Ordinal))
+                    {
+                        hit.Add(a);
+                        hit.Add(b);
+                    }
+                }
+            }
+            return new List<string>(hit);
+        }
+
+        // ch:v1.3.56 R2 行串与外部触发串合并收集，标签带来源（相机序号便于现场定位）
+        private static void CollectPrefixKeys(List<string[]> rows, string[] extraKeys, List<string> keys, List<string> labels)
+        {
             if (rows != null)
             {
                 for (int i = 0; i < rows.Count; i++)
@@ -178,23 +227,9 @@ namespace WindowsFormsApplication1
                     string e = extraKeys[k];
                     if (string.IsNullOrEmpty(e)) continue;
                     keys.Add(e);
-                    labels.Add("相机触发串");
+                    labels.Add("相机" + (k + 1) + "触发串");
                 }
             }
-
-            List<string> conflicts = new List<string>();
-            for (int i = 0; i < keys.Count; i++)
-            {
-                string a = keys[i];
-                for (int j = 0; j < keys.Count; j++)
-                {
-                    if (i == j) continue;
-                    string b = keys[j];
-                    if (b.Length > a.Length && b.StartsWith(a, StringComparison.Ordinal))
-                        conflicts.Add("[" + a + "](" + labels[i] + ") 是 [" + b + "](" + labels[j] + ") 的前缀");
-                }
-            }
-            return conflicts.Count > 0 ? string.Join("；", conflicts.ToArray()) : null;
         }
     }
 }
