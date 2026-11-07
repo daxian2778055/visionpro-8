@@ -6346,8 +6346,12 @@ namespace WindowsFormsApplication1
                         if (m_MyCamera[i] == null)
                             continue;
                         try { StopGrabbingSafe(i); } catch (Exception exInner) { new ErrorLog().WriteLog(exInner.ToString()); }
-                        try { m_MyCamera[i].Dispose(); } catch (Exception exInner) { new ErrorLog().WriteLog(exInner.ToString()); }
-                        m_MyCamera[i] = null;
+                        // ch:v1.3.56 P3-1 兜底释放也须走 _saveBmpGates：MyCamera.Dispose 内部 Stop/Close/Destroy 但不取门闩，
+                        //   若此刻正有手动存图持 gate 用同一句柄编码落盘，直接 Dispose 会释放在途句柄（SDK 操作已销毁对象）。
+                        //   bnClose 正常路径已走门闩并把 m_MyCamera[i] 置空；本兜底只在"bnClose 提前返回(排空超时)或逐相机
+                        //   回调未出栈被跳过(见 13200 continue)"时才见到非空句柄。上面已 StopGrabbingSafe，这里复用门闩助手
+                        //   做锁内 Close+Destroy 并置空，语义与 bnClose 一致、锁序仍为 _cameraLocks→_saveBmpGates 单向。
+                        CloseAndDestroyCameraUnderSaveGate(i, ref m_MyCamera[i]);
                     }
                 }
             }
