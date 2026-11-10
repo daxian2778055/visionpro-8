@@ -6348,10 +6348,24 @@ namespace WindowsFormsApplication1
                         try { StopGrabbingSafe(i); } catch (Exception exInner) { new ErrorLog().WriteLog(exInner.ToString()); }
                         // ch:v1.3.56 P3-1 兜底释放也须走 _saveBmpGates：MyCamera.Dispose 内部 Stop/Close/Destroy 但不取门闩，
                         //   若此刻正有手动存图持 gate 用同一句柄编码落盘，直接 Dispose 会释放在途句柄（SDK 操作已销毁对象）。
-                        //   bnClose 正常路径已走门闩并把 m_MyCamera[i] 置空；本兜底只在"bnClose 提前返回(排空超时)或逐相机
-                        //   回调未出栈被跳过(见 13200 continue)"时才见到非空句柄。上面已 StopGrabbingSafe，这里复用门闩助手
-                        //   做锁内 Close+Destroy 并置空，语义与 bnClose 一致、锁序仍为 _cameraLocks→_saveBmpGates 单向。
-                        CloseAndDestroyCameraUnderSaveGate(i, ref m_MyCamera[i]);
+                        // ch:v1.3.57 P3 兜底同样须等本相机取流回调出栈再销毁（对齐 bnClose 13195-13204）：StopGrabbing 只保证
+                        //   停止取流，不保证已进入的回调退出；回调不取 _cameraLocks（它取 m_BufForSaveImageLock），故 _cameraLocks
+                        //   不能替代本等待。若 bnClose 因排空超时提前 return 或逐相机回调未出栈被 continue 跳过，本兜底见到非空句柄，
+                        //   此时直接 Close/Destroy 会让仍在用 SDK 帧缓冲(pData)的回调踩到已释放对象 → 原生 use-after-free。
+                        int cbWait = 0;
+                        while (System.Threading.Volatile.Read(ref _cbActive[i]) != 0 && cbWait < 200)
+                        {
+                            Thread.Sleep(10);
+                            cbWait++;
+                        }
+                        if (System.Threading.Volatile.Read(ref _cbActive[i]) != 0)
+                        {
+                            MsgErroeLog.WriteLog("退出兜底 相机" + (i + 1) + "：回调2秒未退出，跳过 Close/Destroy 以避免释放中崩溃");
+                            continue;
+                        }
+                        // 锁内 Close+Destroy 并置空；返回码记日志（旧兜底忽略返回码，失败时无痕迹）
+                        int[] cd = CloseAndDestroyCameraUnderSaveGate(i, ref m_MyCamera[i]);
+                        MsgErroeLog.WriteLog("退出兜底 关闭相机" + (i + 1) + ": Close=0x" + ((uint)cd[0]).ToString("X8") + " Destroy=0x" + ((uint)cd[1]).ToString("X8"));
                     }
                 }
             }
