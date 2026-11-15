@@ -462,6 +462,8 @@
     <Compile Include="Core\SerialFrameAccumulator.cs" />
     <Compile Include="Core\SchemeSwitchConfig.cs" />
     <Compile Include="Core\SerialSchemeSection.cs" />
+    <Compile Include="Core\SaveImageSettings.cs" />
+    <Compile Include="Core\SaveImageRetention.cs" />
     <Compile Include="Core\SchemeTablePanel.cs">
       <SubType>Component</SubType>
     </Compile>
@@ -557,6 +559,10 @@
     <Compile Include="FormVersion.Designer.cs">
       <DependentUpon>FormVersion.cs</DependentUpon>
     </Compile>
+    <Compile Include="FormSaveImageConfig.cs">
+      <SubType>Form</SubType>
+    </Compile>
+    <Compile Include="SaveImageWriter.cs" />
     <Compile Include="ClassIni.cs" />
     <Compile Include="ErrorLog.cs" />
     <Compile Include="Form1.cs">

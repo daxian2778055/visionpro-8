@@ -740,10 +740,13 @@
             this.comboBox38 = new System.Windows.Forms.ComboBox();
             this.comboBox39 = new System.Windows.Forms.ComboBox();
             this.pictureBox1 = new System.Windows.Forms.PictureBox();
+            this.存图设置ToolStripMenuItem = new System.Windows.Forms.ToolStripMenuItem();
             this.groupBox2.SuspendLayout();
             ((System.ComponentModel.ISupportInitialize)(this.dataGridView1)).BeginInit();
             this.menuStrip1.SuspendLayout();
             ((System.ComponentModel.ISupportInitialize)(this.numericUpDown22)).BeginInit();
+            ((System.ComponentModel.ISupportInitialize)(this.numDisplayHz)).BeginInit();
+            ((System.ComponentModel.ISupportInitialize)(this.numOverlayFontSize)).BeginInit();
             this.groupBox4.SuspendLayout();
             this.tabControl1.SuspendLayout();
             this.tabPage5.SuspendLayout();
@@ -1227,7 +1230,8 @@
             this.三菱Fx编程口ToolStripMenuItem,
             this.toolStripMenuItem1,
             this.modbusrtuToolStripMenuItem,
-            this.版本ToolStripMenuItem});
+            this.版本ToolStripMenuItem,
+            this.存图设置ToolStripMenuItem});
             resources.ApplyResources(this.查找ToolStripMenuItem, "查找ToolStripMenuItem");
             this.查找ToolStripMenuItem.Name = "查找ToolStripMenuItem";
             // 
@@ -1351,6 +1355,95 @@
             0});
             this.numericUpDown22.Name = "numericUpDown22";
             this.numericUpDown22.ValueChanged += new System.EventHandler(this.numericUpDown22_ValueChanged);
+            // 
+            // labelOutputMode
+            // 
+            resources.ApplyResources(this.labelOutputMode, "labelOutputMode");
+            this.labelOutputMode.Name = "labelOutputMode";
+            // 
+            // cbOutputMode
+            // 
+            this.cbOutputMode.DropDownStyle = System.Windows.Forms.ComboBoxStyle.DropDownList;
+            this.cbOutputMode.FormattingEnabled = true;
+            this.cbOutputMode.Items.AddRange(new object[] {
+            resources.GetString("cbOutputMode.Items"),
+            resources.GetString("cbOutputMode.Items1"),
+            resources.GetString("cbOutputMode.Items2"),
+            resources.GetString("cbOutputMode.Items3"),
+            resources.GetString("cbOutputMode.Items4"),
+            resources.GetString("cbOutputMode.Items5"),
+            resources.GetString("cbOutputMode.Items6"),
+            resources.GetString("cbOutputMode.Items7"),
+            resources.GetString("cbOutputMode.Items8")});
+            resources.ApplyResources(this.cbOutputMode, "cbOutputMode");
+            this.cbOutputMode.Name = "cbOutputMode";
+            this.cbOutputMode.SelectedIndexChanged += new System.EventHandler(this.cbOutputMode_SelectedIndexChanged);
+            // 
+            // labelDisplayHz
+            // 
+            resources.ApplyResources(this.labelDisplayHz, "labelDisplayHz");
+            this.labelDisplayHz.Name = "labelDisplayHz";
+            // 
+            // chkPerfPrint
+            // 
+            resources.ApplyResources(this.chkPerfPrint, "chkPerfPrint");
+            this.chkPerfPrint.Name = "chkPerfPrint";
+            this.chkPerfPrint.UseVisualStyleBackColor = true;
+            this.chkPerfPrint.CheckedChanged += new System.EventHandler(this.chkPerfPrint_CheckedChanged);
+            // 
+            // numDisplayHz
+            // 
+            resources.ApplyResources(this.numDisplayHz, "numDisplayHz");
+            this.numDisplayHz.Minimum = new decimal(new int[] {
+            1,
+            0,
+            0,
+            0});
+            this.numDisplayHz.Name = "numDisplayHz";
+            this.numDisplayHz.Value = new decimal(new int[] {
+            15,
+            0,
+            0,
+            0});
+            this.numDisplayHz.ValueChanged += new System.EventHandler(this.numDisplayHz_ValueChanged);
+            // 
+            // labelOverlayFontSize
+            // 
+            resources.ApplyResources(this.labelOverlayFontSize, "labelOverlayFontSize");
+            this.labelOverlayFontSize.Name = "labelOverlayFontSize";
+            // 
+            // numOverlayFontSize
+            // 
+            resources.ApplyResources(this.numOverlayFontSize, "numOverlayFontSize");
+            this.numOverlayFontSize.Maximum = new decimal(new int[] {
+            72,
+            0,
+            0,
+            0});
+            this.numOverlayFontSize.Minimum = new decimal(new int[] {
+            6,
+            0,
+            0,
+            0});
+            this.numOverlayFontSize.Name = "numOverlayFontSize";
+            this.numOverlayFontSize.Value = new decimal(new int[] {
+            12,
+            0,
+            0,
+            0});
+            this.numOverlayFontSize.ValueChanged += new System.EventHandler(this.numOverlayFontSize_ValueChanged);
+            // 
+            // labelOverlayFontColor
+            // 
+            resources.ApplyResources(this.labelOverlayFontColor, "labelOverlayFontColor");
+            this.labelOverlayFontColor.Name = "labelOverlayFontColor";
+            // 
+            // btnOverlayFontColor
+            // 
+            resources.ApplyResources(this.btnOverlayFontColor, "btnOverlayFontColor");
+            this.btnOverlayFontColor.Name = "btnOverlayFontColor";
+            this.btnOverlayFontColor.UseVisualStyleBackColor = true;
+            this.btnOverlayFontColor.Click += new System.EventHandler(this.btnOverlayFontColor_Click);
             // 
             // checkBox2
             // 
@@ -1551,130 +1644,6 @@
             this.tabControl1.Controls.Add(this.tabPage10);
             this.tabControl1.Name = "tabControl1";
             this.tabControl1.SelectedIndex = 0;
-            // 
-            // labelOutputMode（ch:输出方式标注；采用 WinForms 原生控件，布局在代码中显式指定，不写 resx）
-            // 
-            this.labelOutputMode.AutoSize = true;
-            this.labelOutputMode.Location = new System.Drawing.Point(6, 353);
-            this.labelOutputMode.Name = "labelOutputMode";
-            this.labelOutputMode.TabIndex = 1000;
-            this.labelOutputMode.Text = "输出方式";
-            // 
-            // cbOutputMode（ch:全局唯一输出方式；DropDownList 样式保证只能单选，杜绝多路同时输出）
-            //   位置 y=350 在本页既有控件最低点(y=332)之下，tabPage5.AutoScroll=True 可滚动到）
-            // 
-            this.cbOutputMode.DropDownStyle = System.Windows.Forms.ComboBoxStyle.DropDownList;
-            this.cbOutputMode.FormattingEnabled = true;
-            this.cbOutputMode.Items.AddRange(new object[] {
-            "自动(按原配置)",
-            "不输出",
-            "IO输出",
-            "串口输出",
-            "TCP输出",
-            "ModbusTCP输出",
-            "欧姆龙Fins",
-            "ModbusTCP(配置窗)",
-            "ModbusRTU"});
-            this.cbOutputMode.Location = new System.Drawing.Point(77, 350);
-            this.cbOutputMode.Name = "cbOutputMode";
-            this.cbOutputMode.Size = new System.Drawing.Size(160, 20);
-            this.cbOutputMode.TabIndex = 1001;
-            this.cbOutputMode.SelectedIndexChanged += new System.EventHandler(this.cbOutputMode_SelectedIndexChanged);
-            // 
-            // labelDisplayHz（ch:R18 显示频率标注；同 labelOutputMode：WinForms 原生控件、代码显式布局、不写 resx）
-            //   y=353 与输出方式同排；该行 y≥350 处 x>237 无其它控件（tabPage5 宽581、AutoScroll 下滚可见）
-            // 
-            this.labelDisplayHz.AutoSize = true;
-            this.labelDisplayHz.Location = new System.Drawing.Point(241, 353);
-            this.labelDisplayHz.Name = "labelDisplayHz";
-            this.labelDisplayHz.TabIndex = 1002;
-            this.labelDisplayHz.Text = "显示频率(Hz)";
-            // 
-            // numDisplayHz（ch:R18 上屏节拍 1..100Hz(默认15≈66ms)，紧邻输出方式右侧）
-            //   ValueChanged → 1000/Hz 回写 OcxMinIntervalMs 并落 ini camera/display_hz，只改显示刷新率
-            // 
-            this.numDisplayHz.Location = new System.Drawing.Point(332, 350);
-            this.numDisplayHz.Maximum = new decimal(new int[] {
-            100,
-            0,
-            0,
-            0});
-            this.numDisplayHz.Minimum = new decimal(new int[] {
-            1,
-            0,
-            0,
-            0});
-            this.numDisplayHz.Name = "numDisplayHz";
-            this.numDisplayHz.Size = new System.Drawing.Size(50, 20);
-            this.numDisplayHz.TabIndex = 1003;
-            this.numDisplayHz.Value = new decimal(new int[] {
-            15,
-            0,
-            0,
-            0});
-            this.numDisplayHz.ValueChanged += new System.EventHandler(this.numDisplayHz_ValueChanged);
-            // 
-            // chkPerfPrint（ch:R25 性能统计打印开关：开=异常才打+10分钟心跳，关=完全不打）
-            //   同 labelDisplayHz/numDisplayHz 手法：WinForms 原生控件、代码显式布局、不写 resx，设计器可直接拖改；
-            //   y=351 行 x=390 起（numDisplayHz 止于382，右侧至页宽581 无占用，AutoScroll 下滚可见）
-            // 
-            this.chkPerfPrint.AutoSize = true;
-            this.chkPerfPrint.Location = new System.Drawing.Point(390, 351);
-            this.chkPerfPrint.Name = "chkPerfPrint";
-            this.chkPerfPrint.TabIndex = 1004;
-            this.chkPerfPrint.Text = "性能统计打印";
-            this.chkPerfPrint.UseVisualStyleBackColor = true;
-            this.chkPerfPrint.CheckedChanged += new System.EventHandler(this.chkPerfPrint_CheckedChanged);
-            // 
-            // labelOverlayFontSize（ch:R32 覆盖层字号标注；输出方式行「下方单独一行」y=388，x 从 6 起）
-            //   整行控件 x 均 <581（tabPage5 页宽），无需横向滚动即可见；设计器可直接拖改
-            // 
-            this.labelOverlayFontSize.AutoSize = true;
-            this.labelOverlayFontSize.Location = new System.Drawing.Point(6, 388);
-            this.labelOverlayFontSize.Name = "labelOverlayFontSize";
-            this.labelOverlayFontSize.TabIndex = 1005;
-            this.labelOverlayFontSize.Text = "覆盖字号";
-            // 
-            // numOverlayFontSize（ch:R32 覆盖层字号 6~72pt，默认 12；ValueChanged 落 ini camera/overlay_font_size）
-            // 
-            this.numOverlayFontSize.Location = new System.Drawing.Point(76, 385);
-            this.numOverlayFontSize.Maximum = new decimal(new int[] {
-            72,
-            0,
-            0,
-            0});
-            this.numOverlayFontSize.Minimum = new decimal(new int[] {
-            6,
-            0,
-            0,
-            0});
-            this.numOverlayFontSize.Name = "numOverlayFontSize";
-            this.numOverlayFontSize.Size = new System.Drawing.Size(55, 21);
-            this.numOverlayFontSize.TabIndex = 1006;
-            this.numOverlayFontSize.Value = new decimal(new int[] {
-            12,
-            0,
-            0,
-            0});
-            this.numOverlayFontSize.ValueChanged += new System.EventHandler(this.numOverlayFontSize_ValueChanged);
-            // 
-            // labelOverlayFontColor（ch:R32 覆盖层字色标注；同行 x=140）
-            // 
-            this.labelOverlayFontColor.AutoSize = true;
-            this.labelOverlayFontColor.Location = new System.Drawing.Point(140, 388);
-            this.labelOverlayFontColor.Name = "labelOverlayFontColor";
-            this.labelOverlayFontColor.TabIndex = 1007;
-            this.labelOverlayFontColor.Text = "覆盖字色";
-            // 
-            // btnOverlayFontColor（ch:R32 覆盖层字色选择：ColorDialog 拾色，按钮自身背景即当前色预览）
-            // 
-            this.btnOverlayFontColor.Location = new System.Drawing.Point(206, 385);
-            this.btnOverlayFontColor.Name = "btnOverlayFontColor";
-            this.btnOverlayFontColor.Size = new System.Drawing.Size(72, 23);
-            this.btnOverlayFontColor.TabIndex = 1008;
-            this.btnOverlayFontColor.Text = "选颜色";
-            this.btnOverlayFontColor.UseVisualStyleBackColor = true;
-            this.btnOverlayFontColor.Click += new System.EventHandler(this.btnOverlayFontColor_Click);
             // 
             // tabPage5
             // 
@@ -6916,6 +6885,11 @@
             this.pictureBox1.Name = "pictureBox1";
             this.pictureBox1.TabStop = false;
             // 
+            // 存图设置ToolStripMenuItem
+            // 
+            this.存图设置ToolStripMenuItem.Name = "存图设置ToolStripMenuItem";
+            resources.ApplyResources(this.存图设置ToolStripMenuItem, "存图设置ToolStripMenuItem");
+            // 
             // Form1
             // 
             resources.ApplyResources(this, "$this");
@@ -6959,6 +6933,8 @@
             this.menuStrip1.ResumeLayout(false);
             this.menuStrip1.PerformLayout();
             ((System.ComponentModel.ISupportInitialize)(this.numericUpDown22)).EndInit();
+            ((System.ComponentModel.ISupportInitialize)(this.numDisplayHz)).EndInit();
+            ((System.ComponentModel.ISupportInitialize)(this.numOverlayFontSize)).EndInit();
             this.groupBox4.ResumeLayout(false);
             this.groupBox4.PerformLayout();
             this.tabControl1.ResumeLayout(false);
@@ -7786,6 +7762,7 @@
         private System.Windows.Forms.ComboBox comboBox39;
         private System.Windows.Forms.ToolStripMenuItem toolStripMenuItem1;
         private System.Windows.Forms.ToolStripMenuItem modbusrtuToolStripMenuItem;
+        private System.Windows.Forms.ToolStripMenuItem 存图设置ToolStripMenuItem;
     }
 }
 

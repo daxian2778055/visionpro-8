@@ -273,6 +273,11 @@ namespace WindowsFormsApplication1
             InstallUiInputFilter();
             System.Windows.Forms.Control.CheckForIllegalCrossThreadCalls = false;
             canshuIni.ReadINIFile(AppDomain.CurrentDomain.BaseDirectory + "//code.ini");
+            // ch:铭泰定/转子定制存图：配置读 code.ini [saveimage]，菜单入口在代码里挂 Click（不改 Designer/resx）
+            LoadSaveImageSettings();
+            InitCustomSaveWriters();
+            存图设置ToolStripMenuItem.Click += 存图设置ToolStripMenuItem_Click;
+            StartSaveImageCleanup(); // ch:按“保存天数”后台清理过期存图（0=不删；延迟启动，不拖慢开机）
             // ch:大华相机开关（IO 线号偏移）从 ini 读取并持久化，默认海康(false，不偏移)
             dahua = canshuIni.ReadString("canshu", "dahua", "false").Replace("\0", "") == "true";
             cbDahua.Checked = dahua; // ch:同步 UI 开关状态（Designer 控件，可在设计器里编辑）
@@ -5504,6 +5509,8 @@ namespace WindowsFormsApplication1
                                     }
                                 });
                             }
+                            // ch:铭泰定/转子定制存图：与 OK/NG 判定无关，通讯触发的每一帧都按 根目录\相机目录\日期\触发字符串\ 存一张
+                            QueueCustomImageSave(myjob, tempimage);
 
                         }
                         else
@@ -16531,6 +16538,223 @@ namespace WindowsFormsApplication1
             }
             finally { UnlockAllCameras(); }
         }
+        // ===================== ch:铭泰定/转子定制存图 =====================
+        // 目录：根目录\相机目录\日期\触发字符串\；相机目录可留空，多台相机填同名即合并到同一目录。
+        // 文件名：存图名称（固定即覆盖）；每相机一个名称 + 槽位决定第几张。
+        // 触发：复用 FormModbus 的 c{n}_modbustcp 映射——收到的字符串与相机 triggerZifu 完全相等才触发，
+        //   所以"触发字符串"本身就是产品文件夹名；顶部/底部配成同一串时自然落进同一目录。
+        private SaveImageSettings _saveImgCfg = new SaveImageSettings();
+        private readonly SaveSlotCounter _customSaveSlots = new SaveSlotCounter();
+        private readonly object[] _customSaveLocks = new object[]
+        {
+            new object(), new object(), new object(), new object(),
+            new object(), new object(), new object(), new object()
+        };
+        private readonly CogImageFileBMP[] _customBmpWriters = new CogImageFileBMP[8];
+        private int _lastCustomSaveLogMs = 0;
+
+        private void InitCustomSaveWriters()
+        {
+            for (int i = 0; i < _customBmpWriters.Length; i++)
+            {
+                try { _customBmpWriters[i] = new CogImageFileBMP(); }
+                catch (Exception ex) { MsgErroeLog.WriteLog("定制存图初始化写文件对象失败 cam=" + (i + 1) + ":" + ex.Message); }
+            }
+        }
+
+        private void LoadSaveImageSettings()
+        {
+            try
+            {
+                _saveImgCfg = SaveImageSettingsStore.Load(
+                    delegate (string key, string def)
+                    {
+                        return canshuIni.ReadString("saveimage", key, def).Replace("\0", "");
+                    });
+            }
+            catch (Exception ex)
+            {
+                _saveImgCfg = new SaveImageSettings();
+                MsgErroeLog.WriteLog("存图设置读取失败(按默认关闭处理):" + ex.Message);
+            }
+        }
+
+        private int _saveCleanupRunning = 0;
+
+        /// <summary>
+        /// ch:按“保存天数”清理过期存图（早于 N 天的日期文件夹整目录删）。
+        ///   后台线程 + 5s 延迟：不与设备枚举/方案加载抢磁盘、不拖慢开机；
+        ///   Interlocked 保证同一时刻只跑一个清理线程（启动一次、改配置再触发一次）。
+        /// </summary>
+        private void StartSaveImageCleanup()
+        {
+            if (Interlocked.CompareExchange(ref _saveCleanupRunning, 1, 0) != 0) return;
+            Thread t = new Thread(new ThreadStart(CustomSaveCleanupThread));
+            t.IsBackground = true;
+            t.Name = "存图清理";
+            t.Start();
+        }
+
+        private void CustomSaveCleanupThread()
+        {
+            try
+            {
+                Thread.Sleep(5000);
+                SaveImageSettings cfg = _saveImgCfg;
+                if (cfg == null || !cfg.Enabled || cfg.RetentionDays <= 0) return;
+
+                int removed = SaveImageRetention.Cleanup(cfg.Root, cfg.DateFormat, cfg.RetentionDays, DateTime.Now,
+                    delegate (string line) { MsgErroeLog.WriteLog(line); });
+                MsgErroeLog.WriteLog("存图清理完成：保留最近 " + cfg.RetentionDays + " 天，删除 " + removed
+                    + " 个过期日期文件夹（根目录=" + cfg.Root + "）");
+            }
+            catch (Exception ex)
+            {
+                MsgErroeLog.WriteLog("存图清理异常:" + ex.Message);
+            }
+            finally
+            {
+                Interlocked.Exchange(ref _saveCleanupRunning, 0);
+            }
+        }
+
+        private void 存图设置ToolStripMenuItem_Click(object sender, EventArgs e)
+        {
+            try
+            {
+                using (FormSaveImageConfig frm = new FormSaveImageConfig(_saveImgCfg))
+                {
+                    if (frm.ShowDialog(this) != DialogResult.OK) return;
+                    SaveImageSettingsStore.Save(frm.Settings,
+                        delegate (string key, string val) { canshuIni.WriteString("saveimage", key, val); });
+                    _saveImgCfg = frm.Settings;
+                    _customSaveSlots.Reset(); // ch:改完配置从第 1 张重新数，避免沿用旧模板的槽位
+                    StartSaveImageCleanup(); // ch:改小保存天数后立即清一次（同一时刻只跑一个清理线程）
+                    MsgErroeLog.WriteLog("存图设置已保存: 启用=" + _saveImgCfg.Enabled
+                        + " 根目录=" + _saveImgCfg.Root
+                        + " 日期格式=" + _saveImgCfg.DateFormat
+                        + " 保存天数=" + _saveImgCfg.RetentionDays
+                        + " 格式=" + (_saveImgCfg.Jpeg ? "JPG" : "BMP"));
+                }
+            }
+            catch (Exception ex)
+            {
+                MsgErroeLog.WriteLog("存图设置保存失败:" + ex.Message);
+                MessageBox.Show(this, "存图设置保存失败：" + ex.Message, "存图设置",
+                    MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            }
+        }
+
+        // ch:triggerZifu 是 vpp 里配置的触发字符串（与收到的 Modbus 字符串完全相等才触发），
+        //   读它必须与 block.Run 互斥（同 16513 行方案载入处的写法）。
+        private string ReadTriggerZifuSafe(Myjob job)
+        {
+            try
+            {
+                lock (job.blockLock)
+                {
+                    if (job.block != null && job.block.Inputs.Contains("triggerZifu"))
+                        job.triggerZifu = Convert.ToString(job.block.Inputs["triggerZifu"].Value);
+                }
+            }
+            catch (Exception ex)
+            {
+                LogCustomSave("读取触发字符串失败 cam=" + job.path_number + ":" + ex.Message);
+            }
+            return (job.triggerZifu ?? "").Replace("\0", "").Trim();
+        }
+
+        /// <summary>
+        /// ch:在检测线程上先算好 目录/槽位/文件名 再投后台写盘——槽位在入队时占号，
+        ///   保证同一相机第 1/2/3 次触发对应 1/2/3 号文件，不会因后台任务乱序而对调。
+        /// </summary>
+        private void QueueCustomImageSave(Myjob myjob, ICogImage image)
+        {
+            try
+            {
+                SaveImageSettings cfg = _saveImgCfg;
+                if (cfg == null || !cfg.Enabled || !yunxing || myjob == null || image == null) return;
+                if (!(myjob.trrigerEn || myjob.triggerMode == "通讯触发")) return;
+
+                int camIndex;
+                if (!int.TryParse(myjob.path_number, out camIndex)) return;
+                if (camIndex < 1 || camIndex > SaveImageSettings.CameraCount) return;
+
+                CameraSaveSetting cam = cfg.Cameras[camIndex - 1];
+                if (cam == null || !cam.Enabled) return;
+
+                string trigger = ReadTriggerZifuSafe(myjob);
+                if (trigger.Length == 0)
+                {
+                    LogCustomSave("定制存图跳过：相机" + camIndex + " 的 triggerZifu 为空");
+                    return;
+                }
+
+                DateTime now = DateTime.Now;
+                string folder = SaveImageSettingsStore.BuildFolderPath(cfg.Root, cfg.DateFormat, trigger, now, cam.Folder);
+                if (folder.Length == 0)
+                {
+                    LogCustomSave("定制存图跳过：未配置根目录");
+                    return;
+                }
+
+                int slot = _customSaveSlots.GetNextSlot(folder, camIndex, Math.Max(1, cam.Slots), now);
+                string name = SaveImageSettingsStore.RenderFileName(cam, camIndex, trigger, now, slot);
+                string filePath = Path.Combine(folder, name + (cfg.Jpeg ? ".jpg" : ".bmp"));
+
+                bool jpeg = cfg.Jpeg;
+                int quality = cfg.JpegQuality;
+                ICogImage img = image;
+                string dir = folder;
+                RunAsyncTail(delegate { SaveCustomImage(camIndex, img, filePath, dir, jpeg, quality); });
+            }
+            catch (Exception ex)
+            {
+                LogCustomSave("定制存图入队失败:" + ex.Message);
+            }
+        }
+
+        private void SaveCustomImage(int camIndex, ICogImage image, string filePath, string folder, bool jpeg, int quality)
+        {
+            try
+            {
+                Directory.CreateDirectory(folder);
+                lock (_customSaveLocks[camIndex - 1])
+                {
+                    if (jpeg)
+                    {
+                        using (Bitmap bmp = image.ToBitmap())
+                        {
+                            SaveImageWriter.SaveJpeg(bmp, filePath, quality);
+                        }
+                    }
+                    else
+                    {
+                        CogImageFileBMP writer = _customBmpWriters[camIndex - 1];
+                        if (writer == null)
+                        {
+                            writer = new CogImageFileBMP();
+                            _customBmpWriters[camIndex - 1] = writer;
+                        }
+                        // ch:每相机一个独立写文件对象（不复用 cuntu_fangfa 的 myjob.Cogbmp），本相机锁内串行写
+                        lock (writer) { WriteBmpFileSafe(writer, filePath, image, camIndex); }
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                LogCustomSave("定制存图失败 cam=" + camIndex + " 文件=" + filePath + ":" + ex.Message);
+            }
+        }
+
+        private void LogCustomSave(string message)
+        {
+            int now = Environment.TickCount;
+            if (unchecked(now - _lastCustomSaveLogMs) < 3000) return;
+            _lastCustomSaveLogMs = now;
+            MsgErroeLog.WriteLog(message);
+        }
+
         private int _lastSaveBmpFailLogMs = 0; // ch:R47 P1-7 存图失败日志限流（3s 一条，避免磁盘满时每帧刷日志）
         // ch:R47 P1-7 Open/Append/Close 三连原无 try/finally：Append 抛异常（磁盘满、文件被占用、像素格式异常）时
         //   Close 被跳过，CogImageFileBMP 的 COM 文件句柄泄漏，连续 NG 会累积到句柄耗尽并锁死目标目录。
