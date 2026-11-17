@@ -5510,7 +5510,9 @@ namespace WindowsFormsApplication1
                                 });
                             }
                             // ch:铭泰定/转子定制存图：与 OK/NG 判定无关，通讯触发的每一帧都按 根目录\相机目录\日期\触发字符串\ 存一张
-                            QueueCustomImageSave(myjob, tempimage);
+                            //   传图失败时 Input 里还是上一帧的旧图，存下去会把旧产品图当新产品归档，必须跳过
+                            if (!inputAssignFailed)
+                                QueueCustomImageSave(myjob, tempimage);
 
                         }
                         else
@@ -16603,8 +16605,16 @@ namespace WindowsFormsApplication1
                 SaveImageSettings cfg = _saveImgCfg;
                 if (cfg == null || !cfg.Enabled || cfg.RetentionDays <= 0) return;
 
+                // ch:把配置里的相机目录名传给清理：即使相机目录长得像日期（如产品编号 20261101），
+                //   也只清它下面的日期子目录，不会把整个相机目录当日期目录整棵删掉。
+                string[] cameraFolders = new string[SaveImageSettings.CameraCount];
+                for (int i = 0; i < cameraFolders.Length; i++)
+                    cameraFolders[i] = cfg.Cameras != null && i < cfg.Cameras.Length && cfg.Cameras[i] != null
+                        ? cfg.Cameras[i].Folder
+                        : null;
+
                 int removed = SaveImageRetention.Cleanup(cfg.Root, cfg.DateFormat, cfg.RetentionDays, DateTime.Now,
-                    delegate (string line) { MsgErroeLog.WriteLog(line); });
+                    cameraFolders, delegate (string line) { MsgErroeLog.WriteLog(line); });
                 MsgErroeLog.WriteLog("存图清理完成：保留最近 " + cfg.RetentionDays + " 天，删除 " + removed
                     + " 个过期日期文件夹（根目录=" + cfg.Root + "）");
             }

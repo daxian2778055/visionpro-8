@@ -131,6 +131,66 @@ public class SaveImageRetentionTests : IDisposable
         Assert.True(Directory.Exists(deep));
     }
 
+    [Fact]
+    public void Cleanup_CameraFolderNamedLikeDate_IsKeptAndOnlyItsOldDatesRemoved()
+    {
+        // 相机目录本身叫 2026-01-01（像日期）：不能把整个相机目录当日期目录删掉
+        string camDir = Path.Combine(_root, "2026-01-01");
+        string oldInside = Path.Combine(camDir, "2025-12-01");
+        string keepInside = Path.Combine(camDir, "2026-11-15");
+        Directory.CreateDirectory(oldInside);
+        Directory.CreateDirectory(keepInside);
+        File.WriteAllBytes(Path.Combine(oldInside, "a.jpg"), new byte[] { 1 });
+
+        int removed = SaveImageRetention.Cleanup(_root, "yyyy-MM-dd", 3, Now,
+            new string[] { "2026-01-01" }, null);
+
+        Assert.Equal(1, removed);
+        Assert.True(Directory.Exists(camDir));
+        Assert.False(Directory.Exists(oldInside));
+        Assert.True(Directory.Exists(keepInside));
+    }
+
+    [Fact]
+    public void Cleanup_DateFormatWithSlash_StillFindsSanitizedFolders()
+    {
+        // 日期格式 yyyy/MM/dd 建出来的目录会被清洗成 2026_11_01，清理时要能按同样规则认出来
+        string old = MakeDateDir("2026_11_01");
+        string keep = MakeDateDir("2026_11_14");
+
+        int removed = SaveImageRetention.Cleanup(_root, "yyyy/MM/dd", 7, Now, null);
+
+        Assert.Equal(1, removed);
+        Assert.False(Directory.Exists(old));
+        Assert.True(Directory.Exists(keep));
+    }
+
+    [Fact]
+    public void Cleanup_InvalidDateFormat_FallsBackInsteadOfAborting()
+    {
+        // 手工改坏的格式（"%"）会让 TryParseExact 抛 FormatException；必须只跳过该格式，
+        // 继续按兼容格式清理，而不是让整个清理线程中断
+        string old = MakeDateDir("2026-11-01");
+        string keep = MakeDateDir("2026-11-14");
+
+        int removed = SaveImageRetention.Cleanup(_root, "%", 7, Now, null);
+
+        Assert.Equal(1, removed);
+        Assert.False(Directory.Exists(old));
+        Assert.True(Directory.Exists(keep));
+    }
+
+    [Theory]
+    [InlineData(@"C:\", true)]
+    [InlineData(@"C:\fuNok", false)]
+    [InlineData(@"C:\fuNok\2026-11-15", false)]
+    [InlineData(@"\\server\share", true)]
+    [InlineData(@"\\server\share\dir", false)]
+    public void IsDriveOrShareRoot_OnlyTrueForRoots(string path, bool expected)
+    {
+        Assert.Equal(expected, SaveImageRetention.IsDriveOrShareRoot(path));
+    }
+
     [Theory]
     [InlineData("2026-11-15", true)]
     [InlineData("20261115", true)]

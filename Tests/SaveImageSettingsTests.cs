@@ -217,6 +217,116 @@ public class SaveImageSettingsTests
         Assert.DoesNotContain("?", name);
     }
 
+    [Theory]
+    [InlineData("IMG_{SLOT}")]
+    [InlineData("IMG_{slot}")]
+    [InlineData("IMG_{Num}")]
+    public void RenderFileName_SlotToken_IsCaseInsensitive(string template)
+    {
+        // ch:原实现用区分大小写的 Replace，{SLOT}/{NUM} 不替换也不补 _序号，
+        //   3 个槽位会写同一个文件名，每个产品最后只剩 1 张图
+        CameraSaveSetting cam = new CameraSaveSetting { Name = template, Slots = 3 };
+        DateTime now = new DateTime(2026, 11, 15, 10, 0, 0);
+
+        Assert.Equal("IMG_1", SaveImageSettingsStore.RenderFileName(cam, 1, "SN", now, 1));
+        Assert.Equal("IMG_2", SaveImageSettingsStore.RenderFileName(cam, 1, "SN", now, 2));
+        Assert.Equal("IMG_3", SaveImageSettingsStore.RenderFileName(cam, 1, "SN", now, 3));
+    }
+
+    [Fact]
+    public void RenderFileName_LongNameWithSlots_KeepsSlotSuffix()
+    {
+        // ch:名称超长时先截断再补 _序号，否则后缀被截掉，3 个槽位又同名互相覆盖
+        CameraSaveSetting cam = new CameraSaveSetting { Name = new string('A', 200), Slots = 3 };
+        DateTime now = new DateTime(2026, 11, 15, 10, 0, 0);
+
+        string n1 = SaveImageSettingsStore.RenderFileName(cam, 1, "SN", now, 1);
+        string n2 = SaveImageSettingsStore.RenderFileName(cam, 1, "SN", now, 2);
+        string n3 = SaveImageSettingsStore.RenderFileName(cam, 1, "SN", now, 3);
+
+        Assert.NotEqual(n1, n2);
+        Assert.NotEqual(n2, n3);
+        Assert.EndsWith("_1", n1);
+        Assert.EndsWith("_2", n2);
+        Assert.EndsWith("_3", n3);
+        Assert.True(n1.Length <= SaveImageSettings.MaxSegmentLength);
+    }
+
+    [Fact]
+    public void FindOutputConflict_SanitizedFolderCollision_IsDetected()
+    {
+        // "A/B" 与 "A_B" 存图时都会被清洗成 A_B，是同一个目录
+        SaveImageSettings s = new SaveImageSettings();
+        s.Cameras[0].Enabled = true;
+        s.Cameras[0].Folder = "A/B";
+        s.Cameras[0].Name = "X";
+        s.Cameras[1].Enabled = true;
+        s.Cameras[1].Folder = "A_B";
+        s.Cameras[1].Name = "X";
+
+        Assert.NotNull(SaveImageSettingsStore.FindOutputConflict(s, new DateTime(2026, 11, 15, 10, 0, 0)));
+    }
+
+    [Fact]
+    public void FindOutputConflict_SlotSuffixCollision_IsDetected()
+    {
+        // 相机1 X 三槽位 → X_1/X_2/X_3；相机2 名字直接叫 X_2，会覆盖相机1的第2张
+        SaveImageSettings s = new SaveImageSettings();
+        s.Cameras[0].Enabled = true;
+        s.Cameras[0].Folder = "F";
+        s.Cameras[0].Name = "X";
+        s.Cameras[0].Slots = 3;
+        s.Cameras[1].Enabled = true;
+        s.Cameras[1].Folder = "F";
+        s.Cameras[1].Name = "X_2";
+        s.Cameras[1].Slots = 1;
+
+        Assert.NotNull(SaveImageSettingsStore.FindOutputConflict(s, new DateTime(2026, 11, 15, 10, 0, 0)));
+    }
+
+    [Fact]
+    public void FindOutputConflict_CameraToken_NoConflict()
+    {
+        // {相机} 渲染成各自相机号，两台相机同模板也不会撞名
+        SaveImageSettings s = new SaveImageSettings();
+        s.Cameras[0].Enabled = true;
+        s.Cameras[0].Folder = "F";
+        s.Cameras[0].Name = "{相机}";
+        s.Cameras[1].Enabled = true;
+        s.Cameras[1].Folder = "F";
+        s.Cameras[1].Name = "{相机}";
+
+        Assert.Null(SaveImageSettingsStore.FindOutputConflict(s, new DateTime(2026, 11, 15, 10, 0, 0)));
+    }
+
+    [Fact]
+    public void FindOutputConflict_DifferentFolders_NoConflict()
+    {
+        SaveImageSettings s = new SaveImageSettings();
+        s.Cameras[0].Enabled = true;
+        s.Cameras[0].Folder = "F1";
+        s.Cameras[0].Name = "X";
+        s.Cameras[1].Enabled = true;
+        s.Cameras[1].Folder = "F2";
+        s.Cameras[1].Name = "X";
+
+        Assert.Null(SaveImageSettingsStore.FindOutputConflict(s, new DateTime(2026, 11, 15, 10, 0, 0)));
+    }
+
+    [Fact]
+    public void FindOutputConflict_DisabledCamera_IsIgnored()
+    {
+        SaveImageSettings s = new SaveImageSettings();
+        s.Cameras[0].Enabled = true;
+        s.Cameras[0].Folder = "F";
+        s.Cameras[0].Name = "X";
+        s.Cameras[1].Enabled = false;
+        s.Cameras[1].Folder = "F";
+        s.Cameras[1].Name = "X";
+
+        Assert.Null(SaveImageSettingsStore.FindOutputConflict(s, new DateTime(2026, 11, 15, 10, 0, 0)));
+    }
+
     [Fact]
     public void SlotCounter_CyclesPerFolderPerCamera()
     {

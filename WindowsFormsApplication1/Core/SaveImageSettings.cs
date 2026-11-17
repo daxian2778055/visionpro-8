@@ -53,6 +53,8 @@ namespace WindowsFormsApplication1
         public const int MaxJpegQuality = 100;
         public const int MaxSlots = 20;
         public const int MaxRetentionDays = 3650;
+        /// <summary>ch:单段目录名/文件名最大长度（与 SanitizeSegment 截断保持一致）。</summary>
+        public const int MaxSegmentLength = 80;
 
         public bool Enabled;
         public string Root;
@@ -105,7 +107,8 @@ namespace WindowsFormsApplication1
 
             s.Enabled = ToBool(Clean(read("enabled", "0")));
 
-            string root = Clean(read("root", SaveImageSettings.DefaultRoot));
+            // ch:现场常从资源管理器地址栏复制带引号的路径，路径里不允许引号，去掉首尾引号更稳妥
+            string root = Clean(read("root", SaveImageSettings.DefaultRoot)).Trim('"');
             if (root.Length > 0) s.Root = root;
 
             string dateFormat = Clean(read("dateformat", SaveImageSettings.DefaultDateFormat));
@@ -208,30 +211,108 @@ namespace WindowsFormsApplication1
             bool hasSlotToken = name.IndexOf("{序号}", StringComparison.Ordinal) >= 0
                 || name.IndexOf("{slot}", StringComparison.OrdinalIgnoreCase) >= 0
                 || name.IndexOf("{num}", StringComparison.OrdinalIgnoreCase) >= 0;
-            if (slots > 1 && !hasSlotToken)
-                name = name + "_{序号}";
 
             string rendered = ApplyTemplate(name, camIndex, slot, now, folderName);
+            if (slots > 1 && !hasSlotToken)
+            {
+                // ch:先给 "_序号" 留位置再截断——原实现先拼后缀再统一截到 80 字符，
+                //   名称接近 80 字符时后缀被截掉，同一相机 3 个槽位又变成同一个文件名互相覆盖。
+                string suffix = "_" + slot.ToString(CultureInfo.InvariantCulture);
+                string baseName = SanitizeSegment(rendered);
+                if (baseName.Length == 0)
+                    baseName = "相机" + camIndex.ToString(CultureInfo.InvariantCulture);
+                int keep = SaveImageSettings.MaxSegmentLength - suffix.Length;
+                if (keep < 1) keep = 1;
+                if (baseName.Length > keep)
+                    baseName = baseName.Substring(0, keep).Trim().TrimEnd('.');
+                rendered = baseName + suffix;
+            }
             rendered = SanitizeSegment(rendered);
             if (rendered.Length == 0)
                 rendered = "相机" + camIndex.ToString(CultureInfo.InvariantCulture) + "_" + slot.ToString(CultureInfo.InvariantCulture);
             return rendered;
         }
 
+        /// <summary>ch:列出某相机 1..Slots 各槽位会写出的全部文件名（不含扩展名），供热路径冲突检测。</summary>
+        public static string[] RenderFileNamesForSlots(CameraSaveSetting cam, int camIndex, string folderName, DateTime now)
+        {
+            int slots = cam != null ? Math.Max(1, cam.Slots) : 1;
+            string[] names = new string[slots];
+            for (int i = 0; i < slots; i++)
+                names[i] = RenderFileName(cam, camIndex, folderName, now, i + 1);
+            return names;
+        }
+
+        /// <summary>
+        /// ch:保存前冲突检测：两台启用的相机在同一个相机目录下写出同一个文件名，就会互相覆盖。
+        ///   比较的是 SanitizeSegment 之后的目录 + 各槽位实际文件名，所以
+        ///   "A/B" 与 "A_B"、超长名截断、"_2" 撞上别的相机的第 2 槽位都能拦住。
+        ///   返回 null 表示无冲突，否则返回可直接显示给用户的说明。
+        /// </summary>
+        public static string FindOutputConflict(SaveImageSettings settings, DateTime now)
+        {
+            if (settings == null || settings.Cameras == null) return null;
+
+            HashSet<string> used = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            for (int i = 0; i < SaveImageSettings.CameraCount && i < settings.Cameras.Length; i++)
+            {
+                CameraSaveSetting cam = settings.Cameras[i];
+                if (cam == null || !cam.Enabled) continue;
+
+                string folderKey = SanitizeSegment(cam.Folder);
+                string[] names = RenderFileNamesForSlots(cam, i + 1, "触发字符串", now);
+                for (int k = 0; k < names.Length; k++)
+                {
+                    if (used.Add(folderKey + "|" + names[k])) continue;
+
+                    return "相机" + (i + 1).ToString(CultureInfo.InvariantCulture)
+                        + " 与前面某台相机会写出同一个文件："
+                        + (folderKey.Length == 0 ? "" : folderKey + "\\") + names[k]
+                        + "\r\n两台相机会互相覆盖，请改掉其中一台的存图目录或存图名称。"
+                        + "\r\n（\\ / : * ? \" < > | 等非法字符存图时会替换成 _）";
+                }
+            }
+            return null;
+        }
+
         private static string ApplyTemplate(string template, int camIndex, int slot, DateTime now, string folderName)
         {
             string s = template ?? "";
-            s = s.Replace("{相机}", camIndex.ToString(CultureInfo.InvariantCulture));
-            s = s.Replace("{cam}", camIndex.ToString(CultureInfo.InvariantCulture));
-            s = s.Replace("{序号}", slot.ToString(CultureInfo.InvariantCulture));
-            s = s.Replace("{slot}", slot.ToString(CultureInfo.InvariantCulture));
-            s = s.Replace("{日期}", now.ToString("yyyyMMdd", CultureInfo.InvariantCulture));
-            s = s.Replace("{date}", now.ToString("yyyyMMdd", CultureInfo.InvariantCulture));
-            s = s.Replace("{时间}", now.ToString("HHmmss", CultureInfo.InvariantCulture));
-            s = s.Replace("{time}", now.ToString("HHmmss", CultureInfo.InvariantCulture));
-            s = s.Replace("{文件夹}", folderName ?? "");
-            s = s.Replace("{folder}", folderName ?? "");
+            // ch:大小写都要替换——原实现用区分大小写的 Replace，而 hasSlotToken 用不区分大小写判断，
+            //   写成 {SLOT}/{NUM} 时不会被替换、也不会补 _序号，N 张图全落到同一个文件。
+            s = ReplaceTokenIgnoreCase(s, "{相机}", camIndex.ToString(CultureInfo.InvariantCulture));
+            s = ReplaceTokenIgnoreCase(s, "{cam}", camIndex.ToString(CultureInfo.InvariantCulture));
+            s = ReplaceTokenIgnoreCase(s, "{序号}", slot.ToString(CultureInfo.InvariantCulture));
+            s = ReplaceTokenIgnoreCase(s, "{slot}", slot.ToString(CultureInfo.InvariantCulture));
+            s = ReplaceTokenIgnoreCase(s, "{num}", slot.ToString(CultureInfo.InvariantCulture));
+            s = ReplaceTokenIgnoreCase(s, "{日期}", now.ToString("yyyyMMdd", CultureInfo.InvariantCulture));
+            s = ReplaceTokenIgnoreCase(s, "{date}", now.ToString("yyyyMMdd", CultureInfo.InvariantCulture));
+            s = ReplaceTokenIgnoreCase(s, "{时间}", now.ToString("HHmmss", CultureInfo.InvariantCulture));
+            s = ReplaceTokenIgnoreCase(s, "{time}", now.ToString("HHmmss", CultureInfo.InvariantCulture));
+            s = ReplaceTokenIgnoreCase(s, "{文件夹}", folderName ?? "");
+            s = ReplaceTokenIgnoreCase(s, "{folder}", folderName ?? "");
             return s;
+        }
+
+        private static string ReplaceTokenIgnoreCase(string text, string token, string value)
+        {
+            if (string.IsNullOrEmpty(text) || string.IsNullOrEmpty(token)) return text ?? "";
+            value = value ?? "";
+
+            int idx = text.IndexOf(token, StringComparison.OrdinalIgnoreCase);
+            if (idx < 0) return text;
+
+            StringBuilder sb = new StringBuilder(text.Length + value.Length);
+            int pos = 0;
+            while (idx >= 0)
+            {
+                sb.Append(text, pos, idx - pos);
+                sb.Append(value);
+                pos = idx + token.Length;
+                idx = text.IndexOf(token, pos, StringComparison.OrdinalIgnoreCase);
+            }
+            sb.Append(text, pos, text.Length - pos);
+            return sb.ToString();
         }
 
         /// <summary>ch:把一段文本变成合法的 Windows 文件名/目录名（非法字符与控制字符替换为 _）。</summary>
@@ -247,8 +328,8 @@ namespace WindowsFormsApplication1
             }
             string r = sb.ToString().Trim().TrimEnd('.');
             if (r == "." || r == "..") return "";
-            if (r.Length > 80)
-                r = r.Substring(0, 80).Trim().TrimEnd('.');
+            if (r.Length > SaveImageSettings.MaxSegmentLength)
+                r = r.Substring(0, SaveImageSettings.MaxSegmentLength).Trim().TrimEnd('.');
             return r;
         }
 

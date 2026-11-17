@@ -624,6 +624,39 @@ namespace WindowsFormsApplication1
                     Warn("请填写存图根目录。", _tbRoot);
                     return;
                 }
+                string rootFull;
+                try
+                {
+                    if (!Path.IsPathRooted(root))
+                    {
+                        Warn("根目录要填完整路径，例如 E:\\fuNok。", _tbRoot);
+                        return;
+                    }
+                    rootFull = Path.GetFullPath(root);
+                }
+                catch (Exception)
+                {
+                    Warn("根目录不是合法路径，例如 E:\\fuNok。", _tbRoot);
+                    return;
+                }
+                if (rootFull.IndexOfAny(Path.GetInvalidPathChars()) >= 0
+                    || rootFull.IndexOfAny(new char[] { '"', '<', '>', '|', '?', '*' }) >= 0)
+                {
+                    Warn("根目录含有 Windows 不允许的字符，例如 E:\\fuNok。", _tbRoot);
+                    return;
+                }
+                if (File.Exists(rootFull))
+                {
+                    Warn("根目录指向的是一个文件，请选择文件夹。", _tbRoot);
+                    return;
+                }
+                // ch:磁盘/共享不存在时保存后每帧都会存图失败（日志还被限流），提前拦下更好排查
+                string rootDrive = Path.GetPathRoot(rootFull);
+                if (!string.IsNullOrEmpty(rootDrive) && !Directory.Exists(rootDrive))
+                {
+                    Warn("根目录所在磁盘/共享不存在：" + rootDrive, _tbRoot);
+                    return;
+                }
                 string dateFormat = (_tbDate.Text ?? "").Trim();
                 if (dateFormat.Length == 0) dateFormat = SaveImageSettings.DefaultDateFormat;
                 try
@@ -638,14 +671,13 @@ namespace WindowsFormsApplication1
 
                 SaveImageSettings s = new SaveImageSettings();
                 s.Enabled = _cbEnable.Checked;
-                s.Root = root;
+                s.Root = rootFull;
                 s.DateFormat = dateFormat;
                 s.Jpeg = _cbFormat.SelectedIndex == 1;
                 s.JpegQuality = (int)_nudQuality.Value;
                 s.RetentionDays = (int)_nudKeepDays.Value;
 
                 bool anyCamera = false;
-                HashSet<string> usedNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
                 for (int i = 0; i < SaveImageSettings.CameraCount; i++)
                 {
                     CameraSaveSetting c = ReadRow(i);
@@ -669,21 +701,20 @@ namespace WindowsFormsApplication1
                     s.Cameras[i] = c;
 
                     if (c.Enabled)
-                    {
                         anyCamera = true;
-                        // ch:同目录 + 同名称 = 两台相机写同一个文件，直接拦下（覆盖只应发生在同一相机自己的槽位上）
-                        string key = c.Folder.ToLowerInvariant() + "|" + name.ToLowerInvariant();
-                        if (!usedNames.Add(key))
-                        {
-                            Warn("相机" + (i + 1).ToString(CultureInfo.InvariantCulture)
-                                + " 与前面某台相机的“存图目录 + 存图名称”完全相同，会互相覆盖，请改掉其中一个。", _grid);
-                            return;
-                        }
-                    }
                 }
                 if (s.Enabled && !anyCamera)
                 {
                     Warn("已勾选“启用定制存图”，但没有任何相机被启用。", _grid);
+                    return;
+                }
+
+                // ch:同目录 + 同名称 = 两台相机写同一个文件，直接拦下（覆盖只应发生在同一相机自己的槽位上）。
+                //   用清洗后的目录 + 1..Slots 实际文件名比较，A/B 与 A_B、超长名截断、槽位后缀撞名都能拦住。
+                string conflict = SaveImageSettingsStore.FindOutputConflict(s, DateTime.Now);
+                if (conflict != null)
+                {
+                    Warn(conflict, _grid);
                     return;
                 }
 
