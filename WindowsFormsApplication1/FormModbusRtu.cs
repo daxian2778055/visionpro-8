@@ -75,6 +75,7 @@ namespace WindowsFormsApplication1
 
             private string m_camere;
             private string m_all;
+            private bool m_isStringTrigger;
 
             //本属性用于传递事件数据
 
@@ -96,12 +97,22 @@ namespace WindowsFormsApplication1
                 get { return m_all; }
 
             }
+            /// <summary>ch:v1.3.60 true=字符串触发通道（值变化即触发，收到串即产品编码）。</summary>
+            public bool IsStringTrigger
+            {
+                get { return m_isStringTrigger; }
+            }
             public SelectionChangedEventArgs(string selection, string camera, string all)
+                : this(selection, camera, all, false)
+            {
+            }
+            public SelectionChangedEventArgs(string selection, string camera, string all, bool isStringTrigger)
             {
 
                 m_selection = selection;
                 m_camere = camera;
                 m_all = all;
+                m_isStringTrigger = isStringTrigger;
             }
         }
 
@@ -2368,15 +2379,18 @@ namespace WindowsFormsApplication1
                                             }
                                             else if (par.Value[4] == "string")
                                             {
-                                                xuanzhong_temp = int.Parse(par.Value[1]) - int.Parse(address_qishi.ToString()) + j;
-                                                // 读取字符串
-                                                OperateResult<string> readRtu = busRtuClient.ReadString((int.Parse(par.Value[1]) + j).ToString(), 1);
+                                                // ch:v1.3.60 string 整串读：length=字节数=寄存器数×2；只在 j==0 读一次
+                                                if (j != 0) continue;
+                                                int addrBase = int.Parse(par.Value[1]);
+                                                xuanzhong_temp = addrBase - int.Parse(address_qishi.ToString());
+                                                int byteLen = WindowsFormsApplication1.StringTriggerRules.ToByteLength(int.Parse(par.Value[2]));
+                                                OperateResult<string> readRtu = busRtuClient.ReadString(addrBase.ToString(), (ushort)byteLen);
                                                 commFailed |= !readRtu.IsSuccess;
-                                                DemoUtils.ReadResultRender1(readRtu, (int.Parse(par.Value[1]) + j).ToString(), out fins_temp);
+                                                DemoUtils.ReadResultRender1(readRtu, addrBase.ToString(), out fins_temp);
                                                 if (gridUi && xuanzhong_temp >= 0 && xuanzhong_temp < 50)
-                                                SetModbusGridValue(fins_data[int.Parse(xuanzhong_temp.ToString())][0], fins_data[int.Parse(xuanzhong_temp.ToString())][1], fins_temp);
+                                                    SetModbusGridValue(fins_data[int.Parse(xuanzhong_temp.ToString())][0], fins_data[int.Parse(xuanzhong_temp.ToString())][1], fins_temp);
                                                 if (!readRtu.IsSuccess) { commFailed = true; continue; } // ch:R43 P0-3 读失败串不拼进触发值
-                                                shuju_temp += GetMiddleValue(fins_temp, " ", "\r");
+                                                shuju_temp += WindowsFormsApplication1.StringTriggerRules.NormalizeProductCode(GetMiddleValue(fins_temp, " ", "\r"));
                                             }
                                             else if (par.Value[4] == "long" && j % 2 == 0)
                                             {
@@ -2406,6 +2420,8 @@ namespace WindowsFormsApplication1
                                         if (commFailed) TryAutoReconnectRtu(); // ch:检测到读取失败则触发（方法内部节流）断线自动重连
                                         if (!commFailed && par.Value[3] == "触发") // ch:R43 P0-3 读失败通道不得触发采图/方案切换
                                         {
+                                            // ch:v1.3.60 字符串触发通道：值变化即触发（0x0000 也算），清零由 ClearStringTrigger 负责登记已处理值
+                                            bool strTrig = WindowsFormsApplication1.StringTriggerRules.IsStringTriggerChannel(par.Value[4], par.Value[3]);
                                             foreach (var pap in camera_dic)
                                             {
                                                 if (pap.Value[0] == par.Value[0])
@@ -2441,9 +2457,10 @@ namespace WindowsFormsApplication1
                                                                     camera_dic[pap.Key][1] = shuju_temp; // 标记已处理，避免同一坏配置每轮重复记日志
                                                                     continue;
                                                                 }
-                                                                SelectionChangedEventArgs E = new SelectionChangedEventArgs(shuju_temp, pap.Key.ToString(), zuhe);
+                                                                SelectionChangedEventArgs E = new SelectionChangedEventArgs(shuju_temp, pap.Key.ToString(), zuhe, strTrig);
                                                                 getData(this, E);
-                                                                camera_dic[pap.Key][1] = shuju_temp; // ch:P2-⑥ 记录已处理触发值，防止 PLC 触发字保持期间重复触发采图
+                                                                // ch:v1.3.60 字符串触发的“已处理值”由 ClearStringTrigger 写成清零串，不能被原值覆盖
+                                                                if (!strTrig) camera_dic[pap.Key][1] = shuju_temp; // ch:P2-⑥ 记录已处理触发值，防止 PLC 触发字保持期间重复触发采图
                                                             }
                                                         }
 
@@ -2615,6 +2632,61 @@ namespace WindowsFormsApplication1
                 if (camIndex >= 1 && camIndex <= fins_xie.Length)
                     fins_xie[camIndex - 1] = true;
                 xie_wu(value);
+            }
+        }
+
+        /// <summary>
+        /// ch:v1.3.60 字符串触发闭环：把该相机绑定的“字符串触发通道”清零成 ASCII '0'×长度，
+        ///   并把绑定同一通道的所有相机“已处理值”同步登记为清零串，下一轮读到清零值不再重复触发。
+        /// </summary>
+        public void ClearStringTrigger(int cam)
+        {
+            try
+            {
+                if (!chushihua || cam < 1 || cam > 8) return;
+                string[] row;
+                lock (_rtuIoLock)
+                {
+                    if (!camera_dic.TryGetValue(cam, out row) || row == null || row.Length < 1) return;
+                }
+                string chName = row[0];
+                string[] ch;
+                lock (finsDicLock)
+                {
+                    if (!fins_dic.TryGetValue(chName, out ch)) return;
+                }
+                if (ch == null || ch.Length < 5) return;
+                int addr, len;
+                if (!int.TryParse(ch[1], out addr) || !int.TryParse(ch[2], out len)) return;
+                if (!WindowsFormsApplication1.StringTriggerRules.IsStringTriggerChannel(ch[4], ch[3])) return;
+
+                // ch:v1.3.60 一个寄存器=2字符，每寄存器写 "00"；整串清零值 = 2N 个 '0'
+                string cleared = WindowsFormsApplication1.StringTriggerRules.BuildClearValue(len);
+                string wordClear = WindowsFormsApplication1.StringTriggerRules.BuildRegisterClear();
+                lock (_rtuIoLock)
+                {
+                    if (busRtuClient == null) return;
+                    int regs = WindowsFormsApplication1.StringTriggerRules.ClampRegisterCount(len);
+                    for (int j = 0; j < regs; j++)
+                    {
+                        OperateResult wr = busRtuClient.Write((addr + j).ToString(), wordClear);
+                        if (wr == null || !wr.IsSuccess)
+                        {
+                            MsgErroeLog.WriteLog("字符串触发清零失败 cam=" + cam + " addr=" + (addr + j)
+                                + " msg=" + (wr == null ? "null" : wr.Message));
+                            return;
+                        }
+                    }
+                    foreach (KeyValuePair<int, string[]> kv in camera_dic)
+                    {
+                        if (kv.Value != null && kv.Value.Length > 1 && kv.Value[0] == chName)
+                            kv.Value[1] = cleared;
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                MsgErroeLog.WriteLog("字符串触发清零异常 cam=" + cam + ":" + ex.Message);
             }
         }
         // ch:P2 pending TTL：写失败保留 pending 后若长期写不出去（PLC 断线/掉线），恢复瞬间会把旧结果发给 PLC（错误工位数据）。

@@ -56,6 +56,8 @@ namespace WindowsFormsApplication1
         public string triggerMode;
         public string triggerZifu;
         public string jieshouZifu;
+        // ch:v1.3.60 字符串触发模式下收到的产品编码（文件夹名用它；空串表示未收到，回退 triggerZifu）
+        public volatile string triggerProductCode;
         public bool shijianEn;
         // ch:P2 跨线程标志：检测线程写 true（Form1.cs 取图渲染前）、UI 线程写 false（FinishOcxPaint/入队失败等），读取侧 IsCameraDisplayBusy 无锁。
         //   仅 true/false 赋值、无复合读改写，volatile 保证可见性即可，无需并入 _ocxPaintLock。

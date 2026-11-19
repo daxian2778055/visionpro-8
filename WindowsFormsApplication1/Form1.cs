@@ -7424,6 +7424,12 @@ namespace WindowsFormsApplication1
         }
         private void DataChange_fins(object sender, FormOmron.SelectionChangedEventArgs e)
         {
+            // ch:v1.3.60 字符串触发通道：值变化即触发，收到串即产品编码；不进下面固定 triggerZifu 匹配
+            if (e.IsStringTrigger)
+            {
+                HandleStringTrigger(e.Selection, e.Camera, 3);
+                return;
+            }
             if (e.Camera == "1")
             {
                 try
@@ -7662,6 +7668,12 @@ namespace WindowsFormsApplication1
         {
             if (yunxing)
             {
+                // ch:v1.3.60 字符串触发通道：值变化即触发，收到串即产品编码
+                if (e.IsStringTrigger)
+                {
+                    HandleStringTrigger(e.Selection, e.Camera, 1);
+                    return;
+                }
                 if (e.Camera == "1")
                 {
                     try
@@ -7901,6 +7913,12 @@ namespace WindowsFormsApplication1
         {
             if (yunxing)
             {
+                // ch:v1.3.60 字符串触发通道：值变化即触发，收到串即产品编码
+                if (e.IsStringTrigger)
+                {
+                    HandleStringTrigger(e.Selection, e.Camera, 2);
+                    return;
+                }
                 if (e.Camera == "1")
                 {
                     try
@@ -16655,6 +16673,71 @@ namespace WindowsFormsApplication1
             }
         }
 
+        // ch:v1.3.60 字符串触发：通讯报文里的字符串既是触发信号，也是存图用的产品编码
+        private Myjob GetJobByCam(int cam)
+        {
+            switch (cam)
+            {
+                case 1: return myjob1;
+                case 2: return myjob2;
+                case 3: return myjob3;
+                case 4: return myjob4;
+                case 5: return myjob5;
+                case 6: return myjob6;
+                case 7: return myjob7;
+                case 8: return myjob8;
+                default: return null;
+            }
+        }
+
+        /// <summary>
+        /// ch:v1.3.60 字符串触发统一入口：值变化即触发（PLC 写 0x0000 也算一次触发），
+        ///   收到的串存为产品编码（存图文件夹名），随后把触发寄存器清零形成闭环。
+        ///   protocol: 1=ModbusTCP  2=ModbusRTU  3=Fins
+        /// </summary>
+        private void HandleStringTrigger(string selection, string cameraText, int protocol)
+        {
+            try
+            {
+                if (!yunxing) return;
+                int cam;
+                if (!int.TryParse(cameraText, out cam) || cam < 1 || cam > 8) return;
+                Myjob job = GetJobByCam(cam);
+                if (job == null) return;
+
+                // ch:先把收到的产品编码存好，再清触发寄存器（清零后值变化不会再触发第二次）
+                string code = WindowsFormsApplication1.StringTriggerRules.NormalizeProductCode(selection);
+                job.triggerProductCode = code;
+                job.jieshouZifu = selection;
+
+                // ch:仍同步写进 vpp 对应输入，保持与原有 int 触发链路一致（vpp 脚本若读它不受影响）
+                string inputName = protocol == 1 ? "modbustcp" : (protocol == 2 ? "modbusrtu" : "fins");
+                if (job.block != null && job.block.Inputs.Contains(inputName))
+                    SetBlockInputSafe(job, inputName, selection);
+
+                if (protocol == 1 && modbustcp != null) modbustcp.ClearStringTrigger(cam);
+                else if (protocol == 2 && modbusrtu != null) modbusrtu.ClearStringTrigger(cam);
+                else if (protocol == 3 && omron != null) omron.ClearStringTrigger(cam);
+
+                int nRet = TriggerSoftwareSafe(cam - 1);
+                if (MyCamera.MV_OK != nRet)
+                    MsgErroeLog.WriteLog("字符串触发软触发失败 cam=" + cam + " ret=" + nRet);
+                else
+                    LogCustomSave("字符串触发 cam=" + cam + " 产品编码=" + code);
+            }
+            catch (Exception ex)
+            {
+                MsgErroeLog.WriteLog("字符串触发处理异常 cam=" + cameraText + ":" + ex.Message);
+            }
+        }
+
+        /// <summary>ch:v1.3.60 存图文件夹名：字符串触发用收到的产品编码，否则仍用 vpp 的 triggerZifu。</summary>
+        private string ReadCustomSaveProductCode(Myjob job)
+        {
+            string code = WindowsFormsApplication1.StringTriggerRules.NormalizeProductCode(job.triggerProductCode);
+            return code.Length > 0 ? code : ReadTriggerZifuSafe(job);
+        }
+
         // ch:triggerZifu 是 vpp 里配置的触发字符串（与收到的 Modbus 字符串完全相等才触发），
         //   读它必须与 block.Run 互斥（同 16513 行方案载入处的写法）。
         private string ReadTriggerZifuSafe(Myjob job)
@@ -16693,10 +16776,10 @@ namespace WindowsFormsApplication1
                 CameraSaveSetting cam = cfg.Cameras[camIndex - 1];
                 if (cam == null || !cam.Enabled) return;
 
-                string trigger = ReadTriggerZifuSafe(myjob);
+                string trigger = ReadCustomSaveProductCode(myjob);
                 if (trigger.Length == 0)
                 {
-                    LogCustomSave("定制存图跳过：相机" + camIndex + " 的 triggerZifu 为空");
+                    LogCustomSave("定制存图跳过：相机" + camIndex + " 的触发字符串/产品编码为空");
                     return;
                 }
 
