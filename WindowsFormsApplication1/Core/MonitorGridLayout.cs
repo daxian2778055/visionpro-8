@@ -8,12 +8,16 @@ namespace WindowsFormsApplication1
     {
         public int EnabledCount { get; private set; }
         public int[] Slots { get; private set; }
+        public float[] ColumnPercents { get; private set; }
+        public float[] RowPercents { get; private set; }
         public bool SpanSingleCamera { get { return EnabledCount <= 1; } }
 
-        private MonitorGridLayout(int enabledCount, int[] slots)
+        private MonitorGridLayout(int enabledCount, int[] slots, float[] columnPercents, float[] rowPercents)
         {
             EnabledCount = enabledCount;
             Slots = slots;
+            ColumnPercents = columnPercents;
+            RowPercents = rowPercents;
         }
 
         public static MonitorGridLayout Create(bool[] enabled)
@@ -43,7 +47,35 @@ namespace WindowsFormsApplication1
                 System.Array.Resize(ref slots, count);
             }
 
-            return new MonitorGridLayout(count, slots);
+            float[] columns;
+            float[] rows;
+            if (count <= 1)
+            {
+                columns = new[] { 33f, 33f, 34f };
+                rows = new[] { 33f, 33f, 34f };
+            }
+            else if (count == 2)
+            {
+                columns = new[] { 49.5f, 49.5f, 1f };
+                rows = new[] { 99f, 0.5f, 0.5f };
+            }
+            else if (count <= 4)
+            {
+                columns = new[] { 49.5f, 49.5f, 1f };
+                rows = new[] { 49.5f, 49.5f, 1f };
+            }
+            else if (count <= 6)
+            {
+                columns = new[] { 33f, 34f, 34f };
+                rows = new[] { 49.5f, 49.5f, 1f };
+            }
+            else
+            {
+                columns = new[] { 33f, 33f, 34f };
+                rows = new[] { 33f, 33f, 34f };
+            }
+
+            return new MonitorGridLayout(count, slots, columns, rows);
         }
     }
 }

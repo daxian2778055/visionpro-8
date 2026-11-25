@@ -10,13 +10,14 @@ namespace WindowsFormsApplication1
     public partial class FormVersion : Form
     {
         // 当前版本（与推送仓库的 git tag 一一对应）：语义化版本 + 发布日期
-        public const string AppVersion = "1.3.62";
+        public const string AppVersion = "1.3.63";
         public const string AppVersionDate = "2026-11-25";
         public const string AppRepoName = "正泰 VP八相机连续海康（M4 - 加密）";
 
         // 版本时间线：与仓库 git tag 一一对应（新版本在最前）
         private static readonly string[] VersionTimeline = new string[] 
         {
+            "v1.3.63  2026-11-25  相机网格尺寸自适应修复：客户反馈4相机时监控区右侧空出一大片。根因是运行中切换相机数只调 ApplyMonitorGrid 移动面板格位，ColumnStyles/RowStyles 仍是启动时旧数量（如8→4保留第三列约1/3），并非容器停靠问题。现将列/行百分比纳入 Core.MonitorGridLayout，每次重排与槽位同步设置：4相机列49.5/49.5/1、行49.5/49.5/1；2相机一行；3/4相机2×2；5/6相机2×3；7/8相机3×3；单相机跨满。新增8→4空列/空行回归及各数量百分比测试，累计194/194，构建0 error。",
             "v1.3.62  2026-11-25  相机数选择UI简化：配置页新增单一 NumericUpDown「使用相机数」1..8，替代8个可见使能按钮；原8个按钮隐藏保留作保存/兼容镜像，文字仍按1..N使用中、N+1..8屏蔽中同步，原有 INI 保存逻辑无需改动。数量变化统一走 ApplyCameraCount：推导连续使能 myjob1..N.en、同步隐藏按钮与数值框、立即 ApplyMonitorGrid；启动 display 反向从 ini 状态回显数值框。新增 Core.CameraCountState 纯函数（夹取1..8/生成使能位/计数）并直链8条单测，累计186/186，构建0 error。",
             "v1.3.61  2026-11-25  4相机显示复审修复：客户确认4相机标准布局为相机1左上、相机2右上、相机3左下、相机4右下。静态布局自 v1.3.11 起已正确，但运行中改相机数时8个使能按钮只改 myjobN.en/文字，不调用 ApplyMonitorGrid；从3台启动再启用第4台时，相机4面板仍隐藏，KickOcxPaint 因 !box.Visible 丢弃待显示帧，表现为右下黑屏，重启后才恢复。现将8个按钮统一到 ToggleCameraCount：连续使能状态、后续相机 en、按钮文字/可见性一次同步，并立即重排；顺带修正旧级联禁用只改按钮文字未改后续 myjob.en 的状态不一致。ApplyMonitorGrid 槽位计算抽到 Core.MonitorGridLayout 纯函数并直链单测，钉住4相机 [0,1,3,4]、非连续启用、0..8数量边界。构建0 error、单测178/178。",
             "v1.3.60  2026-11-19  字符串触发模式（ModbusTCP/ModbusRTU/Fins 三协议统一）：数据绑定里“格式=string + 用途含触发”的通道即为字符串触发通道；长度 N=寄存器个数，一个 16 位寄存器=2 字节=2 个 ASCII 字符（本机 ModbusTCP 从站实测 ReadString 的 length 是字节数，旧逐寄存器 ReadString(addr,1) 只读半字节会错位/带 NUL）。值变化即触发（PLC 写 0x0000 也算一次），收到的串整串读 ReadString(起始地址, 寄存器数*2) 后去掉 NUL 存进 Myjob.triggerProductCode 作为存图文件夹名（产品编码），随即把每个触发寄存器清零写回 ASCII “00”（整串 2N 个 '0'）并把所有绑定该通道的相机“已处理值”同步登记为清零串，下一轮不再重复触发（闭环）。原有固定 triggerZifu 匹配与 int 触发零改动。①新增 Core.StringTriggerRules（通道判定/清零串/字节数换算/产品编码清洗），单测直链；②FormModbus/FormModbusRtu/FormOmron 三协议所有 string 通道读取统一改整串读、SelectionChangedEventArgs 加 IsStringTrigger 标记、新增 ClearStringTrigger(cam)、轮询在字符串触发时不用原值覆盖已处理值；③Form1 三协议 DataChange 入口按标记走 HandleStringTrigger（先存编码→清寄存器→软触发），QueueCustomImageSave 文件夹名优先用产品编码，空则回退 triggerZifu。构建 0 error、单测 147→167。",

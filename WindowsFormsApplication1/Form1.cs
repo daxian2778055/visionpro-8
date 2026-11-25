@@ -15711,6 +15711,11 @@ namespace WindowsFormsApplication1
 
             MonitorGridLayout layout = MonitorGridLayout.Create(en);
             int[] slots = layout.Slots;
+            for (int i = 0; i < 3; i++)
+            {
+                tableLayoutPanel1.ColumnStyles[i] = new ColumnStyle(SizeType.Percent, layout.ColumnPercents[i]);
+                tableLayoutPanel1.RowStyles[i] = new RowStyle(SizeType.Percent, layout.RowPercents[i]);
+            }
 
             tableLayoutPanel1.SuspendLayout();
             try
