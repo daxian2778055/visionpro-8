@@ -466,6 +466,7 @@
     <Compile Include="Core\SaveImageRetention.cs" />
     <Compile Include="Core\StringTriggerRules.cs" />
     <Compile Include="Core\MonitorGridLayout.cs" />
+    <Compile Include="Core\CameraCountState.cs" />
     <Compile Include="Core\SchemeTablePanel.cs">
       <SubType>Component</SubType>
     </Compile>

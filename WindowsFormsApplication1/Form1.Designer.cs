@@ -179,6 +179,8 @@
             this.button34 = new System.Windows.Forms.Button();
             this.button19 = new System.Windows.Forms.Button();
             this.button18 = new System.Windows.Forms.Button();
+            this.numCameraCount = new System.Windows.Forms.NumericUpDown();
+            this.lblCameraCount = new System.Windows.Forms.Label();
             this.button3 = new System.Windows.Forms.Button();
             this.label61 = new System.Windows.Forms.Label();
             this.label60 = new System.Windows.Forms.Label();
@@ -752,6 +754,7 @@
             this.tabPage5.SuspendLayout();
             ((System.ComponentModel.ISupportInitialize)(this.numericUpDown5)).BeginInit();
             ((System.ComponentModel.ISupportInitialize)(this.numericUpDown4)).BeginInit();
+            ((System.ComponentModel.ISupportInitialize)(this.numCameraCount)).BeginInit();
             ((System.ComponentModel.ISupportInitialize)(this.numericUpDown2)).BeginInit();
             ((System.ComponentModel.ISupportInitialize)(this.numericUpDown1)).BeginInit();
             this.tabPage6.SuspendLayout();
@@ -1709,6 +1712,8 @@
             this.tabPage5.Controls.Add(this.button34);
             this.tabPage5.Controls.Add(this.button19);
             this.tabPage5.Controls.Add(this.button18);
+            this.tabPage5.Controls.Add(this.numCameraCount);
+            this.tabPage5.Controls.Add(this.lblCameraCount);
             this.tabPage5.Controls.Add(this.button3);
             this.tabPage5.Controls.Add(this.label61);
             this.tabPage5.Controls.Add(this.label60);
@@ -2099,6 +2104,44 @@
             this.button18.Name = "button18";
             this.button18.UseVisualStyleBackColor = false;
             this.button18.Click += new System.EventHandler(this.button18_Click_1);
+            this.button18.Visible = false;
+            this.button19.Visible = false;
+            this.button34.Visible = false;
+            this.button33.Visible = false;
+            this.button30.Visible = false;
+            this.button29.Visible = false;
+            this.button28.Visible = false;
+            this.button21.Visible = false;
+            //
+            // numCameraCount
+            //
+            this.numCameraCount.Location = new System.Drawing.Point(395, 4);
+            this.numCameraCount.Size = new System.Drawing.Size(60, 23);
+            this.numCameraCount.Minimum = new decimal(new int[] {
+            1,
+            0,
+            0,
+            0});
+            this.numCameraCount.Maximum = new decimal(new int[] {
+            8,
+            0,
+            0,
+            0});
+            this.numCameraCount.Value = new decimal(new int[] {
+            4,
+            0,
+            0,
+            0});
+            this.numCameraCount.Name = "numCameraCount";
+            this.numCameraCount.ValueChanged += new System.EventHandler(this.numCameraCount_ValueChanged);
+            //
+            // lblCameraCount
+            //
+            this.lblCameraCount.Location = new System.Drawing.Point(298, 7);
+            this.lblCameraCount.Size = new System.Drawing.Size(90, 23);
+            this.lblCameraCount.Text = "使用相机数：";
+            this.lblCameraCount.Name = "lblCameraCount";
+            this.lblCameraCount.TextAlign = System.Drawing.ContentAlignment.MiddleRight;
             // 
             // button3
             // 
@@ -6942,6 +6985,7 @@
             this.tabPage5.PerformLayout();
             ((System.ComponentModel.ISupportInitialize)(this.numericUpDown5)).EndInit();
             ((System.ComponentModel.ISupportInitialize)(this.numericUpDown4)).EndInit();
+            ((System.ComponentModel.ISupportInitialize)(this.numCameraCount)).EndInit();
             ((System.ComponentModel.ISupportInitialize)(this.numericUpDown2)).EndInit();
             ((System.ComponentModel.ISupportInitialize)(this.numericUpDown1)).EndInit();
             this.tabPage6.ResumeLayout(false);
@@ -7335,6 +7379,8 @@
         private System.Windows.Forms.Label label78;
         private System.Windows.Forms.Label label82;
         private System.Windows.Forms.NumericUpDown numericUpDown4;
+        private System.Windows.Forms.NumericUpDown numCameraCount;
+        private System.Windows.Forms.Label lblCameraCount;
         private System.Windows.Forms.Label label84;
         private System.Windows.Forms.Label label85;
         private System.Windows.Forms.Label label7;

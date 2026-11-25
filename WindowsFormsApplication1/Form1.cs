@@ -15098,27 +15098,61 @@ namespace WindowsFormsApplication1
 
         }
 
-        // ch:相机数选择是连续使能：禁用第 N 台时同步禁用 N+1..8；启用第 N 台时只启用到 N。
-        //   运行中必须立即重排，否则从 3 台切到 4 台时相机4面板仍隐藏，KickOcxPaint 会因 !box.Visible 丢弃帧。
+        // 相机数唯一可见入口是 numCameraCount(1..8)；旧8个按钮隐藏保留作保存/兼容镜像。
+        private bool _syncingCameraCount;
+
+        private void ApplyCameraCount(int count)
+        {
+            int normalized = CameraCountState.Normalize(count);
+            bool[] enabled = CameraCountState.CreateEnabled(normalized);
+            Myjob[] jobs = { myjob1, myjob2, myjob3, myjob4, myjob5, myjob6, myjob7, myjob8 };
+            for (int i = 0; i < jobs.Length; i++)
+                jobs[i].en = enabled[i] ? 1 : 0;
+
+            SyncLegacyCameraButtons(enabled);
+            SyncCameraCountControl(normalized);
+            ApplyMonitorGrid();
+        }
+
+        private void SyncLegacyCameraButtons(bool[] enabled)
+        {
+            Button[] buttons = { button18, button19, button34, button33, button30, button29, button28, button21 };
+            for (int i = 0; i < buttons.Length; i++)
+            {
+                buttons[i].Text = enabled[i] ? (i + 1) + "使用中" : (i + 1) + "屏蔽中";
+                buttons[i].Visible = false;
+            }
+        }
+
+        private void SyncCameraCountControl(int count)
+        {
+            if (numCameraCount == null)
+                return;
+            _syncingCameraCount = true;
+            try { numCameraCount.Value = CameraCountState.Normalize(count); }
+            finally { _syncingCameraCount = false; }
+        }
+
+        private void SyncCameraCountFromJobs()
+        {
+            bool[] enabled = {
+                myjob1.en != 0, myjob2.en != 0, myjob3.en != 0, myjob4.en != 0,
+                myjob5.en != 0, myjob6.en != 0, myjob7.en != 0, myjob8.en != 0 };
+            SyncLegacyCameraButtons(enabled);
+            SyncCameraCountControl(CameraCountState.CountEnabled(enabled));
+        }
+
+        private void numCameraCount_ValueChanged(object sender, EventArgs e)
+        {
+            if (!_syncingCameraCount)
+                ApplyCameraCount((int)numCameraCount.Value);
+        }
+
+        // 兼容旧事件绑定：隐藏按钮不再由用户点击，若程序触发仍按目标数量设置。
         private void ToggleCameraCount(int cameraNumber)
         {
-            if (cameraNumber < 1 || cameraNumber > 8)
-                return;
-
-            Myjob[] jobs = { myjob1, myjob2, myjob3, myjob4, myjob5, myjob6, myjob7, myjob8 };
-            Button[] buttons = { button18, button19, button34, button33, button30, button29, button28, button21 };
-            int index = cameraNumber - 1;
-            bool enable = jobs[index].en == 0;
-
-            for (int i = index; i < jobs.Length; i++)
-            {
-                jobs[i].en = (enable && i == index) ? 1 : 0;
-                buttons[i].Text = jobs[i].en != 0 ? (i + 1) + "使用中" : (i + 1) + "屏蔽中";
-            }
-            for (int i = 0; i < buttons.Length; i++)
-                buttons[i].Visible = i <= index; // 当前按钮保留可见，后续按钮隐藏；启用时再展开
-
-            ApplyMonitorGrid();
+            if (cameraNumber >= 1 && cameraNumber <= 8)
+                ApplyCameraCount(cameraNumber);
         }
 
         private void button19_Click(object sender, EventArgs e)
@@ -15653,6 +15687,7 @@ namespace WindowsFormsApplication1
                     myjob2.record[2] = 34f;
                 }
 
+                SyncCameraCountFromJobs(); // 单控件回显 ini 推导的连续相机数，旧按钮仅作隐藏镜像
                 ApplyMonitorGrid(); // ch:R16 按启用相机重排槽位（见下方方法注释：修4相机槽位错位/相机3图不显示）
             }));
         }

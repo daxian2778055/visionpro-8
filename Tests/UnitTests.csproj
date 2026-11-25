@@ -31,6 +31,8 @@
     <Compile Include="..\WindowsFormsApplication1\Core\StringTriggerRules.cs" Link="Core\StringTriggerRules.cs" />
     <!-- ch:监控画面槽位纯函数直链，钉住4相机=左上/右上/左下/右下及动态重排边界 -->
     <Compile Include="..\WindowsFormsApplication1\Core\MonitorGridLayout.cs" Link="Core\MonitorGridLayout.cs" />
+    <!-- ch:相机数单控件状态推导直链，覆盖1..8连续使能 -->
+    <Compile Include="..\WindowsFormsApplication1\Core\CameraCountState.cs" Link="Core\CameraCountState.cs" />
   </ItemGroup>
 
   <ItemGroup>
