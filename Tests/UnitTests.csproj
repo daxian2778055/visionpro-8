@@ -29,6 +29,8 @@
     <!-- ch:v1.3.58 存图保留天数清理：纯托管目录扫描/日期解析，直链测生产实现 -->
     <Compile Include="..\WindowsFormsApplication1\Core\SaveImageRetention.cs" Link="Core\SaveImageRetention.cs" />
     <Compile Include="..\WindowsFormsApplication1\Core\StringTriggerRules.cs" Link="Core\StringTriggerRules.cs" />
+    <!-- ch:监控画面槽位纯函数直链，钉住4相机=左上/右上/左下/右下及动态重排边界 -->
+    <Compile Include="..\WindowsFormsApplication1\Core\MonitorGridLayout.cs" Link="Core\MonitorGridLayout.cs" />
   </ItemGroup>
 
   <ItemGroup>

@@ -15098,148 +15098,47 @@ namespace WindowsFormsApplication1
 
         }
 
+        // ch:相机数选择是连续使能：禁用第 N 台时同步禁用 N+1..8；启用第 N 台时只启用到 N。
+        //   运行中必须立即重排，否则从 3 台切到 4 台时相机4面板仍隐藏，KickOcxPaint 会因 !box.Visible 丢弃帧。
+        private void ToggleCameraCount(int cameraNumber)
+        {
+            if (cameraNumber < 1 || cameraNumber > 8)
+                return;
+
+            Myjob[] jobs = { myjob1, myjob2, myjob3, myjob4, myjob5, myjob6, myjob7, myjob8 };
+            Button[] buttons = { button18, button19, button34, button33, button30, button29, button28, button21 };
+            int index = cameraNumber - 1;
+            bool enable = jobs[index].en == 0;
+
+            for (int i = index; i < jobs.Length; i++)
+            {
+                jobs[i].en = (enable && i == index) ? 1 : 0;
+                buttons[i].Text = jobs[i].en != 0 ? (i + 1) + "使用中" : (i + 1) + "屏蔽中";
+            }
+            for (int i = 0; i < buttons.Length; i++)
+                buttons[i].Visible = i <= index; // 当前按钮保留可见，后续按钮隐藏；启用时再展开
+
+            ApplyMonitorGrid();
+        }
+
         private void button19_Click(object sender, EventArgs e)
         {
-            if (button19.Text == "2使用中")
-            {
-                myjob2.en = 0;
-                button34.Visible = false;
-                button33.Visible = false;
-                button30.Visible = false;
-                button29.Visible = false;
-                button28.Visible = false;
-                button21.Visible = false;
-                button19.Text = "2屏蔽中";
-                button34.Text = "3屏蔽中";
-                button33.Text = "4屏蔽中";
-                button30.Text = "5屏蔽中";
-                button29.Text = "6屏蔽中";
-                button28.Text = "7屏蔽中";
-                button21.Text = "8屏蔽中";
-            }
-            else
-            {
-                myjob2.en = 1;
-                button19.Text = "2使用中";
-                button34.Text = "3屏蔽中";
-                button33.Text = "4屏蔽中";
-                button30.Text = "5屏蔽中";
-                button29.Text = "6屏蔽中";
-                button28.Text = "7屏蔽中";
-                button21.Text = "8屏蔽中";
-                button34.Visible = true;
-                button33.Visible = true;
-                button30.Visible = true;
-                button29.Visible = true;
-                button28.Visible = true;
-                button21.Visible = true;
-            }
+            ToggleCameraCount(2);
         }
 
         private void button18_Click_1(object sender, EventArgs e)
         {
-            if (button18.Text == "1使用中")
-            {
-                myjob1.en = 0;
-                button18.Text = "1屏蔽中";
-                button19.Visible = false;
-                button34.Visible = false;
-                button33.Visible = false;
-                button30.Visible = false;
-                button29.Visible = false;
-                button28.Visible = false;
-                button21.Visible = false;
-                button19.Text = "2屏蔽中";
-                button34.Text = "3屏蔽中";
-                button33.Text = "4屏蔽中";
-                button30.Text = "5屏蔽中";
-                button29.Text = "6屏蔽中";
-                button28.Text = "7屏蔽中";
-                button21.Text = "8屏蔽中";
-            }
-            else
-            {
-                myjob1.en = 1;
-                button18.Text = "1使用中";
-                button19.Text = "2屏蔽中";
-                button34.Text = "3屏蔽中";
-                button33.Text = "4屏蔽中";
-                button30.Text = "5屏蔽中";
-                button29.Text = "6屏蔽中";
-                button28.Text = "7屏蔽中";
-                button21.Text = "8屏蔽中";
-                button19.Visible = true;
-                button34.Visible = true;
-                button33.Visible = true;
-                button30.Visible = true;
-                button29.Visible = true;
-                button28.Visible = true;
-                button21.Visible = true;
-            }
+            ToggleCameraCount(1);
         }
 
         private void button34_Click(object sender, EventArgs e)
         {
-            if (button34.Text == "3使用中")
-            {
-                myjob3.en = 0;
-                button33.Visible = false;
-                button30.Visible = false;
-                button29.Visible = false;
-                button28.Visible = false;
-                button21.Visible = false;
-                button34.Text = "3屏蔽中";
-                button33.Text = "4屏蔽中";
-                button30.Text = "5屏蔽中";
-                button29.Text = "6屏蔽中";
-                button28.Text = "7屏蔽中";
-                button21.Text = "8屏蔽中";
-            }
-            else
-            {
-                myjob3.en = 1;
-                button34.Text = "3使用中";
-                button33.Text = "4屏蔽中";
-                button30.Text = "5屏蔽中";
-                button29.Text = "6屏蔽中";
-                button28.Text = "7屏蔽中";
-                button21.Text = "8屏蔽中";
-                button33.Visible = true;
-                button30.Visible = true;
-                button29.Visible = true;
-                button28.Visible = true;
-                button21.Visible = true;
-            }
+            ToggleCameraCount(3);
         }
 
         private void button33_Click(object sender, EventArgs e)
         {
-            if (button33.Text == "4使用中")
-            {
-                myjob4.en = 0;
-                button30.Visible = false;
-                button29.Visible = false;
-                button28.Visible = false;
-                button21.Visible = false;
-                button33.Text = "4屏蔽中";
-                button30.Text = "5屏蔽中";
-                button29.Text = "6屏蔽中";
-                button28.Text = "7屏蔽中";
-                button21.Text = "8屏蔽中";
-            }
-            else
-            {
-                myjob4.en = 1;
-                button33.Text = "4使用中";
-                button30.Text = "5屏蔽中";
-                button29.Text = "6屏蔽中";
-                button28.Text = "7屏蔽中";
-                button21.Text = "8屏蔽中";
-                button30.Visible = true;
-                button29.Visible = true;
-                button28.Visible = true;
-                button21.Visible = true;
-            }
+            ToggleCameraCount(4);
         }
 
         private void button4_Click_2(object sender, EventArgs e)
@@ -15775,22 +15674,8 @@ namespace WindowsFormsApplication1
                 myjob1.en != 0, myjob2.en != 0, myjob3.en != 0, myjob4.en != 0,
                 myjob5.en != 0, myjob6.en != 0, myjob7.en != 0, myjob8.en != 0 };
 
-            int n = 0;
-            for (int i = 0; i < 8; i++)
-                if (en[i]) n++;
-
-            TableLayoutPanelCellPosition[] slots;
-            if (n <= 1) slots = new TableLayoutPanelCellPosition[] { new TableLayoutPanelCellPosition(0, 0) };
-            else if (n == 2) slots = new TableLayoutPanelCellPosition[] { new TableLayoutPanelCellPosition(0, 0), new TableLayoutPanelCellPosition(1, 0) };
-            else if (n <= 4) slots = new TableLayoutPanelCellPosition[] {
-                new TableLayoutPanelCellPosition(0, 0), new TableLayoutPanelCellPosition(1, 0), new TableLayoutPanelCellPosition(0, 1), new TableLayoutPanelCellPosition(1, 1) };
-            else if (n <= 6) slots = new TableLayoutPanelCellPosition[] {
-                new TableLayoutPanelCellPosition(0, 0), new TableLayoutPanelCellPosition(1, 0), new TableLayoutPanelCellPosition(2, 0),
-                new TableLayoutPanelCellPosition(0, 1), new TableLayoutPanelCellPosition(1, 1), new TableLayoutPanelCellPosition(2, 1) };
-            else slots = new TableLayoutPanelCellPosition[] {
-                new TableLayoutPanelCellPosition(0, 0), new TableLayoutPanelCellPosition(1, 0), new TableLayoutPanelCellPosition(2, 0),
-                new TableLayoutPanelCellPosition(0, 1), new TableLayoutPanelCellPosition(1, 1), new TableLayoutPanelCellPosition(2, 1),
-                new TableLayoutPanelCellPosition(0, 2), new TableLayoutPanelCellPosition(1, 2), new TableLayoutPanelCellPosition(2, 2) };
+            MonitorGridLayout layout = MonitorGridLayout.Create(en);
+            int[] slots = layout.Slots;
 
             tableLayoutPanel1.SuspendLayout();
             try
@@ -15806,14 +15691,17 @@ namespace WindowsFormsApplication1
                 {
                     if (!en[i]) continue;
                     panels[i].Visible = true;
-                    if (n <= 1) // 单相机：唯一启用面板跨满 3×3
+                    if (layout.SpanSingleCamera) // 单相机：唯一启用面板跨满 3×3
                     {
                         tableLayoutPanel1.SetCellPosition(panels[i], new TableLayoutPanelCellPosition(0, 0));
                         tableLayoutPanel1.SetRowSpan(panels[i], 3);
                         tableLayoutPanel1.SetColumnSpan(panels[i], 3);
                     }
                     else
-                        tableLayoutPanel1.SetCellPosition(panels[i], slots[k]);
+                    {
+                        int slot = slots[k];
+                        tableLayoutPanel1.SetCellPosition(panels[i], new TableLayoutPanelCellPosition(slot % 3, slot / 3));
+                    }
                     k++;
                 }
             }
@@ -18649,82 +18537,22 @@ namespace WindowsFormsApplication1
 
         private void button30_Click(object sender, EventArgs e)
         {
-            if (button30.Text == "5使用中")
-            {
-                myjob5.en = 0;
-                button29.Visible = false;
-                button28.Visible = false;
-                button21.Visible = false;
-                button30.Text = "5屏蔽中";
-                button29.Text = "6屏蔽中";
-                button28.Text = "7屏蔽中";
-                button21.Text = "8屏蔽中";
-            }
-            else
-            {
-                myjob5.en = 1;
-                button30.Text = "5使用中";
-                button29.Text = "6屏蔽中";
-                button28.Text = "7屏蔽中";
-                button21.Text = "8屏蔽中";
-                button29.Visible = true;
-                button28.Visible = true;
-                button21.Visible = true;
-            }
+            ToggleCameraCount(5);
         }
 
         private void button29_Click(object sender, EventArgs e)
         {
-            if (button29.Text == "6使用中")
-            {
-                myjob6.en = 0;
-                button28.Visible = false;
-                button21.Visible = false;
-                button29.Text = "6屏蔽中";
-                button28.Text = "7屏蔽中";
-                button21.Text = "8屏蔽中";
-            }
-            else
-            {
-                myjob6.en = 1;
-                button29.Text = "6使用中";
-                button28.Text = "7屏蔽中";
-                button21.Text = "8屏蔽中";
-                button28.Visible = true;
-                button21.Visible = true;
-            }
+            ToggleCameraCount(6);
         }
 
         private void button28_Click(object sender, EventArgs e)
         {
-            if (button28.Text == "7使用中")
-            {
-                myjob7.en = 0;
-                button21.Visible = false;
-                button28.Text = "7屏蔽中";
-                button21.Text = "8屏蔽中";
-            }
-            else
-            {
-                myjob7.en = 1;
-                button28.Text = "7使用中";
-                button21.Text = "8屏蔽中";
-                button21.Visible = true;
-            }
+            ToggleCameraCount(7);
         }
 
         private void button21_Click(object sender, EventArgs e)
         {
-            if (button21.Text == "8使用中")
-            {
-                myjob8.en = 0;
-                button21.Text = "8屏蔽中";
-            }
-            else
-            {
-                myjob8.en = 1;
-                button21.Text = "8使用中";
-            }
+            ToggleCameraCount(8);
         }
 
         private void 相机5ToolStripMenuItem_Click(object sender, EventArgs e)

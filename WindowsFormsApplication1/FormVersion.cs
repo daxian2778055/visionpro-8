@@ -10,13 +10,14 @@ namespace WindowsFormsApplication1
     public partial class FormVersion : Form
     {
         // 当前版本（与推送仓库的 git tag 一一对应）：语义化版本 + 发布日期
-        public const string AppVersion = "1.3.60";
-        public const string AppVersionDate = "2026-11-19";
+        public const string AppVersion = "1.3.61";
+        public const string AppVersionDate = "2026-11-25";
         public const string AppRepoName = "正泰 VP八相机连续海康（M4 - 加密）";
 
         // 版本时间线：与仓库 git tag 一一对应（新版本在最前）
         private static readonly string[] VersionTimeline = new string[] 
         {
+            "v1.3.61  2026-11-25  4相机显示复审修复：客户确认4相机标准布局为相机1左上、相机2右上、相机3左下、相机4右下。静态布局自 v1.3.11 起已正确，但运行中改相机数时8个使能按钮只改 myjobN.en/文字，不调用 ApplyMonitorGrid；从3台启动再启用第4台时，相机4面板仍隐藏，KickOcxPaint 因 !box.Visible 丢弃待显示帧，表现为右下黑屏，重启后才恢复。现将8个按钮统一到 ToggleCameraCount：连续使能状态、后续相机 en、按钮文字/可见性一次同步，并立即重排；顺带修正旧级联禁用只改按钮文字未改后续 myjob.en 的状态不一致。ApplyMonitorGrid 槽位计算抽到 Core.MonitorGridLayout 纯函数并直链单测，钉住4相机 [0,1,3,4]、非连续启用、0..8数量边界。构建0 error、单测178/178。",
             "v1.3.60  2026-11-19  字符串触发模式（ModbusTCP/ModbusRTU/Fins 三协议统一）：数据绑定里“格式=string + 用途含触发”的通道即为字符串触发通道；长度 N=寄存器个数，一个 16 位寄存器=2 字节=2 个 ASCII 字符（本机 ModbusTCP 从站实测 ReadString 的 length 是字节数，旧逐寄存器 ReadString(addr,1) 只读半字节会错位/带 NUL）。值变化即触发（PLC 写 0x0000 也算一次），收到的串整串读 ReadString(起始地址, 寄存器数*2) 后去掉 NUL 存进 Myjob.triggerProductCode 作为存图文件夹名（产品编码），随即把每个触发寄存器清零写回 ASCII “00”（整串 2N 个 '0'）并把所有绑定该通道的相机“已处理值”同步登记为清零串，下一轮不再重复触发（闭环）。原有固定 triggerZifu 匹配与 int 触发零改动。①新增 Core.StringTriggerRules（通道判定/清零串/字节数换算/产品编码清洗），单测直链；②FormModbus/FormModbusRtu/FormOmron 三协议所有 string 通道读取统一改整串读、SelectionChangedEventArgs 加 IsStringTrigger 标记、新增 ClearStringTrigger(cam)、轮询在字符串触发时不用原值覆盖已处理值；③Form1 三协议 DataChange 入口按标记走 HandleStringTrigger（先存编码→清寄存器→软触发），QueueCustomImageSave 文件夹名优先用产品编码，空则回退 triggerZifu。构建 0 error、单测 147→167。",
             "v1.3.59  2026-11-17  第23轮全面复审（针对 v1.3.58 定制存图+保存天数）：①P1 {序号}/{slot}/{num} 占位符改为不区分大小写替换——原实现判断用 IgnoreCase、替换用区分大小写，写成 {SLOT} 时既不替换也不补 _序号，同一相机 3 个槽位全写同一个文件名，每个产品只剩 1 张图；②P1 超长存图名称先给 _序号 留位置再截断，避免 80 字符截断把槽位号截掉后各槽位同名互相覆盖；③P1 存图设置窗口冲突校验改为比较“清洗后的目录 + 1..Slots 实际文件名”（新增 Core.FindOutputConflict），A/B 与 A_B、名字撞别的相机的 _2 槽位都能拦下（旧实现只比原始文本）；④P1 传图失败(inputAssignFailed)时不再存定制图——此时 Input 里还是上一帧旧图，存下去会把旧产品图当新产品归档；⑤P1 保留天数清理新增两道护栏：根目录是盘符/共享根(C:\\、\\\\server\\share)时拒绝清理（否则 root\\2024 这类普通目录会被当日期目录整棵删），配置里的“相机目录”名即使长得像日期也只清它下面的日期子目录、绝不整棵删；⑥P2 根目录保存前做合法性校验（必须完整路径、不含 Windows 非法字符、不能是文件、所在磁盘/共享必须存在），并规范化成完整路径；⑦P2 日期格式非法(如 %)时清理不再中断（TryParseExact 抛 FormatException 已捕获），日期格式含 / 等非法字符时按清洗后的规则解析，清理不再漏；⑧P2 ini 里的根目录去掉首尾引号（现场复制路径常带引号）。本机实测：CogImage8Grey.ToBitmap() 返回 24bpp RGB 可直接写 JPG；CogImageFileBMP 重写同路径会正确截断。构建 0 error、单测 147/147。",
             "v1.3.58  2026-11-15  铭泰定/转子定制存图：①目录 根目录\\相机目录\\日期\\触发字符串，相机目录/存图名称/每产品张数(循环槽位)每相机可配，同目录名合并（相机1=顶、相机4=底 都填“啊啊啊”→同型号产品落同一文件夹）；触发复用 FormModbus 的 c{n}_modbustcp 映射，旧 cuntu_fangfa 链路零改动，默认关闭可与旧存图共存。②新增“查找→存图设置”窗口：根目录/日期格式/JPG·BMP+质量/8 相机表，全部启用·全部停用·目录应用到全部、实时路径预览、同目录+同名冲突拦截、张数 1-20 校验。③新增“保存天数”（默认 30，0=不自动删除）：每次启动软件后台 5s 后清理早于 N 天的日期文件夹及其图片，只认日期名目录、只扫根目录两层、目录联接不进入、失败只记日志不阻塞开机；改配置保存后立即再清一次。ini 新增 [saveimage] keepdays。构建 0 error、单测 130/130。",
